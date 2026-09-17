@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import EventEmitter from 'events';
 import { config, solToLamportsBigInt } from '../config/index.js';
 import { db } from '../db/database.js';
@@ -8,8 +9,10 @@ import { liveEngine } from '../execution/live-engine.js';
 import { paperEngine } from '../execution/paper-engine.js';
 import { telegramNotifier } from '../notifications/telegram.js';
 import { FastTransactionDecoder, ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
+import { tokenMetadataService } from '../services/token-metadata.js';
 import { latencyTracker } from '../telemetry/latency-tracker.js';
 import {
+  FollowerPosition,
   MirrorIntent,
   MirrorOrder,
   SignalSource,
@@ -153,6 +156,92 @@ export class SignalManager extends EventEmitter {
     telegramNotifier.notifyTradeFilled(order, position || undefined);
 
     return { intent: swapIntent, order };
+  }
+
+  /**
+   * Manual Take Profit / Emergency Exit for open positions
+   */
+  public async executeManualExit(
+    positionIdOrMint: string,
+    fraction: number = 1.0
+  ): Promise<{ order: MirrorOrder; position: FollowerPosition | null }> {
+    const openPositions = db.getOpenPositions();
+    const pos = openPositions.find(
+      (p) => p.id === positionIdOrMint || p.tokenMint.toLowerCase() === positionIdOrMint.toLowerCase()
+    );
+
+    if (!pos) {
+      throw new Error(`Open position not found for "${positionIdOrMint}"`);
+    }
+
+    const currentQty = BigInt(pos.qtyRaw);
+    if (currentQty <= 0n) {
+      throw new Error(`Position has 0 balance`);
+    }
+
+    const clampedFraction = Math.min(1.0, Math.max(0.01, fraction));
+    const tokensToSell = BigInt(Math.floor(Number(currentQty) * clampedFraction));
+    const actualSellQty = tokensToSell > 0n ? tokensToSell : currentQty;
+
+    // Fetch latest market price
+    const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
+    const estimatedPrice = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : pos.avgEntryPriceSol;
+
+    const intentId = randomUUID();
+    const manualSig = `manual_exit_${Date.now()}`;
+
+    const swapIntent: SwapIntent = {
+      targetSignature: manualSig,
+      slot: 0,
+      targetWallet: pos.targetWallet,
+      venue: 'PUMPFUN',
+      side: 'SELL',
+      tokenMint: pos.tokenMint,
+      inputMint: pos.tokenMint,
+      outputMint: 'So11111111111111111111111111111111111111112',
+      inputAmountRaw: actualSellQty.toString(),
+      outputAmountRaw: '0',
+      estimatedPrice,
+      targetPreBalanceToken: pos.qtyRaw,
+      observedAt: process.hrtime.bigint(),
+      timestampMs: Date.now(),
+      rawProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+      confidence: 1.0,
+    };
+
+    const mirrorIntent: MirrorIntent = {
+      id: intentId,
+      targetSignature: manualSig,
+      targetWallet: pos.targetWallet,
+      side: 'SELL',
+      tokenMint: pos.tokenMint,
+      inputMint: pos.tokenMint,
+      outputMint: 'So11111111111111111111111111111111111111112',
+      requestedInAmountRaw: actualSellQty.toString(),
+      expectedOutAmountRaw: '0',
+      sellFraction: clampedFraction,
+      riskDecision: 'APPROVED',
+      createdAt: process.hrtime.bigint(),
+    };
+
+    db.saveMirrorIntent(mirrorIntent);
+
+    let order: MirrorOrder;
+    if (config.EXECUTION_MODE === 'LIVE') {
+      order = await liveEngine.executeLiveTrade(swapIntent, mirrorIntent);
+    } else {
+      order = await paperEngine.executePaperTrade(swapIntent, mirrorIntent);
+    }
+
+    this.emit('mirrorOrder', order);
+    const updatedPosition = db.getPosition(pos.targetWallet, pos.tokenMint);
+    if (updatedPosition) {
+      this.emit('positionUpdate', updatedPosition);
+    }
+
+    telegramNotifier.notifyManualExit(order, updatedPosition || pos, clampedFraction, meta || undefined);
+
+    return { order, position: updatedPosition || pos };
   }
 }
 

@@ -50,16 +50,16 @@ export const PositionsSummary: React.FC<PositionsSummaryProps> = ({
 
       <MetricCard
         label="Floating Unrealized PnL"
-        value={`${totalFloatingPnlSol >= 0 ? '+' : ''}${totalFloatingPnlSol.toFixed(4)} SOL`}
-        subValue={formatUsd(totalFloatingPnlSol * solPriceUsd, 2)}
+        value={`${totalFloatingPnlSol >= 0 ? '+' : '-'}$${Math.abs(totalFloatingPnlSol * solPriceUsd).toFixed(2)} USD`}
+        subValue={`${totalFloatingPnlSol >= 0 ? '+' : ''}${totalFloatingPnlSol.toFixed(4)} SOL`}
         icon={<TrendingUp size={16} />}
         tone={totalFloatingPnlSol >= 0 ? 'positive' : 'negative'}
       />
 
       <MetricCard
         label="Total Portfolio Net PnL"
-        value={`${netPnlSol >= 0 ? '+' : ''}${netPnlSol.toFixed(4)} SOL`}
-        subValue={`Realized: ${formatSol(realizedPnlSol, 3)}`}
+        value={`${netPnlSol >= 0 ? '+' : '-'}$${Math.abs(netPnlSol * solPriceUsd).toFixed(2)} USD`}
+        subValue={`${netPnlSol >= 0 ? '+' : ''}${netPnlSol.toFixed(4)} SOL (Realized: $${(realizedPnlSol * solPriceUsd).toFixed(2)})`}
         icon={<ArrowUpRight size={16} />}
         tone={netPnlSol >= 0 ? 'positive' : 'negative'}
       />

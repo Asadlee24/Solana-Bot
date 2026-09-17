@@ -10,9 +10,10 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
-import React from 'react';
+import React, { useState } from 'react';
 import { MetricCard } from '../components/common/MetricCard';
 import { StatusDot } from '../components/common/StatusDot';
+import { ManualExitModal } from '../components/positions/ManualExitModal';
 import { BotHealthPanel } from '../components/trading/BotHealthPanel';
 import { ExecutionPipeline } from '../components/trading/ExecutionPipeline';
 import { LiveTickerStrip } from '../components/trading/LiveTickerStrip';
@@ -56,6 +57,7 @@ export const Overview: React.FC<OverviewProps> = ({
   onNavigateTab,
   isLoading,
 }) => {
+  const [selectedExitPos, setSelectedExitPos] = useState<Position | null>(null);
   const openPositions = positions.filter((p) => p.state === 'OPEN');
   const latestLatencySample = latencySamples[0] || null;
 
@@ -200,42 +202,68 @@ export const Overview: React.FC<OverviewProps> = ({
             {openPositions.map((pos) => {
               const meta = pos.metadata;
               const symbol = meta?.symbol || pos.tokenMint.substring(0, 5);
+              const costSol = Number(pos.costBasisLamports) / 1e9;
+              const costUsd = costSol * solPriceUsd;
+
               const pnlSol = pos.unrealizedPnlSol || 0;
+              const pnlUsd = (pos.currentValueUsd || 0) - costUsd;
               const pnlPct = pos.unrealizedPnlPct || 0;
               const isProfit = pnlSol >= 0;
+
+              const priceUsd = meta?.priceUsd || (pos.currentPriceSol ? pos.currentPriceSol * solPriceUsd : 0);
 
               return (
                 <div key={pos.id} className="overview-holding-card">
                   <div className="holding-card-header">
                     <TokenIdentity mint={pos.tokenMint} metadata={meta} size="md" />
-                    <div className="holding-pnl-pill">
-                      <span className={`pnl-val mono ${isProfit ? 'text-green' : 'text-rose'}`}>
-                        {isProfit ? '+' : ''}
-                        {pnlSol.toFixed(4)} SOL
-                      </span>
-                      <span className="pnl-pct mono">{formatPct(pnlPct, true)}</span>
+                    <div className="holding-header-right">
+                      <div className={`holding-pnl-pill-dual ${isProfit ? 'pos' : 'neg'}`}>
+                        <span className={`pnl-usd font-bold ${isProfit ? 'text-green' : 'text-rose'}`}>
+                          {isProfit ? '+' : '-'}${Math.abs(pnlUsd).toFixed(2)} USD
+                        </span>
+                        <span className="pnl-sub text-muted" style={{ fontSize: 10.5 }}>
+                          ({isProfit ? '+' : ''}{pnlSol.toFixed(4)} SOL • {formatPct(pnlPct, true)})
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-holding-tp"
+                        onClick={() => setSelectedExitPos(pos)}
+                        title="Manual Take Profit / Partial Exit"
+                      >
+                        <span>💰 Take Profit</span>
+                      </button>
                     </div>
                   </div>
 
                   <div className="holding-stats-row">
                     <div className="h-stat">
                       <span className="lbl">Cost Basis</span>
-                      <span className="val mono">
-                        {formatSol(Number(pos.costBasisLamports) / 1e9, 3)}
+                      <span className="val mono font-semibold">
+                        ${costUsd.toFixed(2)} USD
+                      </span>
+                      <span className="sub mono text-muted" style={{ fontSize: 10 }}>
+                        ({formatSol(costSol, 3)})
                       </span>
                     </div>
 
                     <div className="h-stat">
                       <span className="lbl">Live DEX Price</span>
-                      <span className="val mono text-cyan">
-                        {pos.currentPriceSol ? `${pos.currentPriceSol.toFixed(8)} SOL` : '—'}
+                      <span className="val mono text-cyan font-semibold">
+                        ${priceUsd < 0.01 ? priceUsd.toFixed(7) : priceUsd.toFixed(4)} USD
+                      </span>
+                      <span className="sub mono text-muted" style={{ fontSize: 10 }}>
+                        ({pos.currentPriceSol ? `${pos.currentPriceSol.toFixed(8)} SOL` : '—'})
                       </span>
                     </div>
 
                     <div className="h-stat">
                       <span className="lbl">Current Value</span>
-                      <span className="val mono">
-                        {pos.currentValueSol ? formatSol(pos.currentValueSol, 3) : '—'}
+                      <span className="val mono font-semibold">
+                        {pos.currentValueUsd ? `$${pos.currentValueUsd.toFixed(2)} USD` : '—'}
+                      </span>
+                      <span className="sub mono text-muted" style={{ fontSize: 10 }}>
+                        ({pos.currentValueSol ? formatSol(pos.currentValueSol, 3) : '—'})
                       </span>
                     </div>
                   </div>
@@ -262,6 +290,13 @@ export const Overview: React.FC<OverviewProps> = ({
 
         <TradeFeed orders={orders} isLoading={isLoading} limit={8} />
       </div>
+
+      {/* Manual Take Profit / Exit Modal */}
+      <ManualExitModal
+        position={selectedExitPos}
+        isOpen={Boolean(selectedExitPos)}
+        onClose={() => setSelectedExitPos(null)}
+      />
     </div>
   );
 };

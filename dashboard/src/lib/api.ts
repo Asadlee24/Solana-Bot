@@ -105,3 +105,26 @@ export async function triggerSimulationSwap(targetWallet: string, tokenMint: str
   });
   return res.ok;
 }
+
+export async function sellPosition(
+  positionId: string,
+  fraction = 1.0
+): Promise<{ success: boolean; order: any; position: any }> {
+  const res = await fetch(`${API_BASE}/api/positions/${positionId}/sell`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fraction }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `Sell position HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function closePosition(
+  positionId: string
+): Promise<{ success: boolean; order: any; position: any }> {
+  return sellPosition(positionId, 1.0);
+}
+

@@ -87,6 +87,33 @@ export function createApiServer() {
     res.json(enriched);
   });
 
+  app.post('/api/positions/:id/sell', async (req: Request, res: Response) => {
+    try {
+      const positionId = req.params.id;
+      const fraction = typeof req.body?.fraction === 'number' ? req.body.fraction : 1.0;
+      const result = await signalManager.executeManualExit(positionId, fraction);
+      const safeData = JSON.parse(
+        JSON.stringify({ success: true, ...result }, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
+      );
+      res.json(safeData);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to execute manual sell' });
+    }
+  });
+
+  app.post('/api/positions/:id/close', async (req: Request, res: Response) => {
+    try {
+      const positionId = req.params.id;
+      const result = await signalManager.executeManualExit(positionId, 1.0);
+      const safeData = JSON.parse(
+        JSON.stringify({ success: true, ...result }, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
+      );
+      res.json(safeData);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to close position' });
+    }
+  });
+
   app.get('/api/orders', async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 30;
     const orders = db.getRecentOrders(limit).filter((o) => {

@@ -28,6 +28,10 @@ async function bootstrap() {
     console.info(`[API Server] Running on http://localhost:${config.API_PORT}`);
   });
 
+  // Attach SignalManager to Telegram bot and start interactive command listener
+  telegramNotifier.setSignalManager(signalManager);
+  telegramNotifier.startInteractivePolling();
+
   // Start Live Ingestion Feeds
   const heliusWs = new HeliusWebSocketStream({
     onTransaction: (tx) => {

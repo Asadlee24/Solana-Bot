@@ -1,4 +1,4 @@
-import { ExternalLink, TrendingDown, TrendingUp } from 'lucide-react';
+import { DollarSign, ExternalLink, Flame, TrendingDown, TrendingUp, Zap } from 'lucide-react';
 import React, { useState } from 'react';
 import {
   formatMicroUsd,
@@ -12,14 +12,17 @@ import { Position } from '../../types/dashboard';
 import { Badge } from '../common/Badge';
 import { EmptyState } from '../common/EmptyState';
 import { TokenIdentity } from '../trading/TokenIdentity';
+import { ManualExitModal } from './ManualExitModal';
 
 interface PositionsTableProps {
   positions: Position[];
   isLoading?: boolean;
+  onRefresh?: () => void;
 }
 
-export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoading }) => {
+export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoading, onRefresh }) => {
   const [tabFilter, setTabFilter] = useState<'OPEN' | 'ALL'>('OPEN');
+  const [selectedExitPos, setSelectedExitPos] = useState<Position | null>(null);
 
   const filtered = tabFilter === 'OPEN'
     ? positions.filter((p) => p.state === 'OPEN')
@@ -53,13 +56,13 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
             <tr>
               <th>Token</th>
               <th>Holding Qty</th>
-              <th>Cost Basis</th>
+              <th>Cost Basis (USD & SOL)</th>
               <th>Avg Entry Price</th>
               <th>Current Live Price</th>
-              <th>Current Market Value</th>
-              <th>Floating PnL</th>
+              <th>Market Value</th>
+              <th>Live Profit / Loss</th>
               <th>State</th>
-              <th style={{ textAlign: 'right' }}>DEX Charts</th>
+              <th style={{ textAlign: 'right' }}>Manual Actions & DEX</th>
             </tr>
           </thead>
           <tbody>
@@ -82,9 +85,13 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
               filtered.map((pos) => {
                 const meta = pos.metadata;
                 const costSol = Number(pos.costBasisLamports) / 1e9;
+                const costUsd = costSol * 100.0;
                 const pnlSol = pos.unrealizedPnlSol ?? 0;
+                const pnlUsd = (pos.currentValueUsd ?? 0) - costUsd;
                 const pnlPct = pos.unrealizedPnlPct ?? 0;
                 const isProfit = pnlSol >= 0;
+
+                const priceUsd = meta?.priceUsd || (pos.currentPriceSol ? pos.currentPriceSol * 100.0 : 0);
 
                 return (
                   <tr key={pos.id}>
@@ -102,8 +109,11 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
 
                     {/* Cost Basis */}
                     <td>
-                      <div className="mono">
-                        <span>{formatSol(costSol, 4)}</span>
+                      <div className="cost-basis-cell">
+                        <span className="mono font-semibold">${costUsd.toFixed(2)} USD</span>
+                        <span className="mono text-muted" style={{ fontSize: 10 }}>
+                          ({formatSol(costSol, 4)})
+                        </span>
                       </div>
                     </td>
 
@@ -117,39 +127,39 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                     {/* Current Live Price */}
                     <td>
                       <div className="price-cell">
-                        <span className="mono text-cyan font-semibold">
-                          {pos.currentPriceSol ? `${pos.currentPriceSol.toFixed(8)} SOL` : '—'}
+                        <span className="mono text-cyan font-bold">
+                          ${priceUsd < 0.01 ? priceUsd.toFixed(7) : priceUsd.toFixed(4)} USD
                         </span>
-                        {meta?.priceUsd ? (
-                          <span className="text-muted" style={{ fontSize: 10 }}>
-                            {formatMicroUsd(meta.priceUsd)}
-                          </span>
-                        ) : null}
+                        <span className="mono text-muted" style={{ fontSize: 10 }}>
+                          ({pos.currentPriceSol ? `${pos.currentPriceSol.toFixed(8)} SOL` : '—'})
+                        </span>
                       </div>
                     </td>
 
                     {/* Current Value */}
                     <td>
-                      <div className="mono font-semibold">
-                        {pos.currentValueSol ? formatSol(pos.currentValueSol, 4) : '—'}
-                        {pos.currentValueUsd ? (
-                          <div className="text-muted" style={{ fontSize: 10 }}>
-                            (~${pos.currentValueUsd.toFixed(2)})
-                          </div>
-                        ) : null}
+                      <div className="mono font-bold">
+                        {pos.currentValueUsd ? `$${pos.currentValueUsd.toFixed(2)} USD` : '—'}
+                        <div className="text-muted" style={{ fontSize: 10 }}>
+                          ({pos.currentValueSol ? formatSol(pos.currentValueSol, 4) : '—'})
+                        </div>
                       </div>
                     </td>
 
-                    {/* Floating PnL */}
+                    {/* Floating PnL with Dollars & SOL */}
                     <td>
                       {pos.state === 'OPEN' ? (
-                        <div className={`pnl-pill ${isProfit ? 'pos' : 'neg'}`}>
-                          {isProfit ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                          <span className="mono">
-                            {isProfit ? '+' : ''}
-                            {pnlSol.toFixed(4)} SOL
-                          </span>
-                          <span className="pnl-pct">{formatPct(pnlPct, true)}</span>
+                        <div className={`pnl-pill-dual ${isProfit ? 'pos' : 'neg'}`}>
+                          <div className="pnl-header-line">
+                            {isProfit ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                            <span className="mono font-bold">
+                              {isProfit ? '+' : '-'}${Math.abs(pnlUsd).toFixed(2)} USD
+                            </span>
+                          </div>
+                          <div className="pnl-sub-line mono">
+                            <span>{isProfit ? '+' : ''}{pnlSol.toFixed(4)} SOL</span>
+                            <span className="pnl-tag-pct">{formatPct(pnlPct, true)}</span>
+                          </div>
                         </div>
                       ) : (
                         <div className="mono text-muted">
@@ -165,9 +175,30 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                       </Badge>
                     </td>
 
-                    {/* External DEX Links */}
+                    {/* Manual Actions & External DEX Links */}
                     <td style={{ textAlign: 'right' }}>
                       <div className="actions-cell-right">
+                        {pos.state === 'OPEN' && (
+                          <>
+                            <button
+                              type="button"
+                              className="btn-table-action tp-btn"
+                              onClick={() => setSelectedExitPos(pos)}
+                              title="Manual Take Profit / Partial Exit"
+                            >
+                              <span>💰 Take Profit</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-table-action close-btn"
+                              onClick={() => setSelectedExitPos(pos)}
+                              title="Close 100% Position"
+                            >
+                              <span>Close</span>
+                            </button>
+                          </>
+                        )}
+
                         <a
                           href={meta?.dexScreenerUrl || `https://dexscreener.com/solana/${pos.tokenMint}`}
                           target="_blank"
@@ -198,6 +229,14 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
           </tbody>
         </table>
       </div>
+
+      {/* Manual Take Profit / Close Modal */}
+      <ManualExitModal
+        position={selectedExitPos}
+        isOpen={Boolean(selectedExitPos)}
+        onClose={() => setSelectedExitPos(null)}
+        onSuccess={onRefresh}
+      />
     </div>
   );
 };

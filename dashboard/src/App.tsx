@@ -85,6 +85,7 @@ export default function App() {
           positions={positions}
           telemetry={telemetry}
           isLoading={isLoading}
+          onRefresh={refresh}
         />
       )}
 

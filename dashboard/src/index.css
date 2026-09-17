@@ -2882,3 +2882,316 @@ body::before {
   color: var(--text-secondary);
 }
 
+/* ============================================================
+   DUAL USD/SOL PNL PILLS & MANUAL TAKE PROFIT ACTIONS
+   ============================================================ */
+
+.pnl-pill-dual {
+  display: inline-flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  line-height: 1.25;
+}
+
+.pnl-pill-dual.pos {
+  background: rgba(20, 241, 149, 0.1);
+  border: 1px solid rgba(20, 241, 149, 0.25);
+  color: var(--accent-green);
+}
+
+.pnl-pill-dual.neg {
+  background: rgba(255, 77, 77, 0.1);
+  border: 1px solid rgba(255, 77, 77, 0.25);
+  color: var(--accent-rose);
+}
+
+.pnl-header-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.pnl-sub-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.pnl-tag-pct {
+  padding: 0 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+.cost-basis-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.btn-table-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--ease-fast);
+}
+
+.btn-table-action.tp-btn {
+  background: rgba(20, 241, 149, 0.12);
+  color: var(--accent-green);
+  border: 1px solid rgba(20, 241, 149, 0.3);
+}
+
+.btn-table-action.tp-btn:hover {
+  background: rgba(20, 241, 149, 0.25);
+  border-color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(20, 241, 149, 0.35);
+}
+
+.btn-table-action.close-btn {
+  background: rgba(255, 77, 77, 0.1);
+  color: var(--accent-rose);
+  border: 1px solid rgba(255, 77, 77, 0.25);
+}
+
+.btn-table-action.close-btn:hover {
+  background: rgba(255, 77, 77, 0.2);
+  border-color: var(--accent-rose);
+}
+
+/* OVERVIEW HOLDINGS UPGRADES */
+.holding-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.holding-pnl-pill-dual {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.holding-pnl-pill-dual .pnl-usd {
+  font-size: 13px;
+}
+
+.btn-holding-tp {
+  padding: 5px 10px;
+  background: rgba(20, 241, 149, 0.15);
+  border: 1px solid rgba(20, 241, 149, 0.35);
+  color: var(--accent-green);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--ease-fast);
+}
+
+.btn-holding-tp:hover {
+  background: var(--accent-green);
+  color: #07090D;
+  box-shadow: 0 0 12px rgba(20, 241, 149, 0.5);
+}
+
+/* MANUAL EXIT MODAL */
+.manual-exit-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.exit-modal-token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.exit-pnl-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+}
+
+.exit-pnl-badge.pos {
+  background: rgba(20, 241, 149, 0.12);
+  border: 1px solid rgba(20, 241, 149, 0.3);
+  color: var(--accent-green);
+}
+
+.exit-pnl-badge.neg {
+  background: rgba(255, 77, 77, 0.12);
+  border: 1px solid rgba(255, 77, 77, 0.3);
+  color: var(--accent-rose);
+}
+
+.exit-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.exit-stat-box {
+  background: rgba(13, 17, 23, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.exit-stat-box .lbl {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.exit-stat-box .val {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.exit-stat-box .sub {
+  font-size: 10px;
+}
+
+.exit-fraction-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fraction-pill-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.fraction-pill {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--ease-fast);
+  text-align: center;
+}
+
+.fraction-pill:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.fraction-pill.active {
+  background: rgba(20, 241, 149, 0.15);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+  box-shadow: 0 0 10px rgba(20, 241, 149, 0.2);
+}
+
+.exit-payout-card {
+  background: rgba(20, 241, 149, 0.05);
+  border: 1px solid rgba(20, 241, 149, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.payout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.payout-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.payout-values {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.payout-usd {
+  font-size: 16px;
+}
+
+.payout-sol {
+  font-size: 11px;
+}
+
+.payout-sub {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.exit-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 77, 77, 0.12);
+  border: 1px solid rgba(255, 77, 77, 0.3);
+  color: var(--accent-rose);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+
+.exit-success-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(20, 241, 149, 0.12);
+  border: 1px solid rgba(20, 241, 149, 0.3);
+  color: var(--accent-green);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.exit-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.btn-danger {
+  background: #FF4D4D !important;
+  color: #FFFFFF !important;
+  border-color: #FF4D4D !important;
+}
+
+.btn-danger:hover {
+  background: #E03E3E !important;
+  box-shadow: 0 0 12px rgba(255, 77, 77, 0.4) !important;
+}
+
+

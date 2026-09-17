@@ -7,9 +7,15 @@ interface PositionsProps {
   positions: Position[];
   telemetry: Telemetry | null;
   isLoading?: boolean;
+  onRefresh?: () => void;
 }
 
-export const Positions: React.FC<PositionsProps> = ({ positions, telemetry, isLoading }) => {
+export const Positions: React.FC<PositionsProps> = ({
+  positions,
+  telemetry,
+  isLoading,
+  onRefresh,
+}) => {
   return (
     <div className="positions-page-root">
       <div className="page-header-block">
@@ -22,7 +28,11 @@ export const Positions: React.FC<PositionsProps> = ({ positions, telemetry, isLo
       <PositionsSummary positions={positions} telemetry={telemetry} />
 
       <div style={{ marginTop: 24 }}>
-        <PositionsTable positions={positions} isLoading={isLoading} />
+        <PositionsTable
+          positions={positions}
+          isLoading={isLoading}
+          onRefresh={onRefresh}
+        />
       </div>
     </div>
   );
