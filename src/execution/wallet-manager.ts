@@ -131,6 +131,11 @@ export class ExecutionWalletManager {
     return Number(this.cachedBalanceLamports) / LAMPORTS_PER_SOL;
   }
 
+  public getSpendableBalanceSol(): number {
+    const total = this.getCachedBalanceSol();
+    return Math.max(0, total - config.MIN_SOL_RESERVE_SOL);
+  }
+
   /**
    * Validates whether a proposed buy trade complies with minimum SOL reserve floor.
    * Clearly distinguishes fee units:

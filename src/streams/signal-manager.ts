@@ -109,6 +109,7 @@ export class SignalManager extends EventEmitter {
 
     if (!riskResult.approved) {
       console.info(`[RISK REJECTED] ${riskResult.decision}: ${riskResult.reason}`);
+      telegramNotifier.notifyTargetDetected(swapIntent, 'RISK_REJECTED', riskResult.reason);
       return { intent: swapIntent, order: null };
     }
 
@@ -122,6 +123,7 @@ export class SignalManager extends EventEmitter {
         const liveStatus = liveEngine.getStatus();
         if (!liveStatus.isArmed) {
           console.warn(`[LIVE EXECUTION DISARMED] Order skipped: ${liveStatus.disarmReason}`);
+          telegramNotifier.notifyTargetDetected(swapIntent, 'DISARMED_SKIP', liveStatus.disarmReason);
           return { intent: swapIntent, order: null };
         }
         order = await liveEngine.executeLiveTrade(swapIntent, mirrorIntent);
