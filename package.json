@@ -1,0 +1,53 @@
+{
+  "name": "solana-copy-bot",
+  "version": "1.0.0",
+  "description": "Low-Latency Solana Copy-Trading Bot & Copyability Evaluation Suite",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "replay": "tsx src/cli/replay-cli.ts",
+    "simulate": "tsx src/cli/simulate-trade.ts",
+    "dashboard:dev": "vite dashboard --port 3000",
+    "dashboard:build": "vite build dashboard"
+  },
+  "keywords": [
+    "solana",
+    "copy-trading",
+    "helius",
+    "laserstream",
+    "pumpfun",
+    "jupiter"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@solana/spl-token": "^0.4.12",
+    "@solana/web3.js": "^1.98.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.9",
+    "@types/ws": "^8.5.14",
+    "@vitejs/plugin-react": "^4.7.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.7"
+  }
+}

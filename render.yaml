@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: solana-copy-bot
+    runtime: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: EXECUTION_MODE
+        value: PAPER
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: WATCHED_WALLETS
+        value: CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: FIXED_BUY_SOL
+        value: "0.1"
+      - key: DEFAULT_SIZING_MODE
+        value: FIXED_SIZE

@@ -1,0 +1,39 @@
+name: 24/7 Telegram & Solana Bot Runner
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Run periodically every 6 hours or whenever dispatched
+    - cron: '0 */6 * * *'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350 # Max allowed before next rotation
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Telegram Bot & Stream Listener
+        env:
+          NODE_ENV: production
+          EXECUTION_MODE: PAPER
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          WATCHED_WALLETS: ${{ secrets.WATCHED_WALLETS || 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FIXED_BUY_SOL: "0.1"
+          DEFAULT_SIZING_MODE: FIXED_SIZE
+        run: |
+          echo "Starting 24/7 Solana Copy Bot & Telegram Alert Worker..."
+          npx tsx src/index.ts
