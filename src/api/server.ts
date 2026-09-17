@@ -35,7 +35,7 @@ export function createApiServer() {
     res.json(telemetry);
   });
 
-  app.get('/api/positions', async (_req: Request, res: Response) => {
+  const getEnrichedPositions = async () => {
     const allowedWallets = new Set(config.WATCHED_WALLETS);
     const open = db.getOpenPositions().filter((pos) => {
       const mint = pos.tokenMint || '';
@@ -45,7 +45,7 @@ export function createApiServer() {
     });
 
     const solPriceUsd = 100.0;
-    const enriched = await Promise.all(
+    return Promise.all(
       open.map(async (pos) => {
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
         const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : pos.avgEntryPriceSol;
@@ -80,6 +80,10 @@ export function createApiServer() {
         };
       })
     );
+  };
+
+  app.get('/api/positions', async (_req: Request, res: Response) => {
+    const enriched = await getEnrichedPositions();
     res.json(enriched);
   });
 
@@ -232,6 +236,22 @@ export function createApiServer() {
     signalManager.on('latencySample', onLatencySample);
     signalManager.on('positionUpdate', onPositionUpdate);
 
+    // Fast telemetry & positions live tick every 2 seconds for real-time sub-second charts
+    const tickInterval = setInterval(async () => {
+      try {
+        const telemetry = db.getSystemTelemetry();
+        telemetry.circuitBreakerTripped = riskEngine.isTripped();
+        const positions = await getEnrichedPositions();
+        sendEvent('telemetryTick', {
+          time: Date.now(),
+          telemetry,
+          positions,
+        });
+      } catch {
+        // ignore
+      }
+    }, 2000);
+
     // Heartbeat every 15 seconds
     const interval = setInterval(() => {
       sendEvent('ping', { time: Date.now() });
@@ -239,6 +259,7 @@ export function createApiServer() {
 
     req.on('close', () => {
       clearInterval(interval);
+      clearInterval(tickInterval);
       signalManager.off('targetEvent', onTargetEvent);
       signalManager.off('mirrorOrder', onMirrorOrder);
       signalManager.off('latencySample', onLatencySample);

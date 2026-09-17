@@ -54,12 +54,20 @@ export function useDashboardData() {
     }
   }, []);
 
-  // Debounced refresh handler triggered by SSE events
-  const onSseEvent = useCallback(() => {
+  // Real-time SSE event handler
+  const onSseEvent = useCallback((event: string, data: any) => {
+    if (event === 'telemetryTick' && data) {
+      if (data.telemetry) setTelemetry(data.telemetry);
+      if (data.positions) setPositions(data.positions);
+      setLastRefreshedAt(Date.now());
+      return;
+    }
+
+    // Trade lifecycle events (mirrorOrder, targetEvent, positionUpdate) trigger debounced refresh
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     debounceTimerRef.current = setTimeout(() => {
       loadAll();
-    }, 250);
+    }, 150);
   }, [loadAll]);
 
   const eventStream = useEventStream({
@@ -69,10 +77,10 @@ export function useDashboardData() {
   useEffect(() => {
     loadAll();
 
-    // Background polling reconciliation every 5s
+    // High-frequency background reconciliation every 2.5s
     const pollInterval = setInterval(() => {
       loadAll();
-    }, 5000);
+    }, 2500);
 
     return () => {
       clearInterval(pollInterval);

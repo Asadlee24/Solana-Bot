@@ -26,8 +26,8 @@ export class TokenMetadataService {
     }
 
     const cached = this.cache.get(mint);
-    if (cached && Date.now() - cached.updatedAt < 10000) {
-      // 10 second cache for responsive real-time PnL
+    if (cached && Date.now() - cached.updatedAt < 2500) {
+      // 2.5 second cache for sub-second responsive real-time PnL & charts
       return cached;
     }
 

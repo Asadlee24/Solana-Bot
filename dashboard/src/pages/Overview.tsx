@@ -15,6 +15,8 @@ import { MetricCard } from '../components/common/MetricCard';
 import { StatusDot } from '../components/common/StatusDot';
 import { BotHealthPanel } from '../components/trading/BotHealthPanel';
 import { ExecutionPipeline } from '../components/trading/ExecutionPipeline';
+import { LiveTickerStrip } from '../components/trading/LiveTickerStrip';
+import { OverviewLiveChart } from '../components/trading/OverviewLiveChart';
 import { TokenIdentity } from '../components/trading/TokenIdentity';
 import { TradeFeed } from '../components/trading/TradeFeed';
 import {
@@ -39,6 +41,7 @@ interface OverviewProps {
   positions: Position[];
   latencySamples: LatencySample[];
   streamStatus: StreamStatus;
+  lastRefreshedAt?: number;
   onNavigateTab: (tab: NavigationTab) => void;
   isLoading?: boolean;
 }
@@ -49,6 +52,7 @@ export const Overview: React.FC<OverviewProps> = ({
   positions,
   latencySamples,
   streamStatus,
+  lastRefreshedAt,
   onNavigateTab,
   isLoading,
 }) => {
@@ -73,6 +77,13 @@ export const Overview: React.FC<OverviewProps> = ({
 
   return (
     <div className="overview-page-root">
+      {/* Real-time Sub-second Price Ticker Strip */}
+      <LiveTickerStrip
+        telemetry={telemetry}
+        positions={positions}
+        lastRefreshedAt={lastRefreshedAt || Date.now()}
+      />
+
       {/* Top KPI Row */}
       <div className="overview-kpi-grid">
         <MetricCard
@@ -128,6 +139,16 @@ export const Overview: React.FC<OverviewProps> = ({
           subValue={`${positions.length} Total Monitored`}
           icon={<Layers size={16} />}
           tone="cyan"
+        />
+      </div>
+
+      {/* Real-Time Interactive Trading Terminal Chart */}
+      <div className="overview-section">
+        <OverviewLiveChart
+          telemetry={telemetry}
+          orders={orders}
+          positions={positions}
+          latencySamples={latencySamples}
         />
       </div>
 

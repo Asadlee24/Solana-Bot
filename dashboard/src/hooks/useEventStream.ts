@@ -89,6 +89,13 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         } catch {}
       });
 
+      es.addEventListener('telemetryTick', (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          onEvent?.('telemetryTick', data);
+        } catch {}
+      });
+
       es.addEventListener('ping', () => {
         setStatus('CONNECTED');
       });

@@ -70,6 +70,7 @@ export default function App() {
           positions={positions}
           latencySamples={latencySamples}
           streamStatus={streamStatus}
+          lastRefreshedAt={lastRefreshedAt}
           onNavigateTab={setActiveTab}
           isLoading={isLoading}
         />
