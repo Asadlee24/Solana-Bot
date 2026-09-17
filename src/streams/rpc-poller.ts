@@ -8,7 +8,7 @@ export class SolanaRpcPoller {
   private connection: Connection;
   private isRunning: boolean = false;
   private lastSignatureMap: Map<string, string> = new Map();
-  private pollIntervalMs: number = 2000; // Poll every 2 seconds on public RPC
+  private pollIntervalMs: number = 500; // Poll every 2 seconds on public RPC
   private timer: NodeJS.Timeout | null = null;
 
   constructor() {
@@ -73,11 +73,17 @@ export class SolanaRpcPoller {
 
       const observedAt = process.hrtime.bigint();
       const txRes = await this.connection.getParsedTransaction(latestSig, {
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: 1,
         commitment: 'confirmed',
       });
 
       if (!txRes || !txRes.transaction) return;
+
+      // Skip failed on-chain transactions (e.g. slippage error 6042)
+      if (txRes.meta && txRes.meta.err) {
+        console.info(`[RPC Poller] Skipped failed on-chain target transaction: ${latestSig}`);
+        return;
+      }
 
       const message = txRes.transaction.message;
       const accountKeys = message.accountKeys.map((k: any) =>
@@ -102,13 +108,23 @@ export class SolanaRpcPoller {
         signers: signers.length > 0 ? signers : [accountKeys[0]],
         accountKeys,
         instructions,
+        meta: txRes.meta
+          ? {
+              err: txRes.meta.err,
+              fee: txRes.meta.fee,
+              preBalances: txRes.meta.preBalances,
+              postBalances: txRes.meta.postBalances,
+              preTokenBalances: txRes.meta.preTokenBalances as any,
+              postTokenBalances: txRes.meta.postTokenBalances as any,
+            }
+          : undefined,
         observedAt,
       };
 
       // Ingest live into hot path!
-      await signalManager.handleIncomingTransaction(envelope, 'LASERSTREAM_WS', 'PROCESSED_SUCCESS');
+      await signalManager.handleIncomingTransaction(envelope, 'RPC_FALLBACK', 'CONFIRMED');
     } catch (err: any) {
-      // Throttle or log if needed
+      console.warn('[RPC Poller Error]:', err?.message || err);
     }
   }
 }

@@ -44,10 +44,8 @@ async function bootstrap() {
 
   heliusWs.start();
 
-  // If no Helius key, start live mainnet RPC poller as fallback so target wallet is monitored live!
-  if (!config.HELIUS_API_KEY) {
-    rpcPoller.start();
-  }
+  // Start live mainnet RPC poller in parallel for 100% failover redundancy
+  rpcPoller.start();
 
   // Graceful shutdown
   const shutdown = () => {

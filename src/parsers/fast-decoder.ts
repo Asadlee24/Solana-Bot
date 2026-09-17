@@ -1,9 +1,10 @@
 import { SwapIntent } from '../types/index.js';
 import { JupiterAdapter } from './adapters/jupiter.js';
 import { OrcaAdapter } from './adapters/orca.js';
-import { PumpFunAdapter } from './adapters/pumpfun.js';
+import { PumpFunAdapter, WSOL_MINT } from './adapters/pumpfun.js';
 import { PumpSwapAdapter } from './adapters/pumpswap.js';
 import { RaydiumAdapter } from './adapters/raydium.js';
+import { BalanceDeltaReconciler } from './reconciler.js';
 
 export const SYSTEM_PROGRAM_ID = '11111111111111111111111111111111';
 export const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
@@ -25,6 +26,14 @@ export interface ParsedTransactionEnvelope {
     index: number;
     instructions: RawInstruction[];
   }>;
+  meta?: {
+    err: any | null;
+    fee: number;
+    preBalances: number[];
+    postBalances: number[];
+    preTokenBalances?: any[];
+    postTokenBalances?: any[];
+  };
   observedAt: bigint; // Monotonic hrtime
 }
 
@@ -159,6 +168,52 @@ export class FastTransactionDecoder {
           tx.observedAt
         );
         if (intent) return intent;
+      }
+    }
+
+    // 5. Ultimate Fallback: Balance Delta Ground Truth Reconciliation
+    // (Handles all custom bot contracts, Trojan, Photon, Bloom, GMGN, and new Pump.fun buy_exact_quote_in)
+    if (tx.meta && !tx.meta.err) {
+      const reconciled = BalanceDeltaReconciler.reconcile(
+        tx.signature,
+        tx.slot,
+        targetWallet,
+        {
+          err: tx.meta.err,
+          fee: tx.meta.fee,
+          preBalances: tx.meta.preBalances,
+          postBalances: tx.meta.postBalances,
+          preTokenBalances: tx.meta.preTokenBalances,
+          postTokenBalances: tx.meta.postTokenBalances,
+          accountKeys: tx.accountKeys,
+        }
+      );
+
+      if (reconciled.status === 'SUCCESS' && reconciled.tokenMint && reconciled.tokenMint !== 'UNKNOWN') {
+        const isBuy = reconciled.side === 'BUY';
+        const inputMint = isBuy ? WSOL_MINT : reconciled.tokenMint;
+        const outputMint = isBuy ? reconciled.tokenMint : WSOL_MINT;
+        const absSol = reconciled.netSolDeltaLamports < 0n ? -reconciled.netSolDeltaLamports : reconciled.netSolDeltaLamports;
+        const absTok = reconciled.netTokenDeltaRaw < 0n ? -reconciled.netTokenDeltaRaw : reconciled.netTokenDeltaRaw;
+
+        return {
+          targetSignature: tx.signature,
+          slot: tx.slot,
+          targetWallet,
+          venue: 'PUMPFUN',
+          side: reconciled.side,
+          inputMint,
+          outputMint,
+          tokenMint: reconciled.tokenMint,
+          inputAmountRaw: isBuy ? absSol.toString() : absTok.toString(),
+          outputAmountRaw: isBuy ? absTok.toString() : absSol.toString(),
+          estimatedPrice: reconciled.effectiveTargetPrice,
+          observedAt: tx.observedAt,
+          timestampMs: Date.now(),
+          rawProgramId: 'BALANCE_DELTA_FALLBACK',
+          confidence: 0.99,
+          sellFraction: reconciled.targetSoldFraction,
+        };
       }
     }
 

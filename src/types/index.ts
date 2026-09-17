@@ -12,7 +12,8 @@ export type SignalSource =
   | 'LASERSTREAM_GRPC'
   | 'LASERSTREAM_WS'
   | 'WEBHOOK'
-  | 'REPLAY_SIMULATOR';
+  | 'REPLAY_SIMULATOR'
+  | 'RPC_FALLBACK';
 
 export type DexVenue =
   | 'PUMPFUN'
@@ -74,6 +75,7 @@ export interface SwapIntent {
   rawProgramId: string;
   confidence: number; // 0.0 to 1.0
   isTransferNoise?: boolean;
+  sellFraction?: number;
 }
 
 /**
