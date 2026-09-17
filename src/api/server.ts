@@ -77,8 +77,7 @@ export function createApiServer() {
     );
   };
 
-  // REST APIs for Dashboard
-  app.get('/api/telemetry', async (_req: Request, res: Response) => {
+  const buildTelemetrySnapshot = async (): Promise<SystemTelemetry> => {
     const telemetry = db.getSystemTelemetry();
     telemetry.circuitBreakerTripped = riskEngine.isTripped();
 
@@ -92,6 +91,22 @@ export function createApiServer() {
     telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
     telemetry.roiPercent = Number(((telemetry.totalNetPnlSol / telemetry.initialPaperBalanceSol) * 100).toFixed(2));
 
+    telemetry.isLiveMode = config.EXECUTION_MODE === 'LIVE';
+    if (config.EXECUTION_MODE === 'LIVE') {
+      const walletStatus = executionWalletManager.getStatus();
+      telemetry.liveWalletPublicKey = walletStatus.publicKey;
+      telemetry.liveWalletBalanceSol = walletStatus.balanceSol;
+      telemetry.liveWalletReserveSol = walletStatus.reserveSol;
+      telemetry.liveWalletSpendableSol = walletStatus.spendableSol;
+      telemetry.liveEngineArmed = liveEngine.getStatus().isArmed;
+    }
+
+    return telemetry;
+  };
+
+  // REST APIs for Dashboard
+  app.get('/api/telemetry', async (_req: Request, res: Response) => {
+    const telemetry = await buildTelemetrySnapshot();
     res.json(telemetry);
   });
 
@@ -312,16 +327,10 @@ export function createApiServer() {
     // Fast telemetry & positions live tick every 2 seconds for real-time sub-second charts
     const tickInterval = setInterval(async () => {
       try {
-        const telemetry = db.getSystemTelemetry();
-        telemetry.circuitBreakerTripped = riskEngine.isTripped();
-        const positions = await getEnrichedPositions();
-        const liveFloatingSol = positions.reduce((acc, p) => acc + (p.unrealizedPnlSol || 0), 0);
-        telemetry.totalUnrealizedPnlSol = Number(liveFloatingSol.toFixed(4));
-        telemetry.totalNetPnlSol = Number((telemetry.totalRealizedPnlSol + liveFloatingSol).toFixed(4));
-        telemetry.currentPaperBalanceSol = Number((telemetry.initialPaperBalanceSol + telemetry.totalNetPnlSol).toFixed(4));
-        telemetry.totalPaperBalanceUsd = Number((telemetry.currentPaperBalanceSol * telemetry.solPriceUsd).toFixed(2));
-        telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
-        telemetry.roiPercent = Number(((telemetry.totalNetPnlSol / telemetry.initialPaperBalanceSol) * 100).toFixed(2));
+        const [telemetry, positions] = await Promise.all([
+          buildTelemetrySnapshot(),
+          getEnrichedPositions(),
+        ]);
 
         sendEvent('telemetryTick', {
           time: Date.now(),

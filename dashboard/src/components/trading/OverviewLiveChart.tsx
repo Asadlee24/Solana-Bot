@@ -51,7 +51,10 @@ export const OverviewLiveChart: React.FC<OverviewLiveChartProps> = ({
   const activeMeta = activePosition?.metadata;
   const tokenSymbol = activeMeta?.symbol || activePosition?.tokenMint?.substring(0, 6) || 'TOKEN';
 
-  const initialBalance = telemetry?.initialPaperBalanceSol ?? 10.0;
+  const isLive = telemetry?.executionMode === 'LIVE' || Boolean(telemetry?.isLiveMode);
+  const initialBalance = isLive
+    ? (telemetry?.liveWalletBalanceSol ?? 0)
+    : (telemetry?.initialPaperBalanceSol ?? 10.0);
   const realizedPnl = telemetry?.totalRealizedPnlSol ?? 0;
   const totalFloatingPnl = positions
     .filter((p) => p.state === 'OPEN')
@@ -92,8 +95,10 @@ export const OverviewLiveChart: React.FC<OverviewLiveChartProps> = ({
     const points: ChartPoint[] = [];
 
     if (mode === 'equity') {
-      // Base historical curve starting with initial paper balance
-      const initial = telemetry?.initialPaperBalanceSol || 10.0;
+      // Base historical curve starting with real live hot wallet balance (or paper balance)
+      const initial = isLive
+        ? (telemetry?.liveWalletBalanceSol ?? 0)
+        : (telemetry?.initialPaperBalanceSol || 10.0);
       const sortedOrders = [...orders].reverse();
 
       // Generate initial baseline

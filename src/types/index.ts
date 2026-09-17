@@ -245,4 +245,10 @@ export interface SystemTelemetry {
   latencyP99Ms: number;
   avgEntryGapBps: number;
   lastSignalTimestamp: number;
+  isLiveMode?: boolean;
+  liveWalletPublicKey?: string;
+  liveWalletBalanceSol?: number;
+  liveWalletReserveSol?: number;
+  liveWalletSpendableSol?: number;
+  liveEngineArmed?: boolean;
 }

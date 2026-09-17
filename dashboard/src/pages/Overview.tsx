@@ -66,8 +66,13 @@ export const Overview: React.FC<OverviewProps> = ({
   const openPositions = positions.filter((p) => p.state === 'OPEN');
   const latestLatencySample = latencySamples[0] || null;
 
+  // Mode detection:
+  const isLive = telemetry?.executionMode === 'LIVE' || Boolean(telemetry?.isLiveMode);
+
   // 100% mathematically synchronized live portfolio equity calculation:
-  const initialBalanceSol = telemetry?.initialPaperBalanceSol ?? 10.0;
+  const initialBalanceSol = isLive
+    ? (telemetry?.liveWalletBalanceSol ?? 0)
+    : (telemetry?.initialPaperBalanceSol ?? 10.0);
   const solPriceUsd = telemetry?.solPriceUsd ?? 100;
 
   // Realized profit/loss from closed positions:
@@ -83,8 +88,12 @@ export const Overview: React.FC<OverviewProps> = ({
   const netPnlSol = realizedPnlSol + totalFloatingPnlSol;
   const isNetPositive = netPnlSol >= 0;
 
-  // Real-time Total Portfolio Equity = Initial Capital + Net PnL:
-  const totalEquitySol = initialBalanceSol + netPnlSol;
+  // Real-time Total Portfolio Equity:
+  // In LIVE mode: Live Hot Wallet Balance + value of open positions (if any)
+  // In PAPER mode: Initial Capital + Net PnL
+  const totalEquitySol = isLive
+    ? ((telemetry?.liveWalletBalanceSol ?? 0) + openPositions.reduce((acc, p) => acc + (p.currentValueSol || 0), 0))
+    : (initialBalanceSol + netPnlSol);
   const totalEquityUsd = totalEquitySol * solPriceUsd;
 
   const netPnlUsd = netPnlSol * solPriceUsd;
@@ -106,7 +115,7 @@ export const Overview: React.FC<OverviewProps> = ({
       {/* Top KPI Row */}
       <div className="overview-kpi-grid">
         <MetricCard
-          label="Portfolio Equity"
+          label={isLive ? 'Hot Wallet Equity' : 'Portfolio Equity'}
           value={
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
               <span>{formatSol(totalEquitySol, 4)}</span>
@@ -116,12 +125,22 @@ export const Overview: React.FC<OverviewProps> = ({
             </div>
           }
           subValue={
-            <span>
-              Initial: <strong className="mono">{formatSol(initialBalanceSol, 2)}</strong> (${(initialBalanceSol * solPriceUsd).toFixed(0)} USD)
-            </span>
+            isLive ? (
+              <span>
+                Spendable: <strong className="mono">{formatSol(telemetry?.liveWalletSpendableSol ?? 0, 4)}</strong> • Reserve: <span className="mono">{formatSol(telemetry?.liveWalletReserveSol ?? 0.02, 2)}</span>
+              </span>
+            ) : (
+              <span>
+                Initial: <strong className="mono">{formatSol(initialBalanceSol, 2)}</strong> (${(initialBalanceSol * solPriceUsd).toFixed(0)} USD)
+              </span>
+            )
           }
           icon={<DollarSign size={16} />}
-          badge={<span className="card-tag">SOLANA PAPER</span>}
+          badge={
+            <span className={`card-tag ${isLive ? 'tag-live' : ''}`}>
+              {isLive ? 'LIVE HOT WALLET' : 'SOLANA PAPER'}
+            </span>
+          }
           tone={isNetPositive ? 'cyan' : 'negative'}
         />
 
