@@ -9,13 +9,11 @@ import { rpcPoller } from './streams/rpc-poller.js';
 import { signalManager } from './streams/signal-manager.js';
 
 async function bootstrap() {
-  // Startup self-test for execution wallet
+  // Startup self-test for execution wallet (prints ONLY public key)
   executionWalletManager.logStartupStatus();
 
-  let liveArmStatus = { armed: false, reason: 'PAPER mode active' };
-  if (config.EXECUTION_MODE === 'LIVE') {
-    liveArmStatus = await liveEngine.evaluateArmStatus();
-  }
+  // STRICT: LIVE mode starts DISARMED by default. Requires explicit operator arming via /api/live/arm
+  const liveStatus = liveEngine.getStatus();
 
   const walletPubkey = executionWalletManager.getPublicKeyBase58();
   const walletBalSol = executionWalletManager.getCachedBalanceSol();
@@ -25,9 +23,14 @@ async function bootstrap() {
   =============================================================
      ⚡ LOW-LATENCY SOLANA COPY-TRADING BOT (MVP 2026) ⚡
   =============================================================
-  - Mode:               [${config.EXECUTION_MODE}] ${config.EXECUTION_MODE === 'LIVE' ? (liveArmStatus.armed ? '● LIVE ARMED' : '○ LIVE DISARMED') : '(Paper Simulation)'}
+  - Mode:               [${config.EXECUTION_MODE}] ${config.EXECUTION_MODE === 'LIVE' ? (liveStatus.isArmed ? '● LIVE ARMED' : '○ LIVE DISARMED') : '(Paper Simulation)'}
   - Execution Wallet:   ${walletPubkey || 'None (PAPER mode)'}
   - Wallet Balance:     ${walletBalSol.toFixed(4)} SOL (Reserve: ${config.MIN_SOL_RESERVE_SOL} SOL | Spendable: ${spendableSol.toFixed(4)} SOL)
+  - Jupiter Engine:     Swap API V2 (/order + /execute)
+  - Pump.fun Engine:    Adaptive (On-Chain Reserves + Jupiter V2 Graduation Router)
+  - Preflight Sim:      ${config.LIVE_REQUIRE_SIMULATION ? 'ENABLED (Safety Enforced)' : 'DISABLED'}
+  - Smoke-Test Mode:    ${config.MAINNET_SMOKE_TEST_MODE ? 'ENABLED (1-trade auto-disarm safety)' : 'DISABLED'}
+  - Helius Sender:      Mode: ${config.HELIUS_SENDER_MODE} | Tip: ${config.HELIUS_SENDER_TIP_LAMPORTS} lamports
   - Default Sizing:     ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
   - Watched Wallets:    ${config.WATCHED_WALLETS.length} registered (${config.WATCHED_WALLETS[0]})
   - Max Entry Gap:      ${config.MAX_ENTRY_GAP_BPS} bps

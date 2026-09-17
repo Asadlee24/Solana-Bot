@@ -42,6 +42,17 @@ const ConfigSchema = z.object({
   DAILY_LOSS_LIMIT_SOL: z.coerce.number().default(0.03),
   CONSECUTIVE_ERROR_LIMIT: z.coerce.number().default(5),
 
+  // Jupiter Swap API V2
+  JUPITER_API_KEY: z.string().default(''), // Server-side only (never expose to frontend / VITE)
+
+  // Simulation & Smoke-Test Safety Guards
+  LIVE_REQUIRE_SIMULATION: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
+  MAINNET_SMOKE_TEST_MODE: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
+
+  // Helius Sender Configuration & Tip Validation
+  HELIUS_SENDER_MODE: z.enum(['SWQOS', 'MAX']).default('SWQOS'),
+  HELIUS_SENDER_TIP_LAMPORTS: z.coerce.number().default(100_000),
+
   // On-Chain Transaction Compute & Tips
   PRIORITY_FEE_MICRO_LAMPORTS: z.coerce.number().default(50_000), // Compute unit price
   JITO_TIP_LAMPORTS: z.coerce.number().default(100_000), // 0.0001 SOL tip
@@ -81,3 +92,36 @@ export function solToLamportsBigInt(sol: number): bigint {
 export function lamportsToSol(lamports: bigint | string | number): number {
   return Number(lamports) / 1_000_000_000;
 }
+
+/**
+ * Validates configured tip against Helius Sender mode requirements.
+ * Sender MAX requires minimum 0.001 SOL (1,000,000 lamports).
+ * SWQOS requires minimum 10,000 lamports.
+ */
+export function validateHeliusSenderTip(
+  mode: 'SWQOS' | 'MAX',
+  tipLamports: number
+): { valid: boolean; minRequired: number; error?: string } {
+  if (mode === 'MAX') {
+    const minRequired = 1_000_000; // 0.001 SOL
+    if (tipLamports < minRequired) {
+      return {
+        valid: false,
+        minRequired,
+        error: `Helius Sender MAX requires a minimum tip of 0.001 SOL (1,000,000 lamports). Configured: ${tipLamports} lamports.`,
+      };
+    }
+    return { valid: true, minRequired };
+  } else {
+    const minRequired = 10_000;
+    if (tipLamports < minRequired) {
+      return {
+        valid: false,
+        minRequired,
+        error: `Helius Sender SWQOS requires a minimum tip of 10,000 lamports. Configured: ${tipLamports} lamports.`,
+      };
+    }
+    return { valid: true, minRequired };
+  }
+}
+

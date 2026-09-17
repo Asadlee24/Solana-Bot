@@ -5,6 +5,7 @@ import {
   PublicKey,
   VersionedTransaction,
 } from '@solana/web3.js';
+import bs58Module from 'bs58';
 import { randomUUID } from 'crypto';
 import { config, LAMPORTS_PER_SOL_BIGINT, solToLamportsBigInt } from '../config/index.js';
 import { db } from '../db/database.js';
@@ -14,11 +15,10 @@ import {
   MirrorOrder,
   SwapIntent,
 } from '../types/index.js';
-import { jupiterSwapAdapter, WSOL_MINT } from './jupiter-swap.js';
+import { jupiterSwapV2Adapter, WSOL_MINT } from './jupiter-swap.js';
 import { pumpFunSwapAdapter } from './pump-fun-swap.js';
 import { transactionSubmitter } from './transaction-submitter.js';
 import { executionWalletManager } from './wallet-manager.js';
-import bs58Module from 'bs58';
 
 const bs58Encode = (typeof (bs58Module as any).encode === 'function'
   ? (bs58Module as any).encode
@@ -27,14 +27,15 @@ const bs58Encode = (typeof (bs58Module as any).encode === 'function'
 export class LiveExecutionEngine {
   private connection: Connection;
   private isArmed: boolean = false;
-  private disarmReason: string = 'Initializing';
+  private disarmReason: string = 'Engine initialized in safe DISARMED state. Explicit operator arm command required via /api/live/arm.';
+  private smokeTestTradesCount: number = 0;
 
   constructor() {
     this.connection = new Connection(config.SOLANA_RPC_URL, {
       commitment: 'confirmed',
       confirmTransactionInitialTimeout: 20000,
     });
-    this.evaluateArmStatus();
+    // STRICT: Do NOT auto-arm on startup. Require explicit operator command.
   }
 
   /**
@@ -81,17 +82,27 @@ export class LiveExecutionEngine {
       return { armed: false, reason: this.disarmReason };
     }
 
+    // Reset smoke test count upon manual operator re-arming
+    this.smokeTestTradesCount = 0;
     this.isArmed = true;
     this.disarmReason = 'LIVE ARMED: All safety checks passed. Hot wallet ready.';
     console.info(`[LIVE ENGINE ARMED] Active signer: ${executionWalletManager.getPublicKeyBase58()}`);
     return { armed: true, reason: this.disarmReason };
   }
 
-  public getStatus(): { isArmed: boolean; disarmReason: string; publicKey: string | null } {
+  public getStatus(): {
+    isArmed: boolean;
+    disarmReason: string;
+    publicKey: string | null;
+    smokeTestMode: boolean;
+    smokeTestTradesCount: number;
+  } {
     return {
       isArmed: this.isArmed,
       disarmReason: this.disarmReason,
       publicKey: executionWalletManager.getPublicKeyBase58(),
+      smokeTestMode: config.MAINNET_SMOKE_TEST_MODE,
+      smokeTestTradesCount: this.smokeTestTradesCount,
     };
   }
 
@@ -129,6 +140,14 @@ export class LiveExecutionEngine {
       throw new Error(msg);
     }
 
+    // Smoke Test Guard: Only 1 trade permitted before auto-disarming
+    if (config.MAINNET_SMOKE_TEST_MODE && this.smokeTestTradesCount >= 1) {
+      this.isArmed = false;
+      const msg = 'SMOKE TEST COMPLETE — REVIEW TRANSACTION. Second trade blocked to protect capital.';
+      this.disarmReason = msg;
+      throw new Error(msg);
+    }
+
     const keypair = executionWalletManager.getKeypair();
     if (!keypair) {
       throw new Error('Follower keypair is unavailable');
@@ -143,7 +162,7 @@ export class LiveExecutionEngine {
       const spendCheck = executionWalletManager.checkSpendable(
         requestedLamports,
         BigInt(config.PRIORITY_FEE_MICRO_LAMPORTS),
-        BigInt(config.JITO_TIP_LAMPORTS)
+        BigInt(config.HELIUS_SENDER_TIP_LAMPORTS)
       );
       if (!spendCheck.allowed) {
         throw new Error(spendCheck.reason || 'INSUFFICIENT_BALANCE');
@@ -164,7 +183,7 @@ export class LiveExecutionEngine {
       effectivePrice: targetIntent.estimatedPrice,
       quotedAt,
       priorityFeeLamports: BigInt(config.PRIORITY_FEE_MICRO_LAMPORTS),
-      tipLamports: BigInt(config.JITO_TIP_LAMPORTS),
+      tipLamports: BigInt(config.HELIUS_SENDER_TIP_LAMPORTS),
       routeFeeLamports: 5_000n,
       status: 'PENDING',
     };
@@ -177,49 +196,35 @@ export class LiveExecutionEngine {
       let expectedOutRaw = '0';
       let effectivePrice = targetIntent.estimatedPrice;
 
-      // 3. Build Real Mainnet Transaction
+      // 3. Build Real Mainnet Transaction via Jupiter Swap API V2 / Pump.fun Adaptive Router
       if (isBuy) {
         const solLamports = BigInt(rawInAmount);
 
-        // For Pump.fun tokens, try direct bonding curve builder first
+        // Check if token is Pump.fun (active curve or graduated)
         if (targetIntent.venue === 'PUMPFUN' && !targetIntent.tokenMint.endsWith('pump')) {
-          try {
-            const pumpResult = await pumpFunSwapAdapter.buildAndSignBuy(
-              keypair,
-              mirrorIntent.tokenMint,
-              solLamports,
-              config.MAX_SLIPPAGE_BPS,
-              targetIntent.estimatedPrice
-            );
-            signedTx = pumpResult.transaction;
-            latestBlockhash = pumpResult.latestBlockhash;
-            expectedOutRaw = pumpResult.estimatedTokensRaw;
-          } catch (pumpErr) {
-            // Fallback to Jupiter route
-            const quote = await jupiterSwapAdapter.getQuote(
-              WSOL_MINT,
-              mirrorIntent.tokenMint,
-              rawInAmount,
-              config.MAX_SLIPPAGE_BPS
-            );
-            const buildRes = await jupiterSwapAdapter.buildAndSignSwap(keypair, quote);
-            signedTx = buildRes.transaction;
-            expectedOutRaw = buildRes.outAmountRaw;
-            effectivePrice = buildRes.effectivePriceSol;
-            latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
-          }
+          const pumpResult = await pumpFunSwapAdapter.buildAndSignBuy(
+            keypair,
+            mirrorIntent.tokenMint,
+            solLamports,
+            config.MAX_SLIPPAGE_BPS
+          );
+          signedTx = pumpResult.transaction;
+          latestBlockhash = pumpResult.latestBlockhash;
+          expectedOutRaw = pumpResult.outAmountRaw;
+          effectivePrice = pumpResult.effectivePriceSol;
         } else {
-          // Standard / Raydium / Jupiter route
-          const quote = await jupiterSwapAdapter.getQuote(
+          // Standard / Graduated / Multi-venue swap via Jupiter Swap API V2
+          const jupOrder = await jupiterSwapV2Adapter.createOrder(
             WSOL_MINT,
             mirrorIntent.tokenMint,
             rawInAmount,
+            keypair.publicKey.toBase58(),
             config.MAX_SLIPPAGE_BPS
           );
-          const buildRes = await jupiterSwapAdapter.buildAndSignSwap(keypair, quote);
-          signedTx = buildRes.transaction;
-          expectedOutRaw = buildRes.outAmountRaw;
-          effectivePrice = buildRes.effectivePriceSol;
+          const signedResult = await jupiterSwapV2Adapter.signOrder(keypair, jupOrder);
+          signedTx = signedResult.transaction;
+          expectedOutRaw = signedResult.outAmountRaw;
+          effectivePrice = signedResult.effectivePriceSol;
           latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
         }
       } else {
@@ -227,40 +232,28 @@ export class LiveExecutionEngine {
         const tokenAmountRaw = BigInt(rawInAmount);
 
         if (targetIntent.venue === 'PUMPFUN' && !targetIntent.tokenMint.endsWith('pump')) {
-          try {
-            const pumpResult = await pumpFunSwapAdapter.buildAndSignSell(
-              keypair,
-              mirrorIntent.tokenMint,
-              tokenAmountRaw,
-              config.MAX_SLIPPAGE_BPS,
-              targetIntent.estimatedPrice
-            );
-            signedTx = pumpResult.transaction;
-            latestBlockhash = pumpResult.latestBlockhash;
-          } catch {
-            const quote = await jupiterSwapAdapter.getQuote(
-              mirrorIntent.tokenMint,
-              WSOL_MINT,
-              rawInAmount,
-              config.MAX_SLIPPAGE_BPS
-            );
-            const buildRes = await jupiterSwapAdapter.buildAndSignSwap(keypair, quote);
-            signedTx = buildRes.transaction;
-            expectedOutRaw = buildRes.outAmountRaw;
-            effectivePrice = buildRes.effectivePriceSol;
-            latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
-          }
+          const pumpResult = await pumpFunSwapAdapter.buildAndSignSell(
+            keypair,
+            mirrorIntent.tokenMint,
+            tokenAmountRaw,
+            config.MAX_SLIPPAGE_BPS
+          );
+          signedTx = pumpResult.transaction;
+          latestBlockhash = pumpResult.latestBlockhash;
+          expectedOutRaw = pumpResult.outAmountRaw;
+          effectivePrice = pumpResult.effectivePriceSol;
         } else {
-          const quote = await jupiterSwapAdapter.getQuote(
+          const jupOrder = await jupiterSwapV2Adapter.createOrder(
             mirrorIntent.tokenMint,
             WSOL_MINT,
             rawInAmount,
+            keypair.publicKey.toBase58(),
             config.MAX_SLIPPAGE_BPS
           );
-          const buildRes = await jupiterSwapAdapter.buildAndSignSwap(keypair, quote);
-          signedTx = buildRes.transaction;
-          expectedOutRaw = buildRes.outAmountRaw;
-          effectivePrice = buildRes.effectivePriceSol;
+          const signedResult = await jupiterSwapV2Adapter.signOrder(keypair, jupOrder);
+          signedTx = signedResult.transaction;
+          expectedOutRaw = signedResult.outAmountRaw;
+          effectivePrice = signedResult.effectivePriceSol;
           latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
         }
       }
@@ -274,7 +267,7 @@ export class LiveExecutionEngine {
       order.orderSignature = realTxSignature;
       order.submittedAt = process.hrtime.bigint();
 
-      // 4. Low-Latency Submission & Strict Confirmation Polling (NO BLIND RETRIES)
+      // 4. Low-Latency Submission with Preflight Simulation & Strict Confirmation Polling
       const receipt = await transactionSubmitter.submitAndConfirm(
         signedTx,
         latestBlockhash,
@@ -311,6 +304,13 @@ export class LiveExecutionEngine {
 
         // Refresh hot wallet balance in background
         executionWalletManager.refreshBalance().catch(() => {});
+
+        // Smoke-Test Mode: Auto-Disarm immediately after 1 successful test trade!
+        if (config.MAINNET_SMOKE_TEST_MODE) {
+          this.smokeTestTradesCount++;
+          this.kill('SMOKE TEST COMPLETE — REVIEW TRANSACTION');
+          console.warn('🛡️ [SMOKE TEST COMPLETE] Auto-disarmed live execution hot wallet. Review transaction before re-arming.');
+        }
 
         console.info(`[REAL LIVE EXECUTION FILLED] Signature: ${realTxSignature}`);
         return order;

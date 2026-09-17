@@ -4,7 +4,7 @@ import {
   SendOptions,
   VersionedTransaction,
 } from '@solana/web3.js';
-import { config } from '../config/index.js';
+import { config, validateHeliusSenderTip } from '../config/index.js';
 
 export interface SubmissionReceipt {
   signature: string;
@@ -26,7 +26,8 @@ export class TransactionSubmitter {
   }
 
   /**
-   * High-speed submission with monotonic timer tracking and fail-safe confirmation.
+   * High-speed submission with preflight simulation, monotonic timer tracking, and fail-safe confirmation.
+   * STRICT GUARD: Validates transaction with simulateTransaction first when LIVE_REQUIRE_SIMULATION=true.
    * STRICT GUARD: NEVER blindly retries with a new transaction upon ambiguous timeouts.
    */
   public async submitAndConfirm(
@@ -34,6 +35,35 @@ export class TransactionSubmitter {
     latestBlockhash: BlockhashWithExpiryBlockHeight,
     signature: string
   ): Promise<SubmissionReceipt> {
+    // 1. Validate Helius Sender tip compliance
+    const tipValidation = validateHeliusSenderTip(
+      config.HELIUS_SENDER_MODE,
+      config.HELIUS_SENDER_TIP_LAMPORTS
+    );
+    if (!tipValidation.valid) {
+      console.warn(`[Submitter Tip Warning] ${tipValidation.error}`);
+    }
+
+    // 2. Preflight Simulation Check (Required for live smoke test safety)
+    if (config.LIVE_REQUIRE_SIMULATION) {
+      const simResult = await this.connection.simulateTransaction(transaction, {
+        sigVerify: false,
+        replaceRecentBlockhash: false,
+      });
+
+      if (simResult.value.err) {
+        const errorLogs = simResult.value.logs?.slice(-4).join('; ') || 'No logs available';
+        const simErrMsg = `Preflight simulation rejected: ${JSON.stringify(simResult.value.err)} | Logs: ${errorLogs}`;
+        console.error(`[SIMULATION REJECTED] ${simErrMsg}`);
+        return {
+          signature,
+          status: 'FAILED',
+          submittedAt: process.hrtime.bigint(),
+          error: simErrMsg,
+        };
+      }
+    }
+
     const rawTx = transaction.serialize();
     const submittedAt = process.hrtime.bigint();
 
@@ -44,7 +74,7 @@ export class TransactionSubmitter {
     };
 
     try {
-      // Submit through configured RPC endpoint
+      // Submit through configured RPC endpoint / Helius Sender
       await this.connection.sendRawTransaction(rawTx, sendOptions);
     } catch (sendErr: any) {
       // Ambiguous error check: The transaction might have still reached leaders!

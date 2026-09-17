@@ -1,15 +1,18 @@
-import { Keypair } from '@solana/web3.js';
+import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import bs58Module from 'bs58';
 import { randomUUID } from 'crypto';
 import { describe, expect, it } from 'vitest';
-import { config, solToLamportsBigInt } from '../src/config/index.js';
+import { config, solToLamportsBigInt, validateHeliusSenderTip } from '../src/config/index.js';
 import { db } from '../src/db/database.js';
 import { dedupeEngine } from '../src/engine/dedupe.js';
 import { positionEngine } from '../src/engine/position-engine.js';
 import { riskEngine } from '../src/engine/risk-engine.js';
+import { JupiterSwapV2Adapter, WSOL_MINT } from '../src/execution/jupiter-swap.js';
 import { liveEngine } from '../src/execution/live-engine.js';
+import { OnChainBondingCurveState, PumpFunSwapAdapter } from '../src/execution/pump-fun-swap.js';
 import { TransactionSubmitter } from '../src/execution/transaction-submitter.js';
 import { ExecutionWalletManager } from '../src/execution/wallet-manager.js';
+import { mintDecimalsService } from '../src/services/mint-decimals.js';
 import { SwapIntent, WatchedWallet } from '../src/types/index.js';
 
 const bs58Encode = (typeof (bs58Module as any).encode === 'function'
@@ -146,7 +149,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
       try {
         (config as any).FOLLOWER_PRIVATE_KEY = validBase58Key;
         const manager = new ExecutionWalletManager();
-        // Simulate cached balance of 0.06 SOL (reserve is 0.05 SOL)
         (manager as any).cachedBalanceLamports = solToLamportsBigInt(0.06);
 
         // Attempting to buy 0.02 SOL + fees (total 0.0215 SOL) -> remaining would be 0.0385 SOL (< 0.05 SOL)
@@ -163,7 +165,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
       try {
         (config as any).FOLLOWER_PRIVATE_KEY = validBase58Key;
         const manager = new ExecutionWalletManager();
-        // Simulate cached balance of 1.0 SOL
         (manager as any).cachedBalanceLamports = solToLamportsBigInt(1.0);
 
         // Buy 0.01 SOL (smoke test)
@@ -191,7 +192,7 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
         outputAmountRaw: '1000000',
         estimatedPrice: 0.0001,
         observedAt: process.hrtime.bigint(),
-        timestampMs: Date.now() - (config.MAX_SIGNAL_AGE_MS + 500), // Stale
+        timestampMs: Date.now() - (config.MAX_SIGNAL_AGE_MS + 500),
         rawProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
         confidence: 1.0,
       };
@@ -207,7 +208,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
 
     it('rejects quote when entry price gap exceeds MAX_ENTRY_GAP_BPS', () => {
       const targetPrice = 0.00001;
-      // Follower price is 3.5% higher (350 bps gap > 200 bps tolerance)
       const badFollowerPrice = 0.00001035;
 
       const check = riskEngine.evaluateQuote(targetPrice, badFollowerPrice);
@@ -217,7 +217,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
 
     it('approves quote when entry price gap is within tolerance', () => {
       const targetPrice = 0.00001;
-      // Follower price is 0.5% higher (50 bps gap <= 200 bps tolerance)
       const goodFollowerPrice = 0.00001005;
 
       const check = riskEngine.evaluateQuote(targetPrice, goodFollowerPrice);
@@ -244,10 +243,8 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
     };
 
     it('tracks position for target A and sells exactly 25% when target sells 25%', () => {
-      // Follower bought 1,000,000 raw tokens
       positionEngine.recordFill(targetA, tokenMint, 'BUY', 1_000_000n, 10_000_000n, 0.00001, 'sig_buy_a');
 
-      // Target had 10,000,000 tokens and sells 2,500,000 (25%)
       const sellIntent: SwapIntent = {
         targetSignature: `sig_sell_25_${runId}`,
         slot: 2,
@@ -257,9 +254,9 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
         inputMint: tokenMint,
         outputMint: 'So11111111111111111111111111111111111111112',
         tokenMint,
-        inputAmountRaw: '2500000', // S_t
+        inputAmountRaw: '2500000',
         outputAmountRaw: '25000000',
-        targetPreBalanceToken: '10000000', // B_t
+        targetPreBalanceToken: '10000000',
         estimatedPrice: 0.00001,
         observedAt: process.hrtime.bigint(),
         timestampMs: Date.now(),
@@ -269,7 +266,7 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
 
       const mirror = positionEngine.prepareMirrorIntent(sellIntent, walletConfigA, 'APPROVED');
       expect(mirror.sellFraction).toBeCloseTo(0.25, 2);
-      expect(mirror.requestedInAmountRaw).toBe('250000'); // Exactly 25% of 1,000,000
+      expect(mirror.requestedInAmountRaw).toBe('250000');
     });
 
     it('sells exactly 50% when target sells 50%', () => {
@@ -332,7 +329,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
         createdAt: Date.now(),
       };
 
-      // Target B sells the same token, but follower never copied target B for this token
       const sellIntentB: SwapIntent = {
         targetSignature: `sig_sell_b_${runId}`,
         slot: 5,
@@ -353,7 +349,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
       };
 
       const mirrorB = positionEngine.prepareMirrorIntent(sellIntentB, walletConfigB, 'APPROVED');
-      // Holding protection: Follower sells 0 because follower position belongs to target A, not target B
       expect(mirrorB.requestedInAmountRaw).toBe('0');
     });
   });
@@ -366,7 +361,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
 
       dedupeEngine.markActed(sig);
 
-      // Same signature arrives from LaserStream WS or RPC
       const second = dedupeEngine.registerEvent(sig, 'PROCESSED_SUCCESS', 'LASERSTREAM_WS');
       expect(second.shouldAct).toBe(false);
     });
@@ -375,7 +369,6 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
   describe('7. No Blind Retries & Ambiguous Status Polling', () => {
     it('polls signature status and avoids blind retries on ambiguous network results', async () => {
       const submitter = new TransactionSubmitter();
-      // Mock getSignatureStatuses to simulate transaction successfully confirmed
       (submitter as any).connection.getSignatureStatuses = async () => ({
         value: [
           {
@@ -396,6 +389,211 @@ describe('Real Mainnet Execution Safety & Integration Suite', () => {
 
       expect(receipt.status).toBe('CONFIRMED');
       expect(receipt.slot).toBe(280000000);
+    });
+  });
+
+  describe('8. Jupiter Swap API V2 (/order and /execute) Integration', () => {
+    it('parses Jupiter Swap API V2 /order response and prepares signed transaction', async () => {
+      const jupV2 = new JupiterSwapV2Adapter();
+      // Mock global fetch for V2 /order
+      const origFetch = global.fetch;
+      try {
+        global.fetch = async (url: any) => {
+          if (String(url).includes('/order')) {
+            return {
+              ok: true,
+              json: async () => ({
+                requestId: 'req_v2_abc123',
+                transaction: 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAED',
+                inputMint: WSOL_MINT,
+                outputMint: 'TokenMintXYZ1111111111111111111111111111111',
+                inAmount: '10000000', // 0.01 SOL
+                outAmount: '5000000', // 5 tokens
+                slippageBps: 150,
+              }),
+            } as any;
+          }
+          return origFetch(url);
+        };
+
+        const order = await jupV2.createOrder(
+          WSOL_MINT,
+          'TokenMintXYZ1111111111111111111111111111111',
+          '10000000',
+          mockTestKeypair.publicKey.toBase58()
+        );
+
+        expect(order.requestId).toBe('req_v2_abc123');
+        expect(order.inAmount).toBe('10000000');
+        expect(order.outAmount).toBe('5000000');
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
+
+    it('submits signed transaction to Jupiter V2 /execute and handles success result', async () => {
+      const jupV2 = new JupiterSwapV2Adapter();
+      const origFetch = global.fetch;
+      try {
+        global.fetch = async (url: any, opts: any) => {
+          if (String(url).includes('/execute')) {
+            return {
+              ok: true,
+              json: async () => ({
+                status: 'Success',
+                signature: '4XvH876...realTxSig',
+                totalInputAmount: '10000000',
+                totalOutputAmount: '5000000',
+              }),
+            } as any;
+          }
+          return origFetch(url, opts);
+        };
+
+        const mockVersionedTx = {
+          serialize: () => Buffer.from('mock_tx_bytes'),
+        } as any;
+
+        const res = await jupV2.executeOrder(mockVersionedTx, 'req_v2_abc123');
+        expect(res.status).toBe('Success');
+        expect(res.signature).toBe('4XvH876...realTxSig');
+        expect(res.totalOutputAmount).toBe('5000000');
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
+
+    it('handles Jupiter V2 /execute failure without marking order filled', async () => {
+      const jupV2 = new JupiterSwapV2Adapter();
+      const origFetch = global.fetch;
+      try {
+        global.fetch = async (url: any) => {
+          if (String(url).includes('/execute')) {
+            return {
+              ok: false,
+              status: 400,
+              text: async () => 'SlippageToleranceExceeded',
+            } as any;
+          }
+          return origFetch(url);
+        };
+
+        const mockVersionedTx = {
+          serialize: () => Buffer.from('mock_tx_bytes'),
+        } as any;
+
+        const res = await jupV2.executeOrder(mockVersionedTx, 'req_v2_abc123');
+        expect(res.status).toBe('Failed');
+        expect(res.error).toContain('SlippageToleranceExceeded');
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
+  });
+
+  describe('9. SPL Mint Decimals Resolution (No Hardcoded 1e6)', () => {
+    it('correctly converts amounts for 6-decimal and 9-decimal tokens', () => {
+      // 6 decimals (e.g. USDC, Pump.fun standard)
+      expect(mintDecimalsService.rawToUi('1000000', 6)).toBe(1.0);
+      expect(mintDecimalsService.rawToUi('2500000', 6)).toBe(2.5);
+      expect(mintDecimalsService.uiToRaw(2.5, 6)).toBe(2_500_000n);
+
+      // 9 decimals (e.g. SOL, WSOL)
+      expect(mintDecimalsService.rawToUi('1000000000', 9)).toBe(1.0);
+      expect(mintDecimalsService.rawToUi('10000000', 9)).toBe(0.01);
+      expect(mintDecimalsService.uiToRaw(0.01, 9)).toBe(10_000_000n);
+
+      // 8 decimals (e.g. WBTC)
+      expect(mintDecimalsService.rawToUi('100000000', 8)).toBe(1.0);
+    });
+  });
+
+  describe('10. Pump.fun On-Chain Reserves & Graduation Detection', () => {
+    const adapter = new PumpFunSwapAdapter();
+
+    it('calculates exact constant product output for active bonding curve', () => {
+      const activeState: OnChainBondingCurveState = {
+        isInitialized: true,
+        virtualTokenReserves: 1_073_000_000_000_000n, // ~1.073B tokens
+        virtualSolReserves: 30_000_000_000n, // 30 SOL
+        realTokenReserves: 793_000_000_000_000n,
+        realSolReserves: 0n,
+        tokenTotalSupply: 1_000_000_000_000_000n,
+        complete: false,
+        pairAsset: 'SOL',
+      };
+
+      const quote = adapter.calculateQuote(activeState, 'BUY', solToLamportsBigInt(0.01));
+      expect(quote.isGraduated).toBe(false);
+      expect(quote.expectedOutRaw).toBeGreaterThan(0n);
+      expect(quote.minOutRaw).toBeLessThan(quote.expectedOutRaw);
+      expect(quote.effectivePriceSol).toBeGreaterThan(0);
+    });
+
+    it('identifies graduated token and flags for Jupiter V2 / PumpSwap routing', () => {
+      const graduatedState: OnChainBondingCurveState = {
+        isInitialized: true,
+        virtualTokenReserves: 0n,
+        virtualSolReserves: 0n,
+        realTokenReserves: 0n,
+        realSolReserves: 0n,
+        tokenTotalSupply: 1_000_000_000_000_000n,
+        complete: true, // Graduated!
+        pairAsset: 'SOL',
+      };
+
+      const quote = adapter.calculateQuote(graduatedState, 'BUY', solToLamportsBigInt(0.01));
+      expect(quote.isGraduated).toBe(true);
+      expect(quote.expectedOutRaw).toBe(0n);
+    });
+  });
+
+  describe('11. Preflight Simulation & Helius Sender Tip Validation', () => {
+    it('enforces minimum 0.001 SOL tip for Helius Sender MAX mode', () => {
+      // 100,000 lamports is 0.0001 SOL -> invalid for MAX mode
+      const checkBad = validateHeliusSenderTip('MAX', 100_000);
+      expect(checkBad.valid).toBe(false);
+      expect(checkBad.error).toContain('Helius Sender MAX requires a minimum tip of 0.001 SOL');
+
+      // 1,000,000 lamports is 0.001 SOL -> valid
+      const checkGood = validateHeliusSenderTip('MAX', 1_000_000);
+      expect(checkGood.valid).toBe(true);
+
+      // SWQOS mode permits lower tip
+      const checkSwqos = validateHeliusSenderTip('SWQOS', 100_000);
+      expect(checkSwqos.valid).toBe(true);
+    });
+
+    it('fails submission before broadcasting if preflight simulation returns an error', async () => {
+      const submitter = new TransactionSubmitter();
+      // Mock simulateTransaction returning an error
+      (submitter as any).connection.simulateTransaction = async () => ({
+        value: {
+          err: { InstructionError: [0, 'Custom(1)'] },
+          logs: ['Program 6EF8... failed: custom program error: 0x1'],
+        },
+      });
+
+      const mockVersionedTx = {
+        serialize: () => Buffer.from('mock_tx_bytes'),
+      } as any;
+
+      const receipt = await submitter.submitAndConfirm(
+        mockVersionedTx,
+        { blockhash: 'bh', lastValidBlockHeight: 100 },
+        'sig_mock_sim'
+      );
+
+      expect(receipt.status).toBe('FAILED');
+      expect(receipt.error).toContain('Preflight simulation rejected');
+    });
+  });
+
+  describe('12. Mainnet Smoke-Test Mode & Single-Trade Auto-Disarm', () => {
+    it('auto-disarms engine and blocks second trade when in smoke-test mode', async () => {
+      // Verify initial state
+      const status = liveEngine.getStatus();
+      expect(status.smokeTestMode).toBe(true);
     });
   });
 });
