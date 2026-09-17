@@ -45,11 +45,13 @@ export class FastTransactionDecoder {
     tx: ParsedTransactionEnvelope,
     targetWallet: string
   ): SwapIntent | null {
-    // 1. Anti-bait check: Is target wallet actually a signer/authority in this transaction?
+    // 1. Anti-bait check: Target wallet MUST be an active signer in this transaction.
+    // If target wallet is NOT a signer, this is an airdrop, unsolicited transfer, or third-party token send.
+    // Real intentional buys on Solana strictly require target wallet's signature to authorize spending capital.
     const isSigner = tx.signers.includes(targetWallet);
     const isInAccounts = tx.accountKeys.includes(targetWallet);
 
-    if (!isInAccounts) {
+    if (!isSigner || !isInAccounts) {
       return null;
     }
 

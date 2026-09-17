@@ -95,4 +95,29 @@ describe('DEX Adapters & Fast Parser', () => {
     const intent = FastTransactionDecoder.decodeTransaction(envelope, targetWallet);
     expect(intent?.isTransferNoise).toBe(true);
   });
+
+  it('anti-airdrop: ignores incoming tokens/airdrops where someone sends token to trader without trader signing', () => {
+    const envelope: ParsedTransactionEnvelope = {
+      signature: 'airdrop_sig_999',
+      slot: 12346,
+      signers: ['RandomSenderWallet1111111111111111111111111111'], // Trader NOT a signer!
+      accountKeys: [
+        'RandomSenderWallet1111111111111111111111111111',
+        targetWallet, // Target wallet only recipient
+        PUMPFUN_PROGRAM_ID,
+      ],
+      instructions: [
+        {
+          programId: PUMPFUN_PROGRAM_ID,
+          accounts: ['Global', 'Fee', testMint, 'BondingCurve', 'Assoc', 'UserToken', 'RandomSenderWallet1111111111111111111111111111'],
+          data: Buffer.alloc(24),
+        },
+      ],
+      observedAt: process.hrtime.bigint(),
+    };
+
+    const intent = FastTransactionDecoder.decodeTransaction(envelope, targetWallet);
+    // MUST return null (completely ignored, no copy trade triggered!)
+    expect(intent).toBeNull();
+  });
 });

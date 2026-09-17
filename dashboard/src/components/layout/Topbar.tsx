@@ -18,6 +18,7 @@ import { ApiConfigModal } from '../common/ApiConfigModal';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
 import { StatusDot } from '../common/StatusDot';
+import { WalletButton } from '../wallet/WalletButton';
 
 interface TopbarProps {
   activeTab: NavigationTab;
@@ -166,6 +167,9 @@ export const Topbar: React.FC<TopbarProps> = ({
             <span>{isSimulating ? 'Simulating...' : 'Test Event'}</span>
           </button>
         )}
+
+        {/* Solana Wallet Connect Control */}
+        <WalletButton />
 
         {/* Refresh Action */}
         <button
