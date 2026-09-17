@@ -10,6 +10,7 @@ import { executionWalletManager } from '../execution/wallet-manager.js';
 import { tokenMetadataService } from '../services/token-metadata.js';
 import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
+import { SystemTelemetry } from '../types/index.js';
 
 export function createApiServer() {
   const app = express();
@@ -94,7 +95,7 @@ export function createApiServer() {
     telemetry.isLiveMode = config.EXECUTION_MODE === 'LIVE';
     if (config.EXECUTION_MODE === 'LIVE') {
       const walletStatus = executionWalletManager.getStatus();
-      telemetry.liveWalletPublicKey = walletStatus.publicKey;
+      telemetry.liveWalletPublicKey = walletStatus.publicKey || undefined;
       telemetry.liveWalletBalanceSol = walletStatus.balanceSol;
       telemetry.liveWalletReserveSol = walletStatus.reserveSol;
       telemetry.liveWalletSpendableSol = walletStatus.spendableSol;
