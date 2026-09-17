@@ -25,7 +25,7 @@ export const WalletInfoCard: React.FC = () => {
         </div>
 
         <div className="wic-header-right">
-          <Badge variant={wallet.isConnected ? 'live' : 'default'} size="sm">
+          <Badge variant={wallet.isConnected ? 'live' : 'neutral'} size="sm">
             <StatusDot status={wallet.isConnected ? 'online' : 'offline'} size={6} />
             <span style={{ marginLeft: 4 }}>
               {wallet.isConnected ? 'CONNECTED' : 'DISCONNECTED'}

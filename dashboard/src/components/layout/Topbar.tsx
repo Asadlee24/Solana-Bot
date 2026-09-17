@@ -267,7 +267,7 @@ export const Topbar: React.FC<TopbarProps> = ({
         )}
 
         {/* Execution Mode Badge */}
-        <Badge variant={isLive ? (liveStatus?.isArmed ? 'live' : 'warning') : 'paper'} size="sm">
+        <Badge variant={isLive ? (liveStatus?.isArmed ? 'live' : 'warn') : 'paper'} size="sm">
           {isLive
             ? (liveStatus?.isArmed
                 ? '● LIVE ARMED'

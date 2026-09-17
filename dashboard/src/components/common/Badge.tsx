@@ -8,16 +8,21 @@ export interface BadgeProps {
     | 'live'
     | 'success'
     | 'warn'
+    | 'warning'
     | 'danger'
     | 'neutral'
+    | 'default'
+    | 'info'
+    | 'error'
     | 'estimated'
-    | 'real';
+    | 'real'
+    | string;
   children: React.ReactNode;
   size?: 'sm' | 'md';
 }
 
 export const Badge: React.FC<BadgeProps> = ({ variant, children, size = 'md' }) => {
-  const styles: Record<BadgeProps['variant'], { bg: string; color: string; border: string }> = {
+  const styles: Record<string, { bg: string; color: string; border: string }> = {
     buy: {
       bg: 'rgba(16, 185, 129, 0.12)',
       color: '#10b981',
@@ -48,12 +53,27 @@ export const Badge: React.FC<BadgeProps> = ({ variant, children, size = 'md' }) 
       color: '#fbbf24',
       border: 'rgba(245, 158, 11, 0.3)',
     },
+    warning: {
+      bg: 'rgba(245, 158, 11, 0.12)',
+      color: '#fbbf24',
+      border: 'rgba(245, 158, 11, 0.3)',
+    },
     danger: {
       bg: 'rgba(239, 68, 68, 0.14)',
       color: '#f87171',
       border: 'rgba(239, 68, 68, 0.35)',
     },
+    error: {
+      bg: 'rgba(239, 68, 68, 0.14)',
+      color: '#f87171',
+      border: 'rgba(239, 68, 68, 0.35)',
+    },
     neutral: {
+      bg: 'rgba(100, 116, 139, 0.14)',
+      color: '#94a3b8',
+      border: 'rgba(100, 116, 139, 0.25)',
+    },
+    default: {
       bg: 'rgba(100, 116, 139, 0.14)',
       color: '#94a3b8',
       border: 'rgba(100, 116, 139, 0.25)',
@@ -68,9 +88,14 @@ export const Badge: React.FC<BadgeProps> = ({ variant, children, size = 'md' }) 
       color: '#22d3ee',
       border: 'rgba(6, 182, 212, 0.3)',
     },
+    info: {
+      bg: 'rgba(6, 182, 212, 0.12)',
+      color: '#22d3ee',
+      border: 'rgba(6, 182, 212, 0.3)',
+    },
   };
 
-  const current = styles[variant];
+  const current = styles[variant] || styles.neutral;
   const isSmall = size === 'sm';
 
   return (
