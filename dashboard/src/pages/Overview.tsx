@@ -84,9 +84,12 @@ export const Overview: React.FC<OverviewProps> = ({
   const isNetPositive = netPnlSol >= 0;
 
   // Real-time Total Portfolio Equity = Initial Capital + Net PnL:
-  // When in negative (netPnlSol < 0), this is GUARANTEED to be < 10 SOL and < $1,000!
   const totalEquitySol = initialBalanceSol + netPnlSol;
   const totalEquityUsd = totalEquitySol * solPriceUsd;
+
+  const netPnlUsd = netPnlSol * solPriceUsd;
+  const realizedPnlUsd = realizedPnlSol * solPriceUsd;
+  const totalFloatingPnlUsd = totalFloatingPnlSol * solPriceUsd;
 
   const p50 = telemetry?.latencyP50Ms || 0;
   const avgGap = telemetry?.avgEntryGapBps || 0;
@@ -104,8 +107,19 @@ export const Overview: React.FC<OverviewProps> = ({
       <div className="overview-kpi-grid">
         <MetricCard
           label="Portfolio Equity"
-          value={formatSol(totalEquitySol, 4)}
-          subValue={formatUsd(totalEquityUsd, 2)}
+          value={
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span>{formatSol(totalEquitySol, 4)}</span>
+              <span className="mono font-semibold" style={{ fontSize: '12.5px', opacity: 0.9 }}>
+                ({formatUsd(totalEquityUsd, 2)})
+              </span>
+            </div>
+          }
+          subValue={
+            <span>
+              Initial: <strong className="mono">{formatSol(initialBalanceSol, 2)}</strong> (${(initialBalanceSol * solPriceUsd).toFixed(0)} USD)
+            </span>
+          }
           icon={<DollarSign size={16} />}
           badge={<span className="card-tag">SOLANA PAPER</span>}
           tone={isNetPositive ? 'cyan' : 'negative'}
@@ -113,11 +127,26 @@ export const Overview: React.FC<OverviewProps> = ({
 
         <MetricCard
           label="Total Net Profit (PnL)"
-          value={`${isNetPositive ? '+' : ''}${netPnlSol.toFixed(4)} SOL`}
+          value={
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', flexWrap: 'wrap' }}>
+              <span>{isNetPositive ? '+' : ''}{netPnlSol.toFixed(4)} SOL</span>
+              <span className="mono font-semibold" style={{ fontSize: '12.5px', opacity: 0.9 }}>
+                ({isNetPositive ? '+' : '-'}${Math.abs(netPnlUsd).toFixed(2)} USD)
+              </span>
+            </div>
+          }
           subValue={
             <span>
-              Realized: <strong className="mono">+{realizedPnlSol.toFixed(4)}</strong> | Floating:{' '}
-              <strong className="mono">{totalFloatingPnlSol >= 0 ? '+' : ''}{totalFloatingPnlSol.toFixed(4)}</strong>
+              Realized:{' '}
+              <strong className="mono" style={{ color: realizedPnlSol >= 0 ? '#10b981' : '#ef4444' }}>
+                {realizedPnlSol >= 0 ? '+' : '-'}${Math.abs(realizedPnlUsd).toFixed(2)}
+              </strong>{' '}
+              <span className="text-muted">({realizedPnlSol >= 0 ? '+' : ''}{realizedPnlSol.toFixed(4)} SOL)</span>
+              {' • '}
+              Float:{' '}
+              <strong className="mono" style={{ color: totalFloatingPnlSol >= 0 ? '#10b981' : '#ef4444' }}>
+                {totalFloatingPnlSol >= 0 ? '+' : '-'}${Math.abs(totalFloatingPnlUsd).toFixed(2)}
+              </strong>
             </span>
           }
           icon={<TrendingUp size={16} />}

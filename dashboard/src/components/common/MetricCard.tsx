@@ -2,7 +2,7 @@ import React from 'react';
 
 export interface MetricCardProps {
   label: string;
-  value: string | number;
+  value: string | number | React.ReactNode;
   subValue?: string | React.ReactNode;
   badge?: React.ReactNode;
   hint?: string;
