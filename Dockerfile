@@ -1,5 +1,5 @@
 # Production Dockerfile for Solana Copy-Trading Bot
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm ci
+# Use npm install to gracefully resolve platform-specific Linux binaries and optional dependencies
+RUN npm install
 
 COPY . .
 
@@ -22,7 +23,7 @@ RUN npm run dashboard:build
 RUN npm run build:server
 
 # Production Runtime
-FROM node:20-bookworm-slim AS runner
+FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
