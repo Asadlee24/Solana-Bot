@@ -45,6 +45,7 @@ const ConfigSchema = z.object({
   // Telegram Notifications (Async off hot path)
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_CHAT_ID: z.string().default(''),
+  TELEGRAM_API_ROOT: z.string().default('https://api.telegram.org'),
 
   // SQLite Database path
   DB_PATH: z.string().default('./data/copy_bot.db'),
