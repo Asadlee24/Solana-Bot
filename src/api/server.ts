@@ -28,13 +28,6 @@ export function createApiServer() {
   });
   app.post('/webhook/helius', webhookReceiver.handleHeliusWebhook);
 
-  // REST APIs for Dashboard
-  app.get('/api/telemetry', (_req: Request, res: Response) => {
-    const telemetry = db.getSystemTelemetry();
-    telemetry.circuitBreakerTripped = riskEngine.isTripped();
-    res.json(telemetry);
-  });
-
   const getEnrichedPositions = async () => {
     const allowedWallets = new Set(config.WATCHED_WALLETS);
     const open = db.getOpenPositions().filter((pos) => {
@@ -81,6 +74,24 @@ export function createApiServer() {
       })
     );
   };
+
+  // REST APIs for Dashboard
+  app.get('/api/telemetry', async (_req: Request, res: Response) => {
+    const telemetry = db.getSystemTelemetry();
+    telemetry.circuitBreakerTripped = riskEngine.isTripped();
+
+    // Dynamically calculate live floating PnL from active positions
+    const open = await getEnrichedPositions();
+    const liveFloatingSol = open.reduce((acc, p) => acc + (p.unrealizedPnlSol || 0), 0);
+    telemetry.totalUnrealizedPnlSol = Number(liveFloatingSol.toFixed(4));
+    telemetry.totalNetPnlSol = Number((telemetry.totalRealizedPnlSol + liveFloatingSol).toFixed(4));
+    telemetry.currentPaperBalanceSol = Number((telemetry.initialPaperBalanceSol + telemetry.totalNetPnlSol).toFixed(4));
+    telemetry.totalPaperBalanceUsd = Number((telemetry.currentPaperBalanceSol * telemetry.solPriceUsd).toFixed(2));
+    telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
+    telemetry.roiPercent = Number(((telemetry.totalNetPnlSol / telemetry.initialPaperBalanceSol) * 100).toFixed(2));
+
+    res.json(telemetry);
+  });
 
   app.get('/api/positions', async (_req: Request, res: Response) => {
     const enriched = await getEnrichedPositions();
@@ -269,6 +280,14 @@ export function createApiServer() {
         const telemetry = db.getSystemTelemetry();
         telemetry.circuitBreakerTripped = riskEngine.isTripped();
         const positions = await getEnrichedPositions();
+        const liveFloatingSol = positions.reduce((acc, p) => acc + (p.unrealizedPnlSol || 0), 0);
+        telemetry.totalUnrealizedPnlSol = Number(liveFloatingSol.toFixed(4));
+        telemetry.totalNetPnlSol = Number((telemetry.totalRealizedPnlSol + liveFloatingSol).toFixed(4));
+        telemetry.currentPaperBalanceSol = Number((telemetry.initialPaperBalanceSol + telemetry.totalNetPnlSol).toFixed(4));
+        telemetry.totalPaperBalanceUsd = Number((telemetry.currentPaperBalanceSol * telemetry.solPriceUsd).toFixed(2));
+        telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
+        telemetry.roiPercent = Number(((telemetry.totalNetPnlSol / telemetry.initialPaperBalanceSol) * 100).toFixed(2));
+
         sendEvent('telemetryTick', {
           time: Date.now(),
           telemetry,

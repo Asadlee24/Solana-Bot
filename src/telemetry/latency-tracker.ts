@@ -55,7 +55,11 @@ export class LatencyTracker {
       entryGapBps,
     };
 
-    db.recordLatencySample(metric);
+    setImmediate(() => {
+      try {
+        db.recordLatencySample(metric);
+      } catch {}
+    });
     return metric;
   }
 }

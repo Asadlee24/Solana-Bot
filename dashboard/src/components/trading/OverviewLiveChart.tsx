@@ -51,12 +51,12 @@ export const OverviewLiveChart: React.FC<OverviewLiveChartProps> = ({
   const activeMeta = activePosition?.metadata;
   const tokenSymbol = activeMeta?.symbol || activePosition?.tokenMint?.substring(0, 6) || 'TOKEN';
 
-  const currentPaperBalance = telemetry?.currentPaperBalanceSol ?? 10.0;
+  const initialBalance = telemetry?.initialPaperBalanceSol ?? 10.0;
   const realizedPnl = telemetry?.totalRealizedPnlSol ?? 0;
   const totalFloatingPnl = positions
     .filter((p) => p.state === 'OPEN')
     .reduce((sum, p) => sum + (p.unrealizedPnlSol || 0), 0);
-  const currentTotalEquity = currentPaperBalance + totalFloatingPnl;
+  const currentTotalEquity = initialBalance + realizedPnl + totalFloatingPnl;
   const currentTokenPrice = activePosition?.currentPriceSol || activePosition?.avgEntryPriceSol || 0.0000001;
 
   // Flash price indicator on changes

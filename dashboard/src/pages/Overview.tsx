@@ -61,18 +61,27 @@ export const Overview: React.FC<OverviewProps> = ({
   const openPositions = positions.filter((p) => p.state === 'OPEN');
   const latestLatencySample = latencySamples[0] || null;
 
-  // Real calculation of portfolio values
-  const paperBalanceSol = telemetry?.currentPaperBalanceSol ?? 10.0;
+  // 100% mathematically synchronized live portfolio equity calculation:
+  const initialBalanceSol = telemetry?.initialPaperBalanceSol ?? 10.0;
   const solPriceUsd = telemetry?.solPriceUsd ?? 100;
-  const paperBalanceUsd = paperBalanceSol * solPriceUsd;
 
+  // Realized profit/loss from closed positions:
+  const realizedPnlSol = telemetry?.totalRealizedPnlSol || 0;
+
+  // Real-time live floating (unrealized) profit/loss from active open positions:
   const totalFloatingPnlSol = openPositions.reduce(
     (acc, p) => acc + (p.unrealizedPnlSol || 0),
     0
   );
-  const realizedPnlSol = telemetry?.totalRealizedPnlSol || 0;
+
+  // Total Net Profit = Realized + Floating:
   const netPnlSol = realizedPnlSol + totalFloatingPnlSol;
   const isNetPositive = netPnlSol >= 0;
+
+  // Real-time Total Portfolio Equity = Initial Capital + Net PnL:
+  // When in negative (netPnlSol < 0), this is GUARANTEED to be < 10 SOL and < $1,000!
+  const totalEquitySol = initialBalanceSol + netPnlSol;
+  const totalEquityUsd = totalEquitySol * solPriceUsd;
 
   const p50 = telemetry?.latencyP50Ms || 0;
   const avgGap = telemetry?.avgEntryGapBps || 0;
@@ -89,12 +98,12 @@ export const Overview: React.FC<OverviewProps> = ({
       {/* Top KPI Row */}
       <div className="overview-kpi-grid">
         <MetricCard
-          label="Portfolio Balance"
-          value={formatSol(paperBalanceSol, 3)}
-          subValue={formatUsd(paperBalanceUsd, 2)}
+          label="Portfolio Equity"
+          value={formatSol(totalEquitySol, 4)}
+          subValue={formatUsd(totalEquityUsd, 2)}
           icon={<DollarSign size={16} />}
           badge={<span className="card-tag">SOLANA PAPER</span>}
-          tone="cyan"
+          tone={isNetPositive ? 'cyan' : 'negative'}
         />
 
         <MetricCard

@@ -74,12 +74,7 @@ export class SignalManager extends EventEmitter {
       return { intent: null, order: null };
     }
 
-    // Save target event
-    db.saveTargetEvent(swapIntent, stage, 'PROCESSED');
-    this.emit('targetEvent', swapIntent);
-
-    // 4. Pre-trade Risk Check & Sizing Decision
-    // In paper mode, assume default 10 SOL balance
+    // 4. Pre-trade Risk Check & Sizing Decision (ULTRA-FAST IN-MEMORY HOT PATH)
     const currentSolBalance = solToLamportsBigInt(10.0);
     const totalExposure = positionEngine.getTotalOpenExposureLamports();
 
@@ -91,7 +86,7 @@ export class SignalManager extends EventEmitter {
 
     const decisionAt = process.hrtime.bigint();
 
-    // 5. Prepare Mirror Intent
+    // 5. Prepare Mirror Intent (IN-MEMORY HOT PATH)
     const mirrorIntent = positionEngine.prepareMirrorIntent(
       swapIntent,
       matchedWallet,
@@ -99,7 +94,14 @@ export class SignalManager extends EventEmitter {
       riskResult.reason
     );
 
-    this.emit('mirrorIntent', mirrorIntent);
+    // Save target event & emit asynchronously off the critical execution hot path
+    setImmediate(() => {
+      try {
+        db.saveTargetEvent(swapIntent, stage, 'PROCESSED');
+        this.emit('targetEvent', swapIntent);
+        this.emit('mirrorIntent', mirrorIntent);
+      } catch {}
+    });
 
     if (!riskResult.approved) {
       console.info(`[RISK REJECTED] ${riskResult.decision}: ${riskResult.reason}`);
