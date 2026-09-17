@@ -1,12 +1,6 @@
 name: 24/7 Autonomous Solana Copy Bot & Telegram Terminal
 
 on:
-  schedule:
-    # Overlapping cron cycles in GitHub's high-speed cloud datacenter (24/7 continuous uptime)
-    - cron: '*/30 * * * *'
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -50,13 +44,4 @@ jobs:
           echo "🚀 STARTING 24/7 SOLANA COPY BOT & TELEGRAM TERMINAL"
           echo "Network: High-Speed Azure Cloud Datacenter (US)"
           echo "============================================================"
-          # Run continuous bot listener for 50 minutes (3000 seconds) then auto-cycle
           timeout 3000s npx tsx src/index.ts || true
-
-      - name: 🔄 Auto-Chain Next 24/7 Cloud Runner Cycle
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "🚀 Requesting next 24/7 cloud runner cycle..."
-          gh workflow run telegram-bot-runner.yml --ref main || true

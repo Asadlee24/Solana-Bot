@@ -150,8 +150,9 @@ export class TelegramNotifier {
       this.chatId = String(chatId);
     }
 
-    // Clean input (lowercase, strip emojis, punctuation, slashes)
-    const clean = rawText
+    // Strip @botname suffix (e.g. /menu@asadleebot -> /menu)
+    const withoutBotSuffix = rawText.replace(/@\w+/g, '');
+    const clean = withoutBotSuffix
       .toLowerCase()
       .replace(/[^\w\s/]/g, '')
       .replace(/^\//, '')
