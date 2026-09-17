@@ -183,6 +183,69 @@ export const ExecutionWalletCard: React.FC = () => {
         </div>
       </div>
 
+      {/* Smoke Test Safety & Balance Verification Panel */}
+      <div
+        style={{
+          marginTop: '14px',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          background: 'rgba(20, 241, 149, 0.04)',
+          border: '1px solid rgba(20, 241, 149, 0.2)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <ShieldCheck size={16} color="#14f195" />
+            <span style={{ fontSize: '12px', fontWeight: 700, letterSpacing: '0.5px', color: '#14f195' }}>
+              MAINNET SMOKE-TEST VERIFICATION GATEWAY
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <Badge variant="live" size="sm">SMOKE TEST MODE</Badge>
+            <Badge variant="buy" size="sm">BUY ONLY</Badge>
+            <Badge variant="success" size="sm">FORCE JUPITER V2</Badge>
+            <Badge variant={isArmed ? 'live' : 'neutral'} size="sm">
+              {isArmed ? '● LIVE ARMED' : '○ LIVE DISARMED'}
+            </Badge>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', fontSize: '11px' }}>
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>MINIMUM BALANCE TO ARM</div>
+            <div className="mono" style={{ color: '#fbbf24', fontWeight: 700, fontSize: '13px' }}>
+              0.03 SOL minimum
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '2px' }}>
+              (0.01 SOL trade + 0.02 SOL reserve floor)
+            </div>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>RECOMMENDED FUNDING</div>
+            <div className="mono" style={{ color: '#14f195', fontWeight: 700, fontSize: '13px' }}>
+              0.04 SOL funded test wallet
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '2px' }}>
+              (Safe buffer for 0.01 trade, fees & reserve)
+            </div>
+          </div>
+
+          <div style={{ background: 'rgba(0,0,0,0.25)', padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+            <div style={{ color: 'var(--text-muted)', marginBottom: '2px' }}>EXECUTION ROUTE & LIFECYCLE</div>
+            <div className="mono" style={{ color: '#38bdf8', fontWeight: 600, fontSize: '12px' }}>
+              Jupiter V2 Managed Landing
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '10px', marginTop: '2px' }}>
+              Strict 1-BUY execution → Auto-Disarm on broadcast
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Safety Status & Controls */}
       <div
         style={{
