@@ -96,7 +96,8 @@ export function createApiServer() {
         const meta = await tokenMetadataService.getTokenMetadata(order.token_mint);
 
         const followerPrice = order.effective_price || 0;
-        const traderPrice = order.target_price || (followerPrice > 0 ? followerPrice * 0.985 : 0);
+        const hasMeasuredTargetPrice = Boolean(order.target_price && order.target_price > 0);
+        const traderPrice = hasMeasuredTargetPrice ? order.target_price : (followerPrice > 0 ? followerPrice * 0.985 : 0);
 
         const totalSupply = 1_000_000_000;
         let followerMarketCap = meta && meta.fdvUsd && meta.fdvUsd > 0
@@ -111,14 +112,19 @@ export function createApiServer() {
         }
 
         const isBuy = order.side === 'BUY';
-        const traderSpentSol = isBuy
-          ? (order.target_in_raw ? Number(order.target_in_raw) / 1e9 : 1.5)
-          : (order.target_out_raw ? Number(order.target_out_raw) / 1e9 : 1.5);
+        const hasMeasuredTargetSpend = Boolean(isBuy ? order.target_in_raw : order.target_out_raw);
         const followerSpentSol = isBuy
           ? (Number(order.in_amount_raw || 0) / 1e9)
           : (Number(order.out_amount_raw || 0) / 1e9);
 
-        const entryGapPct = traderPrice > 0 ? ((followerPrice - traderPrice) / traderPrice) * 100 : 1.5;
+        const traderSpentSol = hasMeasuredTargetSpend
+          ? (isBuy ? Number(order.target_in_raw) / 1e9 : Number(order.target_out_raw) / 1e9)
+          : (followerSpentSol > 0 ? followerSpentSol / (config.COPY_RATIO || 0.05) : 0);
+
+        const hasMeasuredLatency = Boolean(order.l_decision_ms && order.l_decision_ms > 0);
+        const entryGapPct = traderPrice > 0 && followerPrice > 0
+          ? ((followerPrice - traderPrice) / traderPrice) * 100
+          : 0;
 
         return {
           ...order,
@@ -136,8 +142,11 @@ export function createApiServer() {
             followerSpentUsd: Number((followerSpentSol * solPriceUsd).toFixed(2)),
             entryGapPct: Number(entryGapPct.toFixed(2)),
             entryGapBps: Math.round(entryGapPct * 100),
-            reactionLatencyMs: Number((order.l_decision_ms || 7.6).toFixed(2)),
-            targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+            reactionLatencyMs: hasMeasuredLatency ? Number(order.l_decision_ms.toFixed(2)) : null,
+            targetWallet: order.target_wallet || config.WATCHED_WALLETS[0],
+            isTargetPriceEstimated: !hasMeasuredTargetPrice,
+            isTargetSpentEstimated: !hasMeasuredTargetSpend,
+            isLatencyEstimated: !hasMeasuredLatency,
           },
         };
       })
@@ -169,6 +178,26 @@ export function createApiServer() {
     db.upsertWatchedWallet(wallet);
     signalManager.refreshWallets();
     res.json({ success: true });
+  });
+
+  app.get('/api/risk', (_req: Request, res: Response) => {
+    res.json({
+      circuitBreakerTripped: riskEngine.isTripped(),
+      consecutiveErrors: riskEngine.getConsecutiveErrors(),
+      consecutiveErrorLimit: config.CONSECUTIVE_ERROR_LIMIT,
+      dailyLossSol: Number(riskEngine.getDailyLossLamports()) / 1e9,
+      dailyLossLimitSol: config.DAILY_LOSS_LIMIT_SOL,
+      maxTotalExposureSol: config.MAX_TOTAL_EXPOSURE_SOL,
+      minSolReserveSol: config.MIN_SOL_RESERVE_SOL,
+      maxSignalAgeMs: config.MAX_SIGNAL_AGE_MS,
+      maxEntryGapBps: config.MAX_ENTRY_GAP_BPS,
+      maxSlippageBps: config.MAX_SLIPPAGE_BPS,
+      mintBlacklist: riskEngine.getMintBlacklist(),
+      defaultSizingMode: config.DEFAULT_SIZING_MODE,
+      fixedBuySol: config.FIXED_BUY_SOL,
+      copyRatio: config.COPY_RATIO,
+      maxBuySol: config.MAX_BUY_SOL,
+    });
   });
 
   app.post('/api/circuit-breaker/reset', (_req: Request, res: Response) => {

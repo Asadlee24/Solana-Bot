@@ -191,6 +191,18 @@ export class RiskEngine {
   public isTripped(): boolean {
     return this.circuitBreakerTripped;
   }
+
+  public getConsecutiveErrors(): number {
+    return this.consecutiveErrors;
+  }
+
+  public getDailyLossLamports(): bigint {
+    return this.dailyLossLamports;
+  }
+
+  public getMintBlacklist(): string[] {
+    return Array.from(this.mintBlacklist);
+  }
 }
 
 export const riskEngine = new RiskEngine();

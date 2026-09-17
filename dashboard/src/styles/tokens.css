@@ -1,0 +1,62 @@
+:root {
+  /* Terminal Backgrounds */
+  --bg-canvas: #07090d;
+  --bg-sidebar: #0a0e14;
+  --bg-topbar: rgba(13, 17, 23, 0.88);
+  --bg-surface: #0d1117;
+  --bg-card: #10151d;
+  --bg-card-hover: #141b25;
+  --bg-elevated: #161e2a;
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-medium: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-solana-green: rgba(20, 241, 149, 0.35);
+  --border-solana-purple: rgba(153, 69, 255, 0.35);
+
+  /* Typography Colors */
+  --text-primary: #f4f7fb;
+  --text-secondary: #8993a4;
+  --text-muted: #596273;
+  --text-disabled: #384152;
+
+  /* Solana Ecosystem Accents */
+  --sol-green: #14f195;
+  --sol-purple: #9945ff;
+  --accent-cyan: #29d4ff;
+
+  /* Trading State Colors */
+  --trade-buy: #10b981;
+  --trade-buy-bg: rgba(16, 185, 129, 0.12);
+  --trade-buy-border: rgba(16, 185, 129, 0.28);
+
+  --trade-sell: #ef4444;
+  --trade-sell-bg: rgba(239, 68, 68, 0.12);
+  --trade-sell-border: rgba(239, 68, 68, 0.28);
+
+  --status-warn: #f59e0b;
+  --status-warn-bg: rgba(245, 158, 11, 0.12);
+  --status-warn-border: rgba(245, 158, 11, 0.28);
+
+  --mode-paper: #9945ff;
+  --mode-paper-bg: rgba(153, 69, 255, 0.12);
+  --mode-paper-border: rgba(153, 69, 255, 0.3);
+
+  --mode-live: #ef4444;
+  --mode-live-bg: rgba(239, 68, 68, 0.16);
+  --mode-live-border: rgba(239, 68, 68, 0.45);
+
+  /* Fonts */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Sizing & Transitions */
+  --sidebar-w: 230px;
+  --sidebar-collapsed-w: 68px;
+  --topbar-h: 56px;
+  --ease-fast: 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
