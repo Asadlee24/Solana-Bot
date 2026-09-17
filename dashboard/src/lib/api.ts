@@ -1,35 +1,63 @@
 import { LatencySample, Order, Position, RiskConfig, Telemetry, WatchedWallet } from '../types/dashboard';
 
-const API_BASE = '';
+export function getApiBase(): string {
+  if (typeof window !== 'undefined') {
+    const saved = window.localStorage.getItem('solana_bot_api_url');
+    if (saved && saved.trim()) {
+      return saved.trim().replace(/\/+$/, '');
+    }
+  }
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  return '';
+}
+
+export function setApiBase(url: string): void {
+  if (typeof window !== 'undefined') {
+    const trimmed = url.trim().replace(/\/+$/, '');
+    if (trimmed) {
+      window.localStorage.setItem('solana_bot_api_url', trimmed);
+    } else {
+      window.localStorage.removeItem('solana_bot_api_url');
+    }
+  }
+}
+
+async function safeJsonFetch<T>(endpoint: string, init?: RequestInit): Promise<T> {
+  const base = getApiBase();
+  const url = `${base}${endpoint}`;
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error || `HTTP ${res.status}: ${res.statusText}`);
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error(`Expected JSON but received ${contentType || 'non-JSON response'} from ${endpoint}`);
+  }
+  return res.json();
+}
 
 export async function fetchTelemetry(): Promise<Telemetry> {
-  const res = await fetch(`${API_BASE}/api/telemetry`);
-  if (!res.ok) throw new Error(`Telemetry HTTP ${res.status}`);
-  return res.json();
+  return safeJsonFetch<Telemetry>('/api/telemetry');
 }
 
 export async function fetchOrders(limit = 50): Promise<Order[]> {
-  const res = await fetch(`${API_BASE}/api/orders?limit=${limit}`);
-  if (!res.ok) throw new Error(`Orders HTTP ${res.status}`);
-  return res.json();
+  return safeJsonFetch<Order[]>(`/api/orders?limit=${limit}`);
 }
 
 export async function fetchPositions(): Promise<Position[]> {
-  const res = await fetch(`${API_BASE}/api/positions`);
-  if (!res.ok) throw new Error(`Positions HTTP ${res.status}`);
-  return res.json();
+  return safeJsonFetch<Position[]>('/api/positions');
 }
 
 export async function fetchLatency(limit = 100): Promise<LatencySample[]> {
-  const res = await fetch(`${API_BASE}/api/latency?limit=${limit}`);
-  if (!res.ok) throw new Error(`Latency HTTP ${res.status}`);
-  return res.json();
+  return safeJsonFetch<LatencySample[]>(`/api/latency?limit=${limit}`);
 }
 
 export async function fetchWallets(): Promise<WatchedWallet[]> {
-  const res = await fetch(`${API_BASE}/api/wallets`);
-  if (!res.ok) throw new Error(`Wallets HTTP ${res.status}`);
-  return res.json();
+  return safeJsonFetch<WatchedWallet[]>('/api/wallets');
 }
 
 export async function addWallet(wallet: {
@@ -41,7 +69,7 @@ export async function addWallet(wallet: {
   copyRatio?: number;
   maxBuyLamports?: string;
 }): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/api/wallets`, {
+  return safeJsonFetch<{ success: boolean }>('/api/wallets', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -54,29 +82,22 @@ export async function addWallet(wallet: {
       max_buy_raw: wallet.maxBuyLamports || '1000000000',
     }),
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Add wallet HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function fetchRiskConfig(): Promise<RiskConfig> {
-  const res = await fetch(`${API_BASE}/api/risk`);
-  if (!res.ok) throw new Error(`Risk HTTP ${res.status}`);
-  return res.json();
+  return safeJsonFetch<RiskConfig>('/api/risk');
 }
 
 export async function resetCircuitBreaker(): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/api/circuit-breaker/reset`, {
+  return safeJsonFetch<{ success: boolean }>('/api/circuit-breaker/reset', {
     method: 'POST',
   });
-  if (!res.ok) throw new Error(`Reset HTTP ${res.status}`);
-  return res.json();
 }
 
 export async function triggerSimulationSwap(targetWallet: string, tokenMint: string): Promise<boolean> {
-  const res = await fetch(`${API_BASE}/webhook/helius`, {
+  const base = getApiBase();
+  const url = `${base}/webhook/helius`;
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify([
@@ -110,16 +131,11 @@ export async function sellPosition(
   positionId: string,
   fraction = 1.0
 ): Promise<{ success: boolean; order: any; position: any }> {
-  const res = await fetch(`${API_BASE}/api/positions/${positionId}/sell`, {
+  return safeJsonFetch<{ success: boolean; order: any; position: any }>(`/api/positions/${positionId}/sell`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fraction }),
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Sell position HTTP ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function closePosition(
@@ -127,4 +143,3 @@ export async function closePosition(
 ): Promise<{ success: boolean; order: any; position: any }> {
   return sellPosition(positionId, 1.0);
 }
-

@@ -22,6 +22,8 @@ data/test_*.db
 # Build outputs
 dist/
 build/
+dashboard/dist/
+public/
 
 # Logs
 npm-debug.log*

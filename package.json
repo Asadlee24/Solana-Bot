@@ -6,13 +6,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "build": "vite build dashboard && node scripts/post-build.js",
+    "build:server": "tsc",
+    "build:all": "vite build dashboard && node scripts/post-build.js && tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "replay": "tsx src/cli/replay-cli.ts",
     "simulate": "tsx src/cli/simulate-trade.ts",
     "dashboard:dev": "vite dashboard --port 3000",
-    "dashboard:build": "vite build dashboard"
+    "dashboard:build": "vite build dashboard && node scripts/post-build.js"
   },
   "keywords": [
     "solana",

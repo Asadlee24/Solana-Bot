@@ -3,6 +3,8 @@ import {
   Menu,
   Play,
   RefreshCw,
+  Server,
+  Settings,
   ShieldCheck,
   ShieldX,
   Target,
@@ -12,6 +14,7 @@ import {
 import React, { useEffect, useState } from 'react';
 import { formatClockTime, formatShortAddress, formatUptime } from '../../lib/format';
 import { NavigationTab, StreamStatus, Telemetry } from '../../types/dashboard';
+import { ApiConfigModal } from '../common/ApiConfigModal';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
 import { StatusDot } from '../common/StatusDot';
@@ -38,6 +41,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   targetWallet = 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
 }) => {
   const [localTime, setLocalTime] = useState<string>(formatClockTime(Date.now()));
+  const [isApiConfigOpen, setIsApiConfigOpen] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -79,7 +83,12 @@ export const Topbar: React.FC<TopbarProps> = ({
 
       <div className="topbar-right">
         {/* Stream Status Cluster */}
-        <div className="topbar-cluster-item" title={`Signal Feed: ${streamStatus}`}>
+        <div
+          className="topbar-cluster-item"
+          onClick={() => setIsApiConfigOpen(true)}
+          title={`Signal Feed: ${streamStatus} — Click to configure Bot Backend API URL`}
+          style={{ cursor: 'pointer' }}
+        >
           {streamStatus === 'CONNECTED' ? (
             <Wifi size={14} color="#10b981" />
           ) : (
@@ -102,6 +111,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               ? 'RECONNECTING'
               : 'OFFLINE'}
           </span>
+          <Settings size={11} color="var(--text-muted)" style={{ marginLeft: 3, opacity: 0.7 }} />
         </div>
 
         {/* Target Trader Wallet Chip */}
@@ -133,6 +143,16 @@ export const Topbar: React.FC<TopbarProps> = ({
           <span className="uptime-tag">UP: {formatUptime(telemetry?.uptimeSeconds)}</span>
         </div>
 
+        {/* Backend API Config Button */}
+        <button
+          type="button"
+          className="btn-topbar-refresh"
+          onClick={() => setIsApiConfigOpen(true)}
+          title="Backend API Connection Settings"
+        >
+          <Server size={14} />
+        </button>
+
         {/* Developer Simulation Trigger (Secondary Button) */}
         {!isLive && (
           <button
@@ -157,6 +177,12 @@ export const Topbar: React.FC<TopbarProps> = ({
           <RefreshCw size={14} />
         </button>
       </div>
+
+      <ApiConfigModal
+        isOpen={isApiConfigOpen}
+        onClose={() => setIsApiConfigOpen(false)}
+        onSaved={onRefresh}
+      />
     </header>
   );
 };

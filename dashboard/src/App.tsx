@@ -23,6 +23,7 @@ export default function App() {
     wallets,
     riskConfig,
     isLoading,
+    lastRefreshedAt,
     streamStatus,
     liveEvents,
     isStreamPaused,

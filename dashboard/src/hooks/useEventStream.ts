@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { getApiBase } from '../lib/api';
 import { LiveConsoleEvent, StreamStatus } from '../types/dashboard';
 
 interface UseEventStreamOptions {
@@ -35,7 +36,9 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
     setStatus('RECONNECTING');
 
     try {
-      const es = new EventSource('/api/events/stream');
+      const apiBase = getApiBase();
+      const streamUrl = `${apiBase}/api/events/stream`;
+      const es = new EventSource(streamUrl);
       eventSourceRef.current = es;
 
       es.onopen = () => {
