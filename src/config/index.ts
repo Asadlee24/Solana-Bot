@@ -60,7 +60,7 @@ const ConfigSchema = z.object({
   JITO_TIP_LAMPORTS: z.coerce.number().default(100_000), // 0.0001 SOL tip
 
   // Web Server & Dashboard
-  API_PORT: z.coerce.number().default(3001),
+  API_PORT: z.coerce.number().default(process.env.PORT ? Number(process.env.PORT) : 3001),
   DASHBOARD_PORT: z.coerce.number().default(3000),
 
   // Telegram Notifications (Async off hot path)
