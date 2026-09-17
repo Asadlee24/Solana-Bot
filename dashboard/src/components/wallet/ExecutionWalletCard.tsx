@@ -113,7 +113,13 @@ export const ExecutionWalletCard: React.FC = () => {
 
         <div className="card-actions-cluster">
           <Badge variant={isLive ? (isArmed ? 'live' : 'danger') : 'paper'} size="sm">
-            {isLive ? (isArmed ? '● LIVE ARMED' : '○ LIVE DISARMED') : 'PAPER SIMULATION'}
+            {isLive
+              ? (isArmed
+                  ? '● LIVE ARMED'
+                  : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
+                      ? 'SMOKE TEST COMPLETE'
+                      : '○ LIVE DISARMED'))
+              : 'PAPER SIMULATION'}
           </Badge>
           <button
             type="button"
@@ -200,7 +206,11 @@ export const ExecutionWalletCard: React.FC = () => {
               <ShieldAlert size={14} color="#ef4444" />
             )}
             <span style={{ color: isArmed ? '#10b981' : '#ef4444' }}>
-              {isArmed ? 'Execution Engine Armed and Ready' : 'Execution Engine Disarmed'}
+              {isArmed
+                ? 'Execution Engine Armed and Ready'
+                : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
+                    ? 'SMOKE TEST COMPLETE — LIVE DISARMED'
+                    : 'Execution Engine Disarmed')}
             </span>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>

@@ -67,6 +67,21 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({ order, onC
               >
                 {order.status}
               </Badge>
+              {order.landing_provider && (
+                <span
+                  style={{
+                    background: 'rgba(20, 241, 149, 0.15)',
+                    color: '#14f195',
+                    border: '1px solid rgba(20, 241, 149, 0.4)',
+                    borderRadius: '4px',
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                  }}
+                >
+                  {order.landing_provider}
+                </span>
+              )}
             </div>
           </div>
 
@@ -184,6 +199,29 @@ export const TradeDetailDrawer: React.FC<TradeDetailDrawerProps> = ({ order, onC
                 <span className="comp-lbl">Capital Spent</span>
                 <span className="comp-val mono">
                   {comp?.followerSpentSol ? formatSol(comp.followerSpentSol, 4) : '—'}
+                </span>
+              </div>
+
+              <div className="comp-row">
+                <span className="comp-lbl">Landing Route</span>
+                <span className="comp-val mono text-cyan">
+                  {order.landing_provider || (order.mode === 'LIVE' ? 'JUPITER_EXECUTE' : 'SIMULATION')}
+                </span>
+              </div>
+
+              <div className="comp-row">
+                <span className="comp-lbl">{isBuy ? 'Tokens Received' : 'SOL Received'}</span>
+                <span className="comp-val mono text-cyan">
+                  {isBuy
+                    ? `${(Number(order.actual_out_raw || order.out_amount_raw || 0) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${meta?.symbol || 'TOKENS'}`
+                    : `${(Number(order.actual_out_raw || order.out_amount_raw || 0) / 1e9).toFixed(4)} SOL`}
+                </span>
+              </div>
+
+              <div className="comp-row">
+                <span className="comp-lbl">Network & Priority Fee</span>
+                <span className="comp-val mono">
+                  {order.fee_raw ? `${(Number(order.fee_raw) / 1e9).toFixed(6)} SOL` : '—'}
                 </span>
               </div>
 

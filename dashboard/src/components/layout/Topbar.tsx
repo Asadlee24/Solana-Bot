@@ -204,7 +204,11 @@ export const Topbar: React.FC<TopbarProps> = ({
                 border: `1px solid ${liveStatus?.isArmed ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
               }}
             >
-              {liveStatus?.isArmed ? 'LIVE ARMED' : 'LIVE DISARMED'}
+              {liveStatus?.isArmed
+                ? 'LIVE ARMED'
+                : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
+                    ? 'SMOKE TEST COMPLETE'
+                    : 'LIVE DISARMED')}
             </span>
           )}
         </div>
@@ -264,7 +268,13 @@ export const Topbar: React.FC<TopbarProps> = ({
 
         {/* Execution Mode Badge */}
         <Badge variant={isLive ? (liveStatus?.isArmed ? 'live' : 'warning') : 'paper'} size="sm">
-          {isLive ? (liveStatus?.isArmed ? '● LIVE ARMED' : '○ LIVE DISARMED') : 'PAPER SIM'}
+          {isLive
+            ? (liveStatus?.isArmed
+                ? '● LIVE ARMED'
+                : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
+                    ? '✔ SMOKE TEST COMPLETE'
+                    : '○ LIVE DISARMED'))
+            : 'PAPER SIM'}
         </Badge>
 
         {/* Circuit Breaker Status */}

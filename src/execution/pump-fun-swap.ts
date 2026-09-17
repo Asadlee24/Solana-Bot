@@ -149,8 +149,11 @@ export class PumpFunSwapAdapter {
   }
 
   /**
-   * Computes exact on-chain executable quote from constant-product bonding curve reserves.
-   * Eliminates arbitrary estimated price execution.
+   * NOTE: Direct Pump bonding-curve AMM quote calculation.
+   * Current official Pump.fun bonding-curve documentation states the current total bonding-curve trading fee is 1.25%
+   * (0.3% creator fee + 0.95% protocol fee).
+   * Direct Pump execution is DISABLED when SMOKE_TEST_FORCE_JUPITER=true.
+   * This calculation must NOT be claimed as current for live execution without dynamic protocol fee retrieval.
    */
   public calculateQuote(
     state: OnChainBondingCurveState,
@@ -184,9 +187,7 @@ export class PumpFunSwapAdapter {
     }
 
     if (side === 'BUY') {
-      // In amount is SOL lamports. 1% fee deduction
       const netSolIn = (inAmountRaw * 99n) / 100n;
-      // Constant product: deltaTokens = (vTokens * netSolIn) / (vSol + netSolIn)
       const expectedOutTokens = (vTokens * netSolIn) / (vSol + netSolIn);
       const minOutTokens = (expectedOutTokens * BigInt(10000 - slippageBps)) / 10000n;
 
@@ -203,9 +204,7 @@ export class PumpFunSwapAdapter {
         pairAsset: state.pairAsset,
       };
     } else {
-      // In amount is Tokens.
       const tokensIn = inAmountRaw;
-      // Constant product: deltaSol = (vSol * tokensIn) / (vTokens + tokensIn)
       const expectedSol = (vSol * tokensIn) / (vTokens + tokensIn);
       const netSolOut = (expectedSol * 99n) / 100n;
       const minSolOut = (netSolOut * BigInt(10000 - slippageBps)) / 10000n;
@@ -227,8 +226,8 @@ export class PumpFunSwapAdapter {
 
   /**
    * Intelligently executes BUY:
-   * - If bonding curve is active: builds direct verified on-chain curve transaction.
-   * - If graduated, USDC-paired, or curve closed: routes through Jupiter Swap API V2 / PumpSwap.
+   * - When SMOKE_TEST_FORCE_JUPITER=true (or if graduated / USDC-paired): routes via Jupiter Swap API V2.
+   * - Direct bonding curve execution is disabled during the smoke test.
    */
   public async buildAndSignBuy(
     keypair: Keypair,
@@ -238,9 +237,14 @@ export class PumpFunSwapAdapter {
   ): Promise<PumpFunBuildResult> {
     const curveState = await this.getBondingCurveState(mintAddress);
 
-    // If token graduated or paired with USDC, route via authoritative Jupiter Swap API V2
-    if (curveState.complete || !curveState.isInitialized || curveState.pairAsset === 'USDC') {
-      console.info(`[PumpFun Routing] Token ${mintAddress} is graduated or USDC-paired. Routing via Jupiter Swap API V2.`);
+    // If smoke test forces Jupiter, or token graduated, or paired with USDC, route via Jupiter Swap API V2
+    if (
+      (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
+      curveState.complete ||
+      !curveState.isInitialized ||
+      curveState.pairAsset === 'USDC'
+    ) {
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         WSOL_MINT,
         mintAddress,
@@ -339,8 +343,13 @@ export class PumpFunSwapAdapter {
   ): Promise<PumpFunBuildResult> {
     const curveState = await this.getBondingCurveState(mintAddress);
 
-    if (curveState.complete || !curveState.isInitialized || curveState.pairAsset === 'USDC') {
-      console.info(`[PumpFun Routing] Token ${mintAddress} is graduated or USDC-paired. Routing sell via Jupiter Swap API V2.`);
+    if (
+      (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
+      curveState.complete ||
+      !curveState.isInitialized ||
+      curveState.pairAsset === 'USDC'
+    ) {
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed sell via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         mintAddress,
         WSOL_MINT,

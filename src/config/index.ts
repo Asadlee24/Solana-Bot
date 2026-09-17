@@ -31,11 +31,11 @@ const ConfigSchema = z.object({
   DEFAULT_SIZING_MODE: z.enum(['FIXED_SIZE', 'TARGET_NOTIONAL_SCALAR', 'CAPPED_PROPORTIONAL_HYBRID']).default('FIXED_SIZE'),
   FIXED_BUY_SOL: z.coerce.number().default(0.01), // Conservative 0.01 SOL smoke test
   COPY_RATIO: z.coerce.number().default(0.05), // 5% of target spend in scalar mode
-  MAX_BUY_SOL: z.coerce.number().default(0.02),
+  MAX_BUY_SOL: z.coerce.number().default(0.01),
 
   // Risk & Safety Parameters
-  MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(0.05),
-  MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.05), // Floor reserved for rent and fees
+  MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(0.02),
+  MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.02), // Floor reserved for rent and fees (0.02 SOL)
   MAX_SIGNAL_AGE_MS: z.coerce.number().default(1500), // Max ms before signal discarded as stale
   MAX_ENTRY_GAP_BPS: z.coerce.number().default(200), // 2.0% max price deterioration vs target
   MAX_SLIPPAGE_BPS: z.coerce.number().default(150), // 1.5% max AMM slippage
@@ -49,6 +49,7 @@ const ConfigSchema = z.object({
   LIVE_REQUIRE_SIMULATION: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
   MAINNET_SMOKE_TEST_MODE: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
   SMOKE_TEST_ALLOWED_SIDE: z.enum(['BUY', 'SELL', 'BOTH']).default('BUY'),
+  SMOKE_TEST_FORCE_JUPITER: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
 
   // Helius Sender Configuration & Tip Validation
   HELIUS_SENDER_MODE: z.enum(['SWQOS', 'MAX']).default('SWQOS'),

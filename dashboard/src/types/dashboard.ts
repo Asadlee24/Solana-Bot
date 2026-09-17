@@ -94,12 +94,22 @@ export interface Order {
   target_price?: number;
   metadata?: TokenMeta;
   comparison?: OrderComparison;
+  landing_provider?: string;
+  actual_in_raw?: string;
+  actual_out_raw?: string;
+  actual_price?: number;
+  actual_fee_raw?: string;
+  reconciliation_source?: string;
 }
 
 export interface LiveEngineStatus {
   executionMode: 'PAPER' | 'LIVE';
   isArmed: boolean;
   disarmReason: string;
+  smokeTestMode?: boolean;
+  smokeTestTradesCount?: number;
+  smokeTestAllowedSide?: string;
+  smokeTestForceJupiter?: boolean;
   liveTradingAckConfigured: boolean;
   wallet: {
     isConfigured: boolean;

@@ -143,10 +143,10 @@ describe('Real Mainnet Execution Safety & Verification Suite', () => {
       try {
         (config as any).FOLLOWER_PRIVATE_KEY = validBase58Key;
         const manager = new ExecutionWalletManager();
-        (manager as any).cachedBalanceLamports = solToLamportsBigInt(0.06);
+        (manager as any).cachedBalanceLamports = solToLamportsBigInt(0.025);
 
-        // Buy 0.02 SOL: 0.06 - (0.02 + 0.0001175) = ~0.03988 SOL (< 0.05 SOL reserve)
-        const check = manager.checkSpendable(solToLamportsBigInt(0.02), 50_000n, 250_000n, 100_000n);
+        // Buy 0.01 SOL with 0.025 SOL balance: 0.025 - (0.01 + 0.0001175) = ~0.01488 SOL (< 0.02 SOL reserve)
+        const check = manager.checkSpendable(solToLamportsBigInt(0.01), 50_000n, 250_000n, 100_000n);
         expect(check.allowed).toBe(false);
         expect(check.reason).toContain('breach minimum SOL reserve floor');
       } finally {
@@ -728,6 +728,194 @@ describe('Real Mainnet Execution Safety & Verification Suite', () => {
       } finally {
         (config as any).SMOKE_TEST_ALLOWED_SIDE = origSide;
         (config as any).MAINNET_SMOKE_TEST_MODE = origSmoke;
+      }
+    });
+  });
+
+  describe('11. First Smoke Test Forced Jupiter V2 & Safety Sizing', () => {
+    it('forces Jupiter Swap API V2 managed path for active Pump.fun token when SMOKE_TEST_FORCE_JUPITER=true', async () => {
+      const engine = new LiveExecutionEngine();
+      (engine as any).isArmed = true;
+      (engine as any).smokeTestTradesCount = 0;
+
+      const origMode = config.MAINNET_SMOKE_TEST_MODE;
+      const origForceJup = config.SMOKE_TEST_FORCE_JUPITER;
+      const origKeypair = (executionWalletManager as any).keypair;
+      const origBalance = (executionWalletManager as any).cachedBalanceLamports;
+
+      const origCreate = jupiterSwapV2Adapter.createOrder;
+      const origSign = jupiterSwapV2Adapter.signOrder;
+      const origExecute = jupiterSwapV2Adapter.executeOrder;
+      const origReconcile = transactionSubmitter.reconcileStatus;
+
+      let jupiterOrderCreated = false;
+      let jupiterExecuteCalled = false;
+
+      const dummyMsg = new TransactionMessage({
+        payerKey: mockTestKeypair.publicKey,
+        recentBlockhash: 'GfDbMbtgVzK9yN5h9z9t9yZt1Zz1Zz1Zz1Zz1Zz1Zz1Z',
+        instructions: [],
+      }).compileToV0Message();
+      const dummyTx = new VersionedTransaction(dummyMsg);
+
+      try {
+        (config as any).MAINNET_SMOKE_TEST_MODE = true;
+        (config as any).SMOKE_TEST_FORCE_JUPITER = true;
+        (executionWalletManager as any).keypair = mockTestKeypair;
+        (executionWalletManager as any).cachedBalanceLamports = 1_000_000_000n;
+
+        jupiterSwapV2Adapter.createOrder = async () => {
+          jupiterOrderCreated = true;
+          return {
+            requestId: 'req_smoke_forced_jup',
+            transaction: Buffer.from(dummyTx.serialize()).toString('base64'),
+            inputMint: WSOL_MINT,
+            outputMint: 'PumpTokenActive1111111111111111111111111111',
+            inAmount: '10000000',
+            outAmount: '1500000',
+            lastValidBlockHeight: 310500888,
+            slippageBps: 150,
+          };
+        };
+
+        jupiterSwapV2Adapter.signOrder = async () => ({
+          transaction: dummyTx,
+          order: {
+            requestId: 'req_smoke_forced_jup',
+            transaction: '',
+            inputMint: WSOL_MINT,
+            outputMint: 'PumpTokenActive1111111111111111111111111111',
+            inAmount: '10000000',
+            outAmount: '1500000',
+            lastValidBlockHeight: 310500888,
+            slippageBps: 150,
+          },
+          outAmountRaw: '1500000',
+          effectivePriceSol: 0.0000066,
+          blockhashWithExpiry: {
+            blockhash: 'GfDbMbtgVzK9yN5h9z9t9yZt1Zz1Zz1Zz1Zz1Zz1Zz1Z',
+            lastValidBlockHeight: 310500888,
+          },
+        });
+
+        jupiterSwapV2Adapter.executeOrder = async () => {
+          jupiterExecuteCalled = true;
+          return {
+            status: 'Success',
+            signature: 'sig_smoke_test_jupiter_landed',
+            totalInputAmount: '10000000',
+            totalOutputAmount: '1490000',
+            inputAmountResult: '10000000',
+            outputAmountResult: '1490000',
+          };
+        };
+
+        transactionSubmitter.reconcileStatus = async () => ({
+          signature: 'sig_smoke_test_jupiter_landed',
+          status: 'CONFIRMED',
+          provider: 'JUPITER_EXECUTE',
+          slot: 285000200,
+          submittedAt: process.hrtime.bigint(),
+          confirmedAt: process.hrtime.bigint(),
+        });
+
+        const targetIntent: SwapIntent = {
+          targetSignature: 'sig_target_active_pump',
+          slot: 150,
+          targetWallet: 'TargetPumpWallet111111111111111111111111111',
+          venue: 'PUMPFUN', // Pump.fun venue!
+          side: 'BUY',
+          inputMint: WSOL_MINT,
+          outputMint: 'PumpTokenActive1111111111111111111111111111',
+          tokenMint: 'PumpTokenActive1111111111111111111111111111',
+          inputAmountRaw: '10000000',
+          outputAmountRaw: '1500000',
+          estimatedPrice: 0.0000066,
+          observedAt: process.hrtime.bigint(),
+          timestampMs: Date.now(),
+          rawProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+          confidence: 1.0,
+        };
+
+        const mirrorIntent: MirrorIntent = {
+          id: 'mirror_forced_jup_1',
+          targetSignature: targetIntent.targetSignature,
+          targetWallet: targetIntent.targetWallet,
+          side: 'BUY',
+          tokenMint: targetIntent.tokenMint,
+          inputMint: targetIntent.inputMint,
+          outputMint: targetIntent.outputMint,
+          requestedInAmountRaw: '10000000',
+          expectedOutAmountRaw: '1500000',
+          riskDecision: 'APPROVED',
+          createdAt: process.hrtime.bigint(),
+        };
+
+        const resultOrder = await engine.executeLiveTrade(targetIntent, mirrorIntent);
+
+        // Verification: Even for active Pump.fun token, Jupiter V2 managed route was forced!
+        expect(jupiterOrderCreated).toBe(true);
+        expect(jupiterExecuteCalled).toBe(true);
+        expect(resultOrder.landingProvider).toBe('JUPITER_EXECUTE');
+        expect(resultOrder.orderSignature).toBe('sig_smoke_test_jupiter_landed');
+        expect(resultOrder.status).toBe('FILLED');
+
+        // Verification: Database stores ACTUAL amounts rather than expected quote amounts
+        expect(resultOrder.inAmountRaw).toBe('10000000');
+        expect(resultOrder.outAmountRaw).toBe('1490000'); // Actual 1,490,000 from Jupiter execute, not 1,500,000 quote
+        expect(resultOrder.actualOutAmountRaw).toBe('1490000');
+
+        // Verification: Strict single buy auto-disarm occurred upon broadcast
+        expect(engine.getStatus().isArmed).toBe(false);
+        expect(engine.getStatus().disarmReason).toContain('SMOKE TEST BROADCAST SUBMITTED');
+      } finally {
+        (config as any).MAINNET_SMOKE_TEST_MODE = origMode;
+        (config as any).SMOKE_TEST_FORCE_JUPITER = origForceJup;
+        (executionWalletManager as any).keypair = origKeypair;
+        (executionWalletManager as any).cachedBalanceLamports = origBalance;
+        jupiterSwapV2Adapter.createOrder = origCreate;
+        jupiterSwapV2Adapter.signOrder = origSign;
+        jupiterSwapV2Adapter.executeOrder = origExecute;
+        transactionSubmitter.reconcileStatus = origReconcile;
+      }
+    });
+
+    it('requires minimum 0.03 SOL balance to arm with FIXED_BUY_SOL=0.01 and MIN_SOL_RESERVE_SOL=0.02', async () => {
+      const engine = new LiveExecutionEngine();
+      const origKey = config.FOLLOWER_PRIVATE_KEY;
+      const origMode = config.EXECUTION_MODE;
+      const origAck = config.LIVE_TRADING_ACK;
+      const origReserve = config.MIN_SOL_RESERVE_SOL;
+      const origBuy = config.FIXED_BUY_SOL;
+
+      try {
+        (config as any).EXECUTION_MODE = 'LIVE';
+        (config as any).LIVE_TRADING_ACK = 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK';
+        (config as any).FOLLOWER_PRIVATE_KEY = validBase58Key;
+        (config as any).MIN_SOL_RESERVE_SOL = 0.02;
+        (config as any).FIXED_BUY_SOL = 0.01;
+
+        // Sub-test A: Wallet funded with 0.025 SOL (< 0.03 SOL required) -> Disarmed
+        (executionWalletManager as any).cachedBalanceLamports = solToLamportsBigInt(0.025);
+        (executionWalletManager as any).connection.getBalance = async () => Number(solToLamportsBigInt(0.025));
+
+        const underfundedStatus = await engine.evaluateArmStatus();
+        expect(underfundedStatus.armed).toBe(false);
+        expect(underfundedStatus.reason).toContain('Minimum required for live operation is 0.0300 SOL');
+
+        // Sub-test B: Wallet funded with 0.04 SOL (> 0.03 SOL required) -> Armed
+        (executionWalletManager as any).cachedBalanceLamports = solToLamportsBigInt(0.04);
+        (executionWalletManager as any).connection.getBalance = async () => Number(solToLamportsBigInt(0.04));
+
+        const fundedStatus = await engine.evaluateArmStatus();
+        expect(fundedStatus.armed).toBe(true);
+        expect(fundedStatus.reason).toContain('LIVE ARMED');
+      } finally {
+        (config as any).EXECUTION_MODE = origMode;
+        (config as any).LIVE_TRADING_ACK = origAck;
+        (config as any).FOLLOWER_PRIVATE_KEY = origKey;
+        (config as any).MIN_SOL_RESERVE_SOL = origReserve;
+        (config as any).FIXED_BUY_SOL = origBuy;
       }
     });
   });

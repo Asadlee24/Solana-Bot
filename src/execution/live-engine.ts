@@ -111,6 +111,7 @@ export class LiveExecutionEngine {
     smokeTestMode: boolean;
     smokeTestTradesCount: number;
     smokeTestAllowedSide: string;
+    smokeTestForceJupiter: boolean;
   } {
     return {
       isArmed: this.isArmed,
@@ -119,6 +120,7 @@ export class LiveExecutionEngine {
       smokeTestMode: config.MAINNET_SMOKE_TEST_MODE,
       smokeTestTradesCount: this.smokeTestTradesCount,
       smokeTestAllowedSide: config.SMOKE_TEST_ALLOWED_SIDE,
+      smokeTestForceJupiter: config.SMOKE_TEST_FORCE_JUPITER,
     };
   }
 
@@ -143,13 +145,14 @@ export class LiveExecutionEngine {
    * STRICT ENFORCEMENT:
    * 1. Managed Jupiter V2 (/order -> /execute) with returned status, signature, and amounts.
    * 2. No mint-suffix routing. Decisions based 100% on on-chain curve state.
-   * 3. Real Helius Sender or explicit Standard RPC landing provider labeling.
-   * 4. PROCESSED does not equal FILLED. Requires on-chain CONFIRMED + balance reconciliation.
-   * 5. Actual settlement values reconciled into PositionEngine; quoted values preserved as EXPECTED.
-   * 6. Jupiter blockhash & lastValidBlockHeight preserved from order.
-   * 7. Fee-unit correctness distinguishing micro-lamports and lamports.
-   * 8. Immediate auto-disarm upon broadcast (SUBMITTED) to prevent concurrent executions.
-   * 9. Smoke test BUY-only guard enforced.
+   * 3. When SMOKE_TEST_FORCE_JUPITER=true, all smoke-test swaps are forced to Jupiter Swap API V2.
+   * 4. Real Helius Sender or explicit Standard RPC landing provider labeling.
+   * 5. PROCESSED does not equal FILLED. Requires on-chain CONFIRMED + balance reconciliation.
+   * 6. Actual settlement values reconciled into PositionEngine; quoted values preserved as EXPECTED.
+   * 7. Jupiter blockhash & lastValidBlockHeight preserved from order.
+   * 8. Fee-unit correctness distinguishing micro-lamports and lamports.
+   * 9. Immediate auto-disarm upon broadcast (SUBMITTED) to prevent concurrent executions.
+   * 10. Smoke test BUY-only guard enforced.
    */
   public async executeLiveTrade(
     targetIntent: SwapIntent,
@@ -245,9 +248,11 @@ export class LiveExecutionEngine {
       let isJupiterManaged = false;
       let jupOrderResponse: JupiterV2OrderResponse | undefined;
 
-      // 4. On-Chain Curve State Resolution (NO mint-suffix routing!)
+      // 4. Routing Decision: Force Jupiter for first smoke test or resolve on-chain curve state
+      const forceJupiter = config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER;
       let isDirectPumpBondingCurve = false;
-      if (targetIntent.venue === 'PUMPFUN') {
+
+      if (!forceJupiter && targetIntent.venue === 'PUMPFUN') {
         const curveState = await pumpFunSwapAdapter.getBondingCurveState(mirrorIntent.tokenMint);
         // Active bonding curve only if initialized, incomplete, and paired with SOL
         if (curveState.isInitialized && !curveState.complete && curveState.pairAsset === 'SOL') {
@@ -399,8 +404,15 @@ export class LiveExecutionEngine {
         order.actualExecutionPrice = settlement.actualExecutionPriceSol;
         order.actualFeeLamports = settlement.actualFeeLamports;
         order.actualPriorityFeeLamports = settlement.actualPriorityFeeLamports;
-        order.actualTipLamports = settlement.actualTipLamports;
         order.reconciliationSource = settlement.reconciliationSource;
+        // Requirement 6: The database stores ACTUAL amounts rather than expected quote amounts
+        order.inAmountRaw = order.actualInAmountRaw;
+        order.outAmountRaw = order.actualOutAmountRaw;
+        order.effectivePrice = settlement.actualExecutionPriceSol;
+        order.routeFeeLamports = settlement.actualFeeLamports;
+        order.priorityFeeLamports = settlement.actualPriorityFeeLamports;
+        order.tipLamports = settlement.actualTipLamports;
+        order.landingProvider = landingProvider;
         db.saveMirrorOrder(order);
 
         // 9. Record ACTUAL amounts in PositionEngine (Never quote estimates!)

@@ -227,7 +227,7 @@ export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }
 
                     {/* Status & Solscan Link */}
                     <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
                         <Badge
                           variant={
                             order.status === 'FILLED' || order.status === 'CONFIRMED'
@@ -242,6 +242,21 @@ export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }
                         >
                           {order.status}
                         </Badge>
+                        {order.landing_provider && (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              fontWeight: 700,
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              background: 'rgba(20, 241, 149, 0.12)',
+                              color: '#14f195',
+                              border: '1px solid rgba(20, 241, 149, 0.3)',
+                            }}
+                          >
+                            {order.landing_provider}
+                          </span>
+                        )}
                         {order.signature && !order.signature.startsWith('sim_') && (
                           <a
                             href={`https://solscan.io/tx/${order.signature}`}

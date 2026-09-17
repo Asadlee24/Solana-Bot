@@ -26,8 +26,8 @@ describe('Risk Engine & Circuit Breakers', () => {
   it('approves standard buy when balance and exposure are sufficient', () => {
     const res = engine.evaluateIntent(
       validIntent,
-      5_000_000_000n, // 5 SOL balance
-      1_000_000_000n  // 1 SOL current exposure
+      50_000_000n, // 0.05 SOL balance (> 0.03 SOL min for 0.01 buy + 0.02 reserve)
+      5_000_000n   // 0.005 SOL current exposure (< 0.02 SOL max exposure)
     );
     expect(res.approved).toBe(true);
     expect(res.decision).toBe('APPROVED');
@@ -39,7 +39,7 @@ describe('Risk Engine & Circuit Breakers', () => {
       timestampMs: Date.now() - 3000, // 3000ms old (> 1500ms limit)
     };
 
-    const res = engine.evaluateIntent(staleIntent, 5_000_000_000n, 0n);
+    const res = engine.evaluateIntent(staleIntent, 50_000_000n, 0n);
     expect(res.approved).toBe(false);
     expect(res.decision).toBe('REJECTED_STALE');
   });
@@ -47,7 +47,7 @@ describe('Risk Engine & Circuit Breakers', () => {
   it('rejects buy when wallet balance would breach minimum fee reserve', () => {
     const res = engine.evaluateIntent(
       validIntent,
-      250_000_000n, // 0.25 SOL balance (buying 0.1 SOL leaves 0.15 < 0.2 SOL reserve)
+      25_000_000n, // 0.025 SOL balance (buying 0.01 SOL leaves 0.015 < 0.02 SOL reserve)
       0n
     );
     expect(res.approved).toBe(false);

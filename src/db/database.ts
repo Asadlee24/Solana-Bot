@@ -123,7 +123,13 @@ export class DBManager {
           fee_raw TEXT DEFAULT '0',
           tip_raw TEXT DEFAULT '0',
           status TEXT NOT NULL,
-          error_message TEXT
+          error_message TEXT,
+          actual_in_raw TEXT,
+          actual_out_raw TEXT,
+          actual_price REAL,
+          actual_fee_raw TEXT,
+          landing_provider TEXT,
+          reconciliation_source TEXT
         );
         CREATE TABLE IF NOT EXISTS positions (
           id TEXT PRIMARY KEY,
@@ -167,9 +173,23 @@ export class DBManager {
           l_landing_ms REAL NOT NULL,
           l_economic_ms REAL,
           entry_gap_bps REAL
-        );
       `);
     }
+
+    // Incremental column migrations for existing tables
+    const safeAddColumn = (table: string, colDef: string) => {
+      try {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${colDef}`);
+      } catch {
+        // column already exists
+      }
+    };
+    safeAddColumn('mirror_orders', 'actual_in_raw TEXT');
+    safeAddColumn('mirror_orders', 'actual_out_raw TEXT');
+    safeAddColumn('mirror_orders', 'actual_price REAL');
+    safeAddColumn('mirror_orders', 'actual_fee_raw TEXT');
+    safeAddColumn('mirror_orders', 'landing_provider TEXT');
+    safeAddColumn('mirror_orders', 'reconciliation_source TEXT');
 
     // Seed default watched wallets if empty
     this.seedDefaultWallets();
@@ -336,8 +356,10 @@ export class DBManager {
         order_id, intent_id, target_signature, mode, side, token_mint,
         in_amount_raw, out_amount_raw, min_out_raw, effective_price,
         quote_at, signed_at, submitted_at, landed_at, signature,
-        fee_raw, tip_raw, status, error_message
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        fee_raw, tip_raw, status, error_message,
+        actual_in_raw, actual_out_raw, actual_price, actual_fee_raw,
+        landing_provider, reconciliation_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     stmt.run(
       order.orderId,
@@ -358,7 +380,13 @@ export class DBManager {
       order.routeFeeLamports.toString(),
       order.tipLamports.toString(),
       order.status,
-      order.errorMessage ?? null
+      order.errorMessage ?? null,
+      order.actualInAmountRaw ?? null,
+      order.actualOutAmountRaw ?? null,
+      order.actualExecutionPrice ?? null,
+      order.actualFeeLamports ? order.actualFeeLamports.toString() : null,
+      order.landingProvider ?? null,
+      order.reconciliationSource ?? null
     );
   }
 
