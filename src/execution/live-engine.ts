@@ -169,7 +169,8 @@ export class LiveExecutionEngine {
     }
 
     // 2. Smoke Test Safeguards
-    if (config.MAINNET_SMOKE_TEST_MODE) {
+    const isManualExit = mirrorIntent.targetSignature?.startsWith('manual_exit_');
+    if (config.MAINNET_SMOKE_TEST_MODE && !isManualExit) {
       // S1: Smoke Test allowed side guard (default BUY only)
       if (
         config.SMOKE_TEST_ALLOWED_SIDE !== 'BOTH' &&

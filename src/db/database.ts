@@ -201,17 +201,10 @@ export class DBManager {
   }
 
   private seedDefaultWallets() {
-    // Delete any wallet that is NOT in config.WATCHED_WALLETS
+    // Ensure default config wallets exist without deleting user-added wallets
     if (config.WATCHED_WALLETS.length > 0) {
-      const placeholders = config.WATCHED_WALLETS.map(() => '?').join(',');
-      this.db.prepare(`DELETE FROM watched_wallets WHERE wallet NOT IN (${placeholders})`).run(...config.WATCHED_WALLETS);
-    }
-
-    const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM watched_wallets');
-    const row = countStmt.get() as { count: number };
-    if (row.count === 0 && config.WATCHED_WALLETS.length > 0) {
       const insertStmt = this.db.prepare(`
-        INSERT INTO watched_wallets (wallet, label, enabled, buy_mode, fixed_buy_raw, copy_ratio, max_buy_raw, created_at)
+        INSERT OR IGNORE INTO watched_wallets (wallet, label, enabled, buy_mode, fixed_buy_raw, copy_ratio, max_buy_raw, created_at)
         VALUES (?, ?, 1, ?, ?, ?, ?, ?)
       `);
       for (const w of config.WATCHED_WALLETS) {
@@ -226,6 +219,12 @@ export class DBManager {
         );
       }
     }
+  }
+
+  public deleteWatchedWallet(wallet: string): boolean {
+    const stmt = this.db.prepare('DELETE FROM watched_wallets WHERE wallet = ?');
+    const res = stmt.run(wallet);
+    return res.changes > 0;
   }
 
   // Idempotency check: record receipt and return true if brand new

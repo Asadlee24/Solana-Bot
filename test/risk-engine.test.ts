@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { config, solToLamportsBigInt } from '../src/config/index.js';
 import { RiskEngine } from '../src/engine/risk-engine.js';
 import { SwapIntent } from '../src/types/index.js';
 
@@ -24,10 +25,11 @@ describe('Risk Engine & Circuit Breakers', () => {
   };
 
   it('approves standard buy when balance and exposure are sufficient', () => {
+    const sufficientBal = solToLamportsBigInt(config.FIXED_BUY_SOL + config.MIN_SOL_RESERVE_SOL + 0.05);
     const res = engine.evaluateIntent(
       validIntent,
-      50_000_000n, // 0.05 SOL balance (> 0.03 SOL min for 0.01 buy + 0.02 reserve)
-      5_000_000n   // 0.005 SOL current exposure (< 0.02 SOL max exposure)
+      sufficientBal,
+      5_000_000n
     );
     expect(res.approved).toBe(true);
     expect(res.decision).toBe('APPROVED');

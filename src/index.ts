@@ -67,6 +67,11 @@ async function bootstrap() {
 
   heliusWs.start();
 
+  // Dynamically update WebSocket subscriptions whenever a wallet is added/removed
+  signalManager.on('walletsUpdated', () => {
+    heliusWs.resubscribe();
+  });
+
   // Start live mainnet RPC poller in parallel for 100% failover redundancy
   rpcPoller.start();
 

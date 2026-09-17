@@ -1,10 +1,11 @@
+import { PublicKey } from '@solana/web3.js';
 import { config } from '../config/index.js';
 import { db } from '../db/database.js';
 import { riskEngine } from '../engine/risk-engine.js';
 import { tokenMetadataService, TokenMetadata } from '../services/token-metadata.js';
 import { executionWalletManager } from '../execution/wallet-manager.js';
 import { liveEngine } from '../execution/live-engine.js';
-import { FollowerPosition, MirrorOrder, SwapIntent } from '../types/index.js';
+import { FollowerPosition, MirrorOrder, SwapIntent, WatchedWallet } from '../types/index.js';
 
 export class TelegramNotifier {
   private botToken: string;
@@ -48,6 +49,9 @@ export class TelegramNotifier {
             { command: 'positions', description: 'Open Positions & Close Controls' },
             { command: 'close', description: 'Close Position: /close <mint>' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
+            { command: 'targets', description: 'View & Manage Watched Target Traders' },
+            { command: 'add_target', description: 'Add Target: /add_target <address>' },
+            { command: 'remove_target', description: 'Remove Target: /remove_target <address>' },
             { command: 'status', description: 'Engine Health, Telemetry & Feed' },
             { command: 'pnl', description: 'Portfolio Profit/Loss Performance' },
             { command: 'help', description: 'Terminal Usage Guide & Commands' },
@@ -179,8 +183,30 @@ export class TelegramNotifier {
       await this.sendPnlSummaryReport(chatId);
     } else if (clean === 'status' || clean.includes('bot status') || clean === 'health' || clean === 'stats') {
       await this.sendStatusReport(chatId);
-    } else if (clean === 'wallets' || clean.includes('watched wallets') || clean === 'targets' || clean.includes('target wallets')) {
+    } else if (clean === 'wallets' || clean.includes('watched wallets') || clean === 'targets' || clean.includes('target traders') || clean.includes('target wallets')) {
       await this.sendWalletsReport(chatId);
+    } else if (clean.startsWith('add_target') || clean.startsWith('addtarget') || clean.startsWith('add ') || clean.startsWith('watch ')) {
+      const parts = rawText.split(/\s+/);
+      const address = parts[1];
+      const label = parts.slice(2).join(' ') || undefined;
+      if (!address) {
+        await this.sendCustomMessage(
+          chatId,
+          'ℹ️ <b>Usage:</b> <code>/add_target &lt;wallet_address&gt; [optional_label]</code>\nExample: <code>/add_target CwUHN4...hJqS Alpha Whale</code>'
+        );
+        return;
+      }
+      await this.handleAddTargetWallet(chatId, address, label);
+    } else if (clean.startsWith('remove_target') || clean.startsWith('removetarget') || clean.startsWith('remove ') || clean.startsWith('del ') || clean.startsWith('unwatch ')) {
+      const parts = rawText.split(/\s+/);
+      const address = parts[1];
+      if (!address) {
+        await this.sendCustomMessage(chatId, 'ℹ️ <b>Usage:</b> <code>/remove_target &lt;wallet_address&gt;</code>');
+        return;
+      }
+      await this.handleRemoveTargetWallet(chatId, address);
+    } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawText)) {
+      await this.handleDirectAddressInput(chatId, rawText);
     } else if (clean === 'risk' || clean.includes('risk controls') || clean === 'breaker' || clean.includes('risk limits')) {
       await this.sendRiskReport(chatId);
     } else if (clean === 'sim' || clean === 'simulate' || clean.includes('simulate buy') || clean === 'test') {
@@ -203,7 +229,7 @@ export class TelegramNotifier {
     } else {
       await this.sendCustomMessage(
         chatId,
-        `[COMMAND NOT RECOGNIZED] "${rawText}"\nUse the interactive keypad below or type /menu.`,
+        `[COMMAND NOT RECOGNIZED] "${rawText}"\nUse the interactive keypad below or type /menu. To add a target trader, send <code>/add_target &lt;address&gt;</code> or paste any Solana address!`,
         this.getPersistentReplyKeyboard()
       );
     }
@@ -259,6 +285,17 @@ export class TelegramNotifier {
       const fraction = pct / 100;
 
       await this.executeManualSellFromChat(chatId, posIdOrMint, fraction);
+    } else if (data.startsWith('del_wallet_')) {
+      const address = data.replace('del_wallet_', '').trim();
+      await this.handleRemoveTargetWallet(chatId, address);
+    } else if (data.startsWith('add_wallet_')) {
+      const address = data.replace('add_wallet_', '').trim();
+      await this.handleAddTargetWallet(chatId, address);
+    } else if (data === 'prompt_add_wallet') {
+      await this.sendCustomMessage(
+        chatId,
+        '🎯 <b>[ADD TARGET TRADER]</b>\n\nPaste a Solana wallet address directly in this chat, or type:\n<code>/add_target &lt;wallet_address&gt; [label]</code>\n\nExample:\n<code>/add_target CwUHN4...hJqS Alpha Whale</code>'
+      );
     }
   }
 
@@ -272,8 +309,8 @@ export class TelegramNotifier {
         keyboard: [
           [{ text: 'POSITIONS' }, { text: 'WALLET BALANCE' }],
           [{ text: 'ARM ENGINE' }, { text: 'DISARM ENGINE' }],
-          [{ text: 'CLOSE ALL' }, { text: 'BOT STATUS' }],
-          [{ text: 'REFRESH' }, { text: 'MAIN MENU' }],
+          [{ text: 'TARGET TRADERS' }, { text: 'CLOSE ALL' }],
+          [{ text: 'BOT STATUS' }, { text: 'MAIN MENU' }],
         ],
         resize_keyboard: true,
         is_persistent: true,
@@ -283,7 +320,7 @@ export class TelegramNotifier {
     return {
       keyboard: [
         [{ text: 'POSITIONS' }, { text: 'PNL SUMMARY' }],
-        [{ text: 'BOT STATUS' }, { text: 'TARGET WALLETS' }],
+        [{ text: 'TARGET TRADERS' }, { text: 'BOT STATUS' }],
         [{ text: 'CLOSE ALL' }, { text: 'SIMULATE BUY' }],
         [{ text: 'REFRESH' }, { text: 'MAIN MENU' }],
       ],
@@ -504,10 +541,11 @@ ${balanceBlock}
    * Open Positions Report with Individual & Bulk Close Controls
    */
   public async sendOpenPositionsReport(chatId: string | number): Promise<void> {
-    const allowedWallets = new Set(config.WATCHED_WALLETS);
+    const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
+    const allowedWallets = new Set([...config.WATCHED_WALLETS, ...dbWallets]);
     const openPositions = db.getOpenPositions().filter((p) => {
       const mint = p.tokenMint || '';
-      const isAllowed = allowedWallets.has(p.targetWallet);
+      const isAllowed = allowedWallets.has(p.targetWallet) || !p.targetWallet;
       const isNotDummy =
         !mint.toLowerCase().includes('tokenmint') &&
         !mint.toLowerCase().includes('paper1111') &&
@@ -779,37 +817,191 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
   }
 
   /**
-   * Watched Target Wallets report
+   * Watched Target Wallets report with interactive Add & Remove controls
    */
   public async sendWalletsReport(chatId: string | number): Promise<void> {
     const wallets = db.getWatchedWallets();
     let walletList = '';
+    const inlineKeyboardRows: any[] = [];
 
     if (wallets.length === 0) {
-      walletList = 'No target wallets configured.';
+      walletList = 'No target wallets configured.\nPaste any Solana wallet address to start copy-trading!';
     } else {
       walletList = wallets
         .map((w, idx) => {
           const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
-          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   Mode: ${w.buyMode} | Allocation: ${((w.copyRatio || 0.05) * 100).toFixed(0)}%`;
+          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   Mode: ${w.buyMode} | Sizing: ${config.FIXED_BUY_SOL} SOL | Active: ${w.enabled ? '✅' : '⏸️'}`;
         })
-        .join('\n');
+        .join('\n\n');
+
+      for (const w of wallets) {
+        const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
+        inlineKeyboardRows.push([
+          { text: `🗑️ Remove ${w.label || short}`, callback_data: `del_wallet_${w.wallet}` },
+        ]);
+      }
     }
 
+    inlineKeyboardRows.push([
+      { text: '➕ Add Target Trader', callback_data: 'prompt_add_wallet' },
+      { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
+    ]);
+    inlineKeyboardRows.push([
+      { text: 'MAIN MENU', callback_data: 'menu_main' },
+      { text: 'REFRESH', callback_data: 'menu_wallets' },
+    ]);
+
     const text = `
-<b>[WATCHED TARGET WALLETS] (${wallets.length})</b>
+<b>[WATCHED TARGET TRADERS] (${wallets.length})</b>
 
 ${walletList}
 
-Signals from these traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.
+⚡ Signals from these traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.
+💡 <i>To add a trader, paste their address directly into this chat or type <code>/add_target &lt;address&gt;</code></i>
+    `.trim();
+
+    await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineKeyboardRows });
+  }
+
+  /**
+   * Add a new target trader wallet
+   */
+  public async handleAddTargetWallet(
+    chatId: string | number,
+    rawAddress: string,
+    label?: string
+  ): Promise<void> {
+    const address = rawAddress.trim();
+    try {
+      new PublicKey(address);
+    } catch {
+      await this.sendCustomMessage(
+        chatId,
+        `❌ <b>[INVALID ADDRESS]</b> <code>${address}</code> is not a valid Solana public key.\nPlease send a valid 32-44 character base58 address.`
+      );
+      return;
+    }
+
+    const existing = db.getWatchedWallet(address);
+    if (existing) {
+      await this.sendCustomMessage(
+        chatId,
+        `ℹ️ <b>[ALREADY MONITORED]</b>\nWallet <code>${address}</code> is already in your target list (${existing.label || 'Target'}).`
+      );
+      return;
+    }
+
+    const newTarget: WatchedWallet = {
+      wallet: address,
+      label: label || `Target_${address.slice(0, 4)}`,
+      buyMode: config.DEFAULT_SIZING_MODE,
+      fixedBuyLamports: (config.FIXED_BUY_SOL * 1e9).toString(),
+      copyRatio: config.COPY_RATIO,
+      maxBuyLamports: (config.MAX_BUY_SOL * 1e9).toString(),
+      enabled: true,
+      createdAt: Date.now(),
+    };
+
+    db.upsertWatchedWallet(newTarget);
+
+    if (this.signalManagerRef) {
+      this.signalManagerRef.refreshWallets();
+    }
+
+    const confirmMsg = `
+✅ <b>[TARGET TRADER ADDED]</b>
+
+<b>Address:</b> <code>${address}</code>
+<b>Label:</b> ${newTarget.label}
+<b>Copy Sizing:</b> ${config.FIXED_BUY_SOL} SOL per trade
+<b>Stream:</b> Live on Helius LaserStream & Webhook
+
+The bot will now detect and copy all buy & sell transactions from this wallet in real time!
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
-          { text: 'MAIN MENU', callback_data: 'menu_main' },
+          { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
+          { text: 'POSITIONS', callback_data: 'menu_positions' },
         ],
+        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, confirmMsg, inlineKeyboard);
+  }
+
+  /**
+   * Remove a target trader wallet
+   */
+  public async handleRemoveTargetWallet(chatId: string | number, rawAddress: string): Promise<void> {
+    const address = rawAddress.trim();
+    const removed = db.deleteWatchedWallet(address);
+
+    if (this.signalManagerRef) {
+      this.signalManagerRef.refreshWallets();
+    }
+
+    if (removed) {
+      await this.sendCustomMessage(
+        chatId,
+        `🗑️ <b>[TARGET REMOVED]</b>\nSuccessfully removed <code>${address}</code> from watched traders.`
+      );
+    } else {
+      await this.sendCustomMessage(
+        chatId,
+        `ℹ️ Wallet <code>${address}</code> was not found in your target list.`
+      );
+    }
+
+    await this.sendWalletsReport(chatId);
+  }
+
+  /**
+   * Detect raw pasted Solana address and offer instant actions
+   */
+  public async handleDirectAddressInput(chatId: string | number, address: string): Promise<void> {
+    try {
+      new PublicKey(address);
+    } catch {
+      return;
+    }
+
+    const existing = db.getWatchedWallet(address);
+    if (existing) {
+      const text = `
+🎯 <b>[TARGET WALLET RECOGNIZED]</b>
+
+<b>Address:</b> <code>${address}</code>
+<b>Label:</b> ${existing.label}
+<b>Status:</b> ${existing.enabled ? '🟢 Actively Monitored' : '⏸️ Paused'}
+<b>Mode:</b> ${existing.buyMode}
+      `.trim();
+
+      const inlineKeyboard = {
+        inline_keyboard: [
+          [{ text: '🗑️ Remove Target', callback_data: `del_wallet_${address}` }],
+          [{ text: 'TARGET TRADERS', callback_data: 'menu_wallets' }],
+        ],
+      };
+      await this.sendCustomMessage(chatId, text, inlineKeyboard);
+      return;
+    }
+
+    // New address detected
+    const text = `
+🎯 <b>[SOLANA ADDRESS DETECTED]</b>
+
+<code>${address}</code>
+
+Would you like to add this address to your <b>Target Traders</b> list? The bot will automatically copy its buy and sell swaps on pump.fun and Raydium!
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [{ text: '➕ Start Copy-Trading This Wallet', callback_data: `add_wallet_${address}` }],
+        [{ text: 'CANCEL', callback_data: 'menu_main' }],
       ],
     };
 

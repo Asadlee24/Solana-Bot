@@ -38,6 +38,7 @@ export class SignalManager extends EventEmitter {
         this.watchedWallets.set(w.wallet, w);
       }
     }
+    this.emit('walletsUpdated', Array.from(this.watchedWallets.values()));
   }
 
   /**

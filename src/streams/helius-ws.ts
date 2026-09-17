@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import { config } from '../config/index.js';
+import { db } from '../db/database.js';
 import { ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
 
 export interface HeliusWsCallbacks {
@@ -93,10 +94,18 @@ export class HeliusWebSocketStream {
     }
   }
 
-  private subscribe(): void {
+  public subscribe(): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-    for (const wallet of config.WATCHED_WALLETS) {
+    let dbWallets: string[] = [];
+    try {
+      dbWallets = db.getWatchedWallets().filter((w) => w.enabled).map((w) => w.wallet);
+    } catch {
+      // ignore
+    }
+    const allWallets = Array.from(new Set([...config.WATCHED_WALLETS, ...dbWallets]));
+
+    for (const wallet of allWallets) {
       // Standard transactionSubscribe / logsSubscribe
       const msg = {
         jsonrpc: '2.0',
@@ -118,6 +127,11 @@ export class HeliusWebSocketStream {
       };
       this.ws.send(JSON.stringify(msg));
     }
+  }
+
+  public resubscribe(): void {
+    console.info('[Helius WS] Refreshing target wallet subscriptions...');
+    this.subscribe();
   }
 
   private transformResult(result: any, observedAt: bigint): ParsedTransactionEnvelope | null {
