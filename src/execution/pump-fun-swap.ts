@@ -16,7 +16,11 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { config } from '../config/index.js';
-import { jupiterSwapV2Adapter, WSOL_MINT } from './jupiter-swap.js';
+import {
+  jupiterSwapV2Adapter,
+  JupiterV2OrderResponse,
+  WSOL_MINT,
+} from './jupiter-swap.js';
 
 export const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 export const PUMP_FEE_RECIPIENT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
@@ -55,6 +59,7 @@ export interface PumpFunBuildResult {
   outAmountRaw: string;
   effectivePriceSol: number;
   routedViaJupiter: boolean;
+  jupiterOrder?: JupiterV2OrderResponse;
 }
 
 export class PumpFunSwapAdapter {
@@ -108,6 +113,16 @@ export class PumpFunSwapAdapter {
       const tokenTotalSupply = data.readBigUInt64LE(40);
       const complete = data.readUInt8(48) === 1;
 
+      // Check quote_mint if present (Pump.fun USDC pairs support)
+      let pairAsset: 'SOL' | 'USDC' = 'SOL';
+      if (data.length >= 81) {
+        const quoteMintBytes = data.subarray(49, 81);
+        const quoteMint = new PublicKey(quoteMintBytes);
+        if (quoteMint.toBase58() === USDC_MINT) {
+          pairAsset = 'USDC';
+        }
+      }
+
       return {
         isInitialized: true,
         virtualTokenReserves,
@@ -116,7 +131,7 @@ export class PumpFunSwapAdapter {
         realSolReserves,
         tokenTotalSupply,
         complete,
-        pairAsset: 'SOL',
+        pairAsset,
       };
     } catch (err: any) {
       console.warn(`[PumpFun] Failed to read bonding curve state for ${mintAddress}: ${err.message}`);
@@ -234,14 +249,14 @@ export class PumpFunSwapAdapter {
         slippageBps
       );
       const signedResult = await jupiterSwapV2Adapter.signOrder(keypair, order);
-      const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
 
       return {
         transaction: signedResult.transaction,
-        latestBlockhash,
+        latestBlockhash: signedResult.blockhashWithExpiry,
         outAmountRaw: signedResult.outAmountRaw,
         effectivePriceSol: signedResult.effectivePriceSol,
         routedViaJupiter: true,
+        jupiterOrder: order,
       };
     }
 
@@ -334,14 +349,14 @@ export class PumpFunSwapAdapter {
         slippageBps
       );
       const signedResult = await jupiterSwapV2Adapter.signOrder(keypair, order);
-      const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
 
       return {
         transaction: signedResult.transaction,
-        latestBlockhash,
+        latestBlockhash: signedResult.blockhashWithExpiry,
         outAmountRaw: signedResult.outAmountRaw,
         effectivePriceSol: signedResult.effectivePriceSol,
         routedViaJupiter: true,
+        jupiterOrder: order,
       };
     }
 

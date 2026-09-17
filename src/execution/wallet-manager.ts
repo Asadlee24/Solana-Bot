@@ -133,19 +133,55 @@ export class ExecutionWalletManager {
 
   /**
    * Validates whether a proposed buy trade complies with minimum SOL reserve floor.
-   * walletBalance - requestedTrade - expectedFees - tip >= MIN_SOL_RESERVE_SOL
+   * Clearly distinguishes fee units:
+   * - computeUnitPriceMicroLamports (in micro-lamports per CU, 10^-6 lamports)
+   * - computeUnitLimit (number of compute units)
+   * - estimatedPriorityFeeLamports = (computeUnitPriceMicroLamports * computeUnitLimit) / 1,000,000
+   * - baseFeeLamports (5,000 lamports standard Solana base fee)
+   * - senderTipLamports (Helius/Jito tip in lamports)
+   * 
+   * walletBalance - requestedTrade - baseFee - priorityFee - senderTip >= MIN_SOL_RESERVE_SOL
    */
   public checkSpendable(
     requestedTradeLamports: bigint,
-    estimatedFeesLamports: bigint = 50_000n,
-    tipLamports: bigint = 100_000n
-  ): { allowed: boolean; reason?: string; balanceSol: number; reserveSol: number; spendableSol: number } {
+    computeUnitPriceMicroLamports: bigint = BigInt(config.PRIORITY_FEE_MICRO_LAMPORTS),
+    computeUnitLimit: bigint = 250_000n,
+    senderTipLamports: bigint = BigInt(config.HELIUS_SENDER_TIP_LAMPORTS),
+    baseFeeLamports: bigint = 5_000n
+  ): {
+    allowed: boolean;
+    reason?: string;
+    balanceSol: number;
+    reserveSol: number;
+    spendableSol: number;
+    feeBreakdown: {
+      computeUnitPriceMicroLamports: bigint;
+      computeUnitLimit: bigint;
+      estimatedPriorityFeeLamports: bigint;
+      baseFeeLamports: bigint;
+      senderTipLamports: bigint;
+      totalDeductionLamports: bigint;
+    };
+  } {
     const balanceSol = this.getCachedBalanceSol();
     const reserveSol = config.MIN_SOL_RESERVE_SOL;
     const spendableSol = Math.max(0, balanceSol - reserveSol);
 
+    // 1 lamport = 1,000,000 micro-lamports
+    const estimatedPriorityFeeLamports = (computeUnitPriceMicroLamports * computeUnitLimit) / 1_000_000n;
+    const totalDeductionLamports =
+      requestedTradeLamports + baseFeeLamports + estimatedPriorityFeeLamports + senderTipLamports;
+
+    const feeBreakdown = {
+      computeUnitPriceMicroLamports,
+      computeUnitLimit,
+      estimatedPriorityFeeLamports,
+      baseFeeLamports,
+      senderTipLamports,
+      totalDeductionLamports,
+    };
+
     const minReserveLamports = BigInt(Math.floor(reserveSol * LAMPORTS_PER_SOL));
-    const totalDeductionLamports = requestedTradeLamports + estimatedFeesLamports + tipLamports;
 
     if (this.cachedBalanceLamports < totalDeductionLamports) {
       return {
@@ -154,6 +190,7 @@ export class ExecutionWalletManager {
         balanceSol,
         reserveSol,
         spendableSol,
+        feeBreakdown,
       };
     }
 
@@ -165,6 +202,7 @@ export class ExecutionWalletManager {
         balanceSol,
         reserveSol,
         spendableSol,
+        feeBreakdown,
       };
     }
 
@@ -173,6 +211,7 @@ export class ExecutionWalletManager {
       balanceSol,
       reserveSol,
       spendableSol,
+      feeBreakdown,
     };
   }
 

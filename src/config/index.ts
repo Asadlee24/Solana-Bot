@@ -48,6 +48,7 @@ const ConfigSchema = z.object({
   // Simulation & Smoke-Test Safety Guards
   LIVE_REQUIRE_SIMULATION: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
   MAINNET_SMOKE_TEST_MODE: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
+  SMOKE_TEST_ALLOWED_SIDE: z.enum(['BUY', 'SELL', 'BOTH']).default('BUY'),
 
   // Helius Sender Configuration & Tip Validation
   HELIUS_SENDER_MODE: z.enum(['SWQOS', 'MAX']).default('SWQOS'),
@@ -123,5 +124,44 @@ export function validateHeliusSenderTip(
     }
     return { valid: true, minRequired };
   }
+}
+
+/**
+ * Calculates estimated transaction fees in lamports, clearly distinguishing:
+ * - computeUnitPriceMicroLamports (in micro-lamports per CU, 10^-6 lamports)
+ * - computeUnitLimit (number of compute units)
+ * - estimatedPriorityFeeLamports = (computeUnitPriceMicroLamports * computeUnitLimit) / 1,000,000
+ * - baseFeeLamports (5,000 lamports standard Solana base fee)
+ * - senderTipLamports (Helius/Jito tip in lamports)
+ */
+export function calculateEstimatedFeesLamports(
+  computeUnitPriceMicroLamports: number | bigint = config.PRIORITY_FEE_MICRO_LAMPORTS,
+  computeUnitLimit: number | bigint = 250_000n,
+  senderTipLamports: number | bigint = config.HELIUS_SENDER_TIP_LAMPORTS
+): {
+  baseFeeLamports: bigint;
+  computeUnitPriceMicroLamports: bigint;
+  computeUnitLimit: bigint;
+  estimatedPriorityFeeLamports: bigint;
+  senderTipLamports: bigint;
+  totalEstimatedFeesLamports: bigint;
+} {
+  const baseFeeLamports = 5_000n;
+  const priceMicro = BigInt(computeUnitPriceMicroLamports);
+  const limitUnits = BigInt(computeUnitLimit);
+  const tipLamports = BigInt(senderTipLamports);
+
+  // 1 lamport = 1,000,000 micro-lamports
+  const estimatedPriorityFeeLamports = (priceMicro * limitUnits) / 1_000_000n;
+  const totalEstimatedFeesLamports = baseFeeLamports + estimatedPriorityFeeLamports + tipLamports;
+
+  return {
+    baseFeeLamports,
+    computeUnitPriceMicroLamports: priceMicro,
+    computeUnitLimit: limitUnits,
+    estimatedPriorityFeeLamports,
+    senderTipLamports: tipLamports,
+    totalEstimatedFeesLamports,
+  };
 }
 

@@ -1,4 +1,5 @@
 import {
+  BlockhashWithExpiryBlockHeight,
   Keypair,
   VersionedTransaction,
 } from '@solana/web3.js';
@@ -37,6 +38,7 @@ export interface JupiterV2OrderBuildResult {
   order: JupiterV2OrderResponse;
   outAmountRaw: string;
   effectivePriceSol: number;
+  blockhashWithExpiry: BlockhashWithExpiryBlockHeight;
 }
 
 export class JupiterSwapV2Adapter {
@@ -140,11 +142,20 @@ export class JupiterSwapV2Adapter {
       effectivePriceSol = inAmountUi > 0 ? outAmountUi / inAmountUi : 0;
     }
 
+    // Preserve exact blockhash & lastValidBlockHeight from Jupiter's assembled transaction/order
+    const recentBlockhash = transaction.message.recentBlockhash;
+    const lastValidBlockHeight = order.lastValidBlockHeight || 0;
+    const blockhashWithExpiry: BlockhashWithExpiryBlockHeight = {
+      blockhash: recentBlockhash,
+      lastValidBlockHeight,
+    };
+
     return {
       transaction,
       order,
       outAmountRaw: order.outAmount,
       effectivePriceSol,
+      blockhashWithExpiry,
     };
   }
 

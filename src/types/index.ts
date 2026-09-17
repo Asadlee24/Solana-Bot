@@ -117,6 +117,17 @@ export interface MirrorIntent {
   createdAt: bigint;
 }
 
+export type OrderStatus =
+  | 'PENDING'
+  | 'SUBMITTED'
+  | 'PROCESSED'
+  | 'CONFIRMED'
+  | 'RECONCILED'
+  | 'FILLED'
+  | 'FAILED'
+  | 'DROPPED'
+  | 'EXPIRED';
+
 /**
  * Actual execution order lifecycle (paper or live)
  */
@@ -127,19 +138,29 @@ export interface MirrorOrder {
   mode: ExecutionMode;
   side: TradeSide;
   tokenMint: string;
+  // Quoted / Expected values
   inAmountRaw: string;
   outAmountRaw: string;
   minOutAmountRaw: string;
+  effectivePrice: number;
+  // Actual settled values (populated upon confirmed reconciliation)
+  actualInAmountRaw?: string;
+  actualOutAmountRaw?: string;
+  actualExecutionPrice?: number;
+  actualFeeLamports?: bigint;
+  actualPriorityFeeLamports?: bigint;
+  actualTipLamports?: bigint;
+  landingProvider?: 'STANDARD_RPC' | 'HELIUS_SWQOS' | 'HELIUS_SENDER_MAX' | 'JUPITER_EXECUTE';
+  reconciliationSource?: string;
   quotedAt: bigint;
   signedAt?: bigint;
   submittedAt?: bigint;
   landedAt?: bigint;
   orderSignature?: string;
-  effectivePrice: number;
   priorityFeeLamports: bigint;
   tipLamports: bigint;
   routeFeeLamports: bigint;
-  status: 'PENDING' | 'FILLED' | 'FAILED' | 'EXPIRED';
+  status: OrderStatus;
   errorMessage?: string;
 }
 
