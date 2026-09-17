@@ -86,7 +86,7 @@ export interface Order {
   landed_at?: number;
   fee_raw: string;
   tip_raw: string;
-  status: 'PENDING' | 'FILLED' | 'FAILED' | 'EXPIRED';
+  status: 'PENDING' | 'DETECTED' | 'RISK_CHECK' | 'BUILDING' | 'SIGNED' | 'SUBMITTED' | 'PROCESSED' | 'CONFIRMED' | 'FILLED' | 'FAILED' | 'EXPIRED' | 'SKIPPED';
   error_message?: string | null;
   signature?: string;
   risk_decision?: string;
@@ -94,6 +94,27 @@ export interface Order {
   target_price?: number;
   metadata?: TokenMeta;
   comparison?: OrderComparison;
+}
+
+export interface LiveEngineStatus {
+  executionMode: 'PAPER' | 'LIVE';
+  isArmed: boolean;
+  disarmReason: string;
+  liveTradingAckConfigured: boolean;
+  wallet: {
+    isConfigured: boolean;
+    publicKey: string | null;
+    balanceSol: number;
+    reserveSol: number;
+    spendableSol: number;
+  };
+  limits: {
+    fixedBuySol: number;
+    maxBuySol: number;
+    maxExposureSol: number;
+    dailyLossLimitSol: number;
+    minReserveSol: number;
+  };
 }
 
 export interface Position {

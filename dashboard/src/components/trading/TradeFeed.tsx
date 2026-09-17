@@ -23,10 +23,12 @@ interface TradeFeedProps {
 export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }) => {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [sideFilter, setSideFilter] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
+  const [modeFilter, setModeFilter] = useState<'ALL' | 'LIVE' | 'PAPER'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredOrders = orders.filter((o) => {
     if (sideFilter !== 'ALL' && o.side !== sideFilter) return false;
+    if (modeFilter !== 'ALL' && o.mode !== modeFilter) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const symbolMatch = o.metadata?.symbol?.toLowerCase().includes(q);
@@ -55,6 +57,7 @@ export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }
         </div>
 
         <div className="filter-pill-group">
+          {/* Side Filters */}
           <button
             type="button"
             className={`filter-pill ${sideFilter === 'ALL' ? 'active' : ''}`}
@@ -75,6 +78,31 @@ export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }
             onClick={() => setSideFilter('SELL')}
           >
             Sells
+          </button>
+
+          {/* Mode Isolation Filters */}
+          <span style={{ color: 'var(--border-subtle)', margin: '0 4px' }}>|</span>
+          <button
+            type="button"
+            className={`filter-pill ${modeFilter === 'ALL' ? 'active' : ''}`}
+            onClick={() => setModeFilter('ALL')}
+          >
+            All Modes
+          </button>
+          <button
+            type="button"
+            className={`filter-pill ${modeFilter === 'LIVE' ? 'active' : ''}`}
+            onClick={() => setModeFilter('LIVE')}
+            style={{ color: modeFilter === 'LIVE' ? '#10b981' : undefined }}
+          >
+            Live Only
+          </button>
+          <button
+            type="button"
+            className={`filter-pill ${modeFilter === 'PAPER' ? 'active' : ''}`}
+            onClick={() => setModeFilter('PAPER')}
+          >
+            Paper Only
           </button>
         </div>
       </div>
@@ -197,20 +225,36 @@ export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }
                       </div>
                     </td>
 
-                    {/* Status */}
+                    {/* Status & Solscan Link */}
                     <td>
-                      <Badge
-                        variant={
-                          order.status === 'FILLED'
-                            ? 'success'
-                            : order.status === 'FAILED'
-                            ? 'danger'
-                            : 'neutral'
-                        }
-                        size="sm"
-                      >
-                        {order.status}
-                      </Badge>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Badge
+                          variant={
+                            order.status === 'FILLED' || order.status === 'CONFIRMED'
+                              ? 'success'
+                              : order.status === 'FAILED' || order.status === 'EXPIRED'
+                              ? 'danger'
+                              : order.status === 'SUBMITTED' || order.status === 'PROCESSED'
+                              ? 'live'
+                              : 'neutral'
+                          }
+                          size="sm"
+                        >
+                          {order.status}
+                        </Badge>
+                        {order.signature && !order.signature.startsWith('sim_') && (
+                          <a
+                            href={`https://solscan.io/tx/${order.signature}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title={`View verified on-chain transaction: ${order.signature}`}
+                            style={{ color: '#14f195', display: 'inline-flex', alignItems: 'center' }}
+                          >
+                            <ExternalLink size={11} />
+                          </a>
+                        )}
+                      </div>
                     </td>
 
                     {/* Inspect Trigger */}

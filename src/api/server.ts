@@ -5,6 +5,8 @@ import path from 'path';
 import { config } from '../config/index.js';
 import { db } from '../db/database.js';
 import { riskEngine } from '../engine/risk-engine.js';
+import { liveEngine } from '../execution/live-engine.js';
+import { executionWalletManager } from '../execution/wallet-manager.js';
 import { tokenMetadataService } from '../services/token-metadata.js';
 import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
@@ -236,9 +238,48 @@ export function createApiServer() {
     });
   });
 
-  app.post('/api/circuit-breaker/reset', (_req: Request, res: Response) => {
-    riskEngine.resetCircuitBreaker();
-    res.json({ success: true });
+  // Live Engine Safety & Status Endpoints
+  app.get('/api/live/status', async (_req: Request, res: Response) => {
+    if (config.EXECUTION_MODE === 'LIVE') {
+      await executionWalletManager.refreshBalance().catch(() => {});
+    }
+    const liveStatus = liveEngine.getStatus();
+    const walletStatus = executionWalletManager.getStatus();
+
+    res.json({
+      executionMode: config.EXECUTION_MODE,
+      isArmed: liveStatus.isArmed,
+      disarmReason: liveStatus.disarmReason,
+      liveTradingAckConfigured: config.LIVE_TRADING_ACK === 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK',
+      wallet: {
+        isConfigured: walletStatus.isConfigured,
+        publicKey: walletStatus.publicKey,
+        balanceSol: walletStatus.balanceSol,
+        reserveSol: walletStatus.reserveSol,
+        spendableSol: walletStatus.spendableSol,
+      },
+      limits: {
+        fixedBuySol: config.FIXED_BUY_SOL,
+        maxBuySol: config.MAX_BUY_SOL,
+        maxExposureSol: config.MAX_TOTAL_EXPOSURE_SOL,
+        dailyLossLimitSol: config.DAILY_LOSS_LIMIT_SOL,
+        minReserveSol: config.MIN_SOL_RESERVE_SOL,
+      },
+    });
+  });
+
+  app.post('/api/live/kill', (_req: Request, res: Response) => {
+    liveEngine.kill('Operator triggered Emergency Kill Switch via Dashboard/API');
+    res.json({ success: true, isArmed: false, message: 'Live execution DISARMED immediately.' });
+  });
+
+  app.post('/api/live/arm', async (_req: Request, res: Response) => {
+    const result = await liveEngine.arm();
+    res.json({
+      success: result.armed,
+      isArmed: result.armed,
+      reason: result.reason,
+    });
   });
 
   // Server-Sent Events (SSE) Live Feed for Web Dashboard

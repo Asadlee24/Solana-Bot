@@ -7,6 +7,7 @@ import { positionEngine } from '../engine/position-engine.js';
 import { riskEngine } from '../engine/risk-engine.js';
 import { liveEngine } from '../execution/live-engine.js';
 import { paperEngine } from '../execution/paper-engine.js';
+import { executionWalletManager } from '../execution/wallet-manager.js';
 import { telegramNotifier } from '../notifications/telegram.js';
 import { FastTransactionDecoder, ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
 import { tokenMetadataService } from '../services/token-metadata.js';
@@ -75,7 +76,10 @@ export class SignalManager extends EventEmitter {
     }
 
     // 4. Pre-trade Risk Check & Sizing Decision (ULTRA-FAST IN-MEMORY HOT PATH)
-    const currentSolBalance = solToLamportsBigInt(10.0);
+    const currentSolBalance =
+      config.EXECUTION_MODE === 'LIVE'
+        ? executionWalletManager.getCachedBalanceLamports()
+        : solToLamportsBigInt(10.0);
     const totalExposure = positionEngine.getTotalOpenExposureLamports();
 
     const riskResult = riskEngine.evaluateIntent(
@@ -115,6 +119,11 @@ export class SignalManager extends EventEmitter {
     let order: MirrorOrder;
     try {
       if (config.EXECUTION_MODE === 'LIVE') {
+        const liveStatus = liveEngine.getStatus();
+        if (!liveStatus.isArmed) {
+          console.warn(`[LIVE EXECUTION DISARMED] Order skipped: ${liveStatus.disarmReason}`);
+          return { intent: swapIntent, order: null };
+        }
         order = await liveEngine.executeLiveTrade(swapIntent, mirrorIntent);
       } else {
         order = await paperEngine.executePaperTrade(swapIntent, mirrorIntent);

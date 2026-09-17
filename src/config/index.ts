@@ -8,13 +8,17 @@ const ConfigSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   EXECUTION_MODE: z.enum(['PAPER', 'LIVE']).default('PAPER'),
 
+  // Live Safety Acknowledgement (MUST match exactly to arm LIVE mode)
+  LIVE_TRADING_ACK: z.string().default(''),
+
   // Solana RPC & Helius Services
   SOLANA_RPC_URL: z.string().default('https://api.mainnet-beta.solana.com'),
   HELIUS_API_KEY: z.string().default(''),
   HELIUS_WSS_URL: z.string().default('wss://mainnet.helius-rpc.com/?api-key='),
+  HELIUS_SENDER_URL: z.string().default(''),
   LASERSTREAM_GRPC_URL: z.string().default(''),
 
-  // Execution Wallet Key (Base58 or JSON byte array) - Optional for paper mode
+  // Execution Wallet Key (Base58 or JSON byte array) - Strictly isolated backend hot wallet
   FOLLOWER_PRIVATE_KEY: z.string().default(''),
 
   // Target Wallets to watch (comma-separated list of base58 public keys)
@@ -23,20 +27,24 @@ const ConfigSchema = z.object({
     .default('CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS')
     .transform((val) => val.split(',').map((w) => w.trim()).filter(Boolean)),
 
-  // Sizing Defaults
+  // Initial Sizing Defaults (Conservative Mainnet Smoke-Test Configuration)
   DEFAULT_SIZING_MODE: z.enum(['FIXED_SIZE', 'TARGET_NOTIONAL_SCALAR', 'CAPPED_PROPORTIONAL_HYBRID']).default('FIXED_SIZE'),
-  FIXED_BUY_SOL: z.coerce.number().default(0.1), // ~20 USD equivalent
+  FIXED_BUY_SOL: z.coerce.number().default(0.01), // Conservative 0.01 SOL smoke test
   COPY_RATIO: z.coerce.number().default(0.05), // 5% of target spend in scalar mode
-  MAX_BUY_SOL: z.coerce.number().default(1.0),
+  MAX_BUY_SOL: z.coerce.number().default(0.02),
 
   // Risk & Safety Parameters
-  MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(5.0),
-  MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.2), // Always preserve for fees/rent
+  MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(0.05),
+  MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.05), // Floor reserved for rent and fees
   MAX_SIGNAL_AGE_MS: z.coerce.number().default(1500), // Max ms before signal discarded as stale
   MAX_ENTRY_GAP_BPS: z.coerce.number().default(200), // 2.0% max price deterioration vs target
   MAX_SLIPPAGE_BPS: z.coerce.number().default(150), // 1.5% max AMM slippage
-  DAILY_LOSS_LIMIT_SOL: z.coerce.number().default(2.0),
+  DAILY_LOSS_LIMIT_SOL: z.coerce.number().default(0.03),
   CONSECUTIVE_ERROR_LIMIT: z.coerce.number().default(5),
+
+  // On-Chain Transaction Compute & Tips
+  PRIORITY_FEE_MICRO_LAMPORTS: z.coerce.number().default(50_000), // Compute unit price
+  JITO_TIP_LAMPORTS: z.coerce.number().default(100_000), // 0.0001 SOL tip
 
   // Web Server & Dashboard
   API_PORT: z.coerce.number().default(3001),

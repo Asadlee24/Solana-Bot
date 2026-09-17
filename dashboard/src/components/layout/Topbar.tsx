@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { formatClockTime, formatShortAddress, formatUptime } from '../../lib/format';
-import { NavigationTab, StreamStatus, Telemetry } from '../../types/dashboard';
+import { LiveEngineStatus, NavigationTab, StreamStatus, Telemetry } from '../../types/dashboard';
 import { ApiConfigModal } from '../common/ApiConfigModal';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
@@ -63,6 +63,63 @@ export const Topbar: React.FC<TopbarProps> = ({
 
   const isLive = telemetry?.executionMode === 'LIVE';
   const isTripped = telemetry?.circuitBreakerTripped;
+
+  // Real live engine status & emergency kill switch
+  const [liveStatus, setLiveStatus] = useState<LiveEngineStatus | null>(null);
+  const [isArmingOrKilling, setIsArmingOrKilling] = useState(false);
+
+  const fetchLiveStatus = async () => {
+    try {
+      const res = await fetch('/api/live/status');
+      if (res.ok) {
+        const data = await res.json();
+        setLiveStatus(data);
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchLiveStatus();
+    const interval = setInterval(fetchLiveStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleKillSwitch = async () => {
+    const confirmStop = window.confirm(
+      'EMERGENCY STOP LIVE TRADING?\n\nThis will immediately disarm the automated execution engine. No further live trades will be copied until explicitly re-armed.'
+    );
+    if (!confirmStop) return;
+
+    try {
+      setIsArmingOrKilling(true);
+      const res = await fetch('/api/live/kill', { method: 'POST' });
+      if (res.ok) {
+        await fetchLiveStatus();
+        onRefresh();
+      }
+    } catch (err) {
+      alert('Failed to trigger kill switch: ' + String(err));
+    } finally {
+      setIsArmingOrKilling(false);
+    }
+  };
+
+  const handleArmSwitch = async () => {
+    try {
+      setIsArmingOrKilling(true);
+      const res = await fetch('/api/live/arm', { method: 'POST' });
+      const data = await res.json();
+      if (!data.success) {
+        alert('Cannot Arm Live Trading:\n\n' + data.reason);
+      }
+      await fetchLiveStatus();
+      onRefresh();
+    } catch (err) {
+      alert('Failed to arm live trading: ' + String(err));
+    } finally {
+      setIsArmingOrKilling(false);
+    }
+  };
 
   return (
     <header className="terminal-topbar">
@@ -116,16 +173,98 @@ export const Topbar: React.FC<TopbarProps> = ({
         </div>
 
         {/* Target Trader Wallet Chip */}
-        <div className="topbar-cluster-item wallet-chip" title={`Target: ${targetWallet}`}>
+        <div className="topbar-cluster-item wallet-chip" title={`Watched Target Trader: ${targetWallet}`}>
           <Target size={13} color="#29d4ff" />
           <span className="cluster-label">TARGET:</span>
           <span className="cluster-text mono">{formatShortAddress(targetWallet, 4, 4)}</span>
           <CopyButton text={targetWallet} size={11} />
         </div>
 
+        {/* Dedicated Execution Hot Wallet Chip */}
+        <div
+          className="topbar-cluster-item wallet-chip"
+          title={`Backend Execution Hot Wallet: ${liveStatus?.wallet?.publicKey || 'Not loaded'} (Balance: ${liveStatus?.wallet?.balanceSol?.toFixed(3) || '0'} SOL)`}
+        >
+          <span className="cluster-label" style={{ color: '#a78bfa' }}>EXEC:</span>
+          <span className="cluster-text mono">
+            {liveStatus?.wallet?.publicKey
+              ? formatShortAddress(liveStatus.wallet.publicKey, 4, 4)
+              : 'PAPER'}
+          </span>
+          {isLive && (
+            <span
+              style={{
+                fontSize: '9px',
+                fontWeight: 700,
+                padding: '2px 5px',
+                borderRadius: '3px',
+                marginLeft: '4px',
+                background: liveStatus?.isArmed ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)',
+                color: liveStatus?.isArmed ? '#10b981' : '#ef4444',
+                border: `1px solid ${liveStatus?.isArmed ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`,
+              }}
+            >
+              {liveStatus?.isArmed ? 'LIVE ARMED' : 'LIVE DISARMED'}
+            </span>
+          )}
+        </div>
+
+        {/* Emergency Kill Switch (Live Mode Only) */}
+        {isLive && (
+          liveStatus?.isArmed ? (
+            <button
+              type="button"
+              className="btn-kill-switch"
+              onClick={handleKillSwitch}
+              disabled={isArmingOrKilling}
+              title="STOP LIVE TRADING immediately disarms execution hot wallet"
+              style={{
+                background: 'rgba(239,68,68,0.15)',
+                color: '#ef4444',
+                border: '1px solid rgba(239,68,68,0.4)',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                fontSize: '11px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              <ShieldX size={12} />
+              <span>STOP LIVE</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-arm-switch"
+              onClick={handleArmSwitch}
+              disabled={isArmingOrKilling}
+              title="Re-evaluate safety checks and Arm Live Execution"
+              style={{
+                background: 'rgba(16,185,129,0.15)',
+                color: '#10b981',
+                border: '1px solid rgba(16,185,129,0.4)',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                fontSize: '11px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              <ShieldCheck size={12} />
+              <span>ARM LIVE</span>
+            </button>
+          )
+        )}
+
         {/* Execution Mode Badge */}
-        <Badge variant={isLive ? 'live' : 'paper'} size="sm">
-          {isLive ? '● LIVE EXECUTION' : 'PAPER SIM'}
+        <Badge variant={isLive ? (liveStatus?.isArmed ? 'live' : 'warning') : 'paper'} size="sm">
+          {isLive ? (liveStatus?.isArmed ? '● LIVE ARMED' : '○ LIVE DISARMED') : 'PAPER SIM'}
         </Badge>
 
         {/* Circuit Breaker Status */}
@@ -154,7 +293,7 @@ export const Topbar: React.FC<TopbarProps> = ({
           <Server size={14} />
         </button>
 
-        {/* Developer Simulation Trigger (Secondary Button) */}
+        {/* Developer Simulation Trigger (Paper Mode Only) */}
         {!isLive && (
           <button
             type="button"
@@ -168,14 +307,17 @@ export const Topbar: React.FC<TopbarProps> = ({
           </button>
         )}
 
-        {/* Solana Wallet Connect Control */}
+        {/* Dashboard Browser Wallet Connect Control */}
         <WalletButton />
 
         {/* Refresh Action */}
         <button
           type="button"
           className="btn-topbar-refresh"
-          onClick={onRefresh}
+          onClick={() => {
+            fetchLiveStatus();
+            onRefresh();
+          }}
           title="Refresh All Dashboard Data"
         >
           <RefreshCw size={14} />

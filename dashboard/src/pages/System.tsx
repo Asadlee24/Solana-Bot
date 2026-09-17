@@ -1,6 +1,7 @@
 import React from 'react';
 import { EventConsole } from '../components/system/EventConsole';
 import { SystemDiagnostics } from '../components/system/SystemDiagnostics';
+import { ExecutionWalletCard } from '../components/wallet/ExecutionWalletCard';
 import { WalletInfoCard } from '../components/wallet/WalletInfoCard';
 import { LiveConsoleEvent, StreamStatus, Telemetry } from '../types/dashboard';
 
@@ -31,6 +32,10 @@ export const System: React.FC<SystemProps> = ({
       </div>
 
       <SystemDiagnostics telemetry={telemetry} streamStatus={streamStatus} />
+
+      <div style={{ marginTop: 20 }}>
+        <ExecutionWalletCard />
+      </div>
 
       <div style={{ marginTop: 20 }}>
         <WalletInfoCard />
