@@ -14,10 +14,9 @@ import React, { useState } from 'react';
 import { MetricCard } from '../components/common/MetricCard';
 import { StatusDot } from '../components/common/StatusDot';
 import { ManualExitModal } from '../components/positions/ManualExitModal';
-import { BotHealthPanel } from '../components/trading/BotHealthPanel';
-import { ExecutionPipeline } from '../components/trading/ExecutionPipeline';
 import { LiveTickerStrip } from '../components/trading/LiveTickerStrip';
 import { OverviewLiveChart } from '../components/trading/OverviewLiveChart';
+import { TargetVsFollowerPanel } from '../components/trading/TargetVsFollowerPanel';
 import { TokenIdentity } from '../components/trading/TokenIdentity';
 import { TradeFeed } from '../components/trading/TradeFeed';
 import {
@@ -45,6 +44,9 @@ interface OverviewProps {
   lastRefreshedAt?: number;
   onNavigateTab: (tab: NavigationTab) => void;
   isLoading?: boolean;
+  targetWallet?: string;
+  onRefresh?: () => void;
+  onSimulate?: () => void;
 }
 
 export const Overview: React.FC<OverviewProps> = ({
@@ -56,6 +58,9 @@ export const Overview: React.FC<OverviewProps> = ({
   lastRefreshedAt,
   onNavigateTab,
   isLoading,
+  targetWallet = 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+  onRefresh = () => {},
+  onSimulate,
 }) => {
   const [selectedExitPos, setSelectedExitPos] = useState<Position | null>(null);
   const openPositions = positions.filter((p) => p.state === 'OPEN');
@@ -153,6 +158,19 @@ export const Overview: React.FC<OverviewProps> = ({
         />
       </div>
 
+      {/* Real-Time Target Trader vs Follower Execution Comparison */}
+      <div className="overview-section">
+        <TargetVsFollowerPanel
+          orders={orders}
+          positions={positions}
+          telemetry={telemetry}
+          latencySamples={latencySamples}
+          targetWallet={targetWallet}
+          onRefresh={onRefresh}
+          onSimulate={onSimulate}
+        />
+      </div>
+
       {/* Real-Time Interactive Trading Terminal Chart */}
       <div className="overview-section">
         <OverviewLiveChart
@@ -160,35 +178,6 @@ export const Overview: React.FC<OverviewProps> = ({
           orders={orders}
           positions={positions}
           latencySamples={latencySamples}
-        />
-      </div>
-
-      {/* Bot Health & Telemetry Panel */}
-      <div className="overview-section">
-        <div className="section-title-row">
-          <h3 className="section-heading">SYSTEM HEALTH & INFRASTRUCTURE</h3>
-          <button
-            type="button"
-            className="btn-text-link"
-            onClick={() => onNavigateTab('system')}
-          >
-            <span>Diagnostics Console</span>
-            <ArrowRight size={12} />
-          </button>
-        </div>
-
-        <BotHealthPanel
-          telemetry={telemetry}
-          streamStatus={streamStatus}
-          lastOrderTime={orders[0]?.quote_at}
-        />
-      </div>
-
-      {/* Execution Pipeline */}
-      <div className="overview-section">
-        <ExecutionPipeline
-          latestSample={latestLatencySample}
-          mode={telemetry?.executionMode}
         />
       </div>
 
@@ -240,7 +229,7 @@ export const Overview: React.FC<OverviewProps> = ({
                         onClick={() => setSelectedExitPos(pos)}
                         title="Manual Take Profit / Partial Exit"
                       >
-                        <span>💰 Take Profit</span>
+                        <span>Take Profit</span>
                       </button>
                     </div>
                   </div>

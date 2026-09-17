@@ -186,7 +186,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                               onClick={() => setSelectedExitPos(pos)}
                               title="Manual Take Profit / Partial Exit"
                             >
-                              <span>💰 Take Profit</span>
+                              <span>Take Profit</span>
                             </button>
                             <button
                               type="button"

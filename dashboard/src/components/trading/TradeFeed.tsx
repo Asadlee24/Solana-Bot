@@ -189,7 +189,7 @@ export const TradeFeed: React.FC<TradeFeedProps> = ({ orders, isLoading, limit }
                       <div className="latency-cell mono">
                         {comp?.reactionLatencyMs !== null && comp?.reactionLatencyMs !== undefined ? (
                           <span className="text-cyan">
-                            ⚡ {formatLatency(comp.reactionLatencyMs)}
+                            {formatLatency(comp.reactionLatencyMs)}
                           </span>
                         ) : (
                           <span className="text-muted">—</span>

@@ -74,6 +74,9 @@ export default function App() {
           lastRefreshedAt={lastRefreshedAt}
           onNavigateTab={setActiveTab}
           isLoading={isLoading}
+          targetWallet={primaryTargetWallet}
+          onRefresh={refresh}
+          onSimulate={handleSimulate}
         />
       )}
 

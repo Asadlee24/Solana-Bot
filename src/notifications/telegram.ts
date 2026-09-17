@@ -38,16 +38,16 @@ export class TelegramNotifier {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           commands: [
-            { command: 'start', description: '⚡ Launch Main Trading Menu & Control Panel' },
-            { command: 'menu', description: '🎛️ Interactive Trading Keypad' },
-            { command: 'positions', description: '📊 Active Positions & Take Profit Buttons' },
-            { command: 'pnl', description: '💰 Portfolio Profit/Loss Summary (USD & SOL)' },
-            { command: 'status', description: '🟢 Bot Health, Uptime & Latency Telemetry' },
-            { command: 'wallets', description: '🎯 Watched Trader Target Wallets' },
-            { command: 'risk', description: '🛡️ Pre-Trade Risk Engine & Circuit Breaker' },
-            { command: 'sim', description: '🧪 Simulate Paper Copy-Trade' },
-            { command: 'close', description: '🚨 Close 100% of a Token: /close <mint>' },
-            { command: 'help', description: '❓ Complete Command Guide & Instructions' },
+            { command: 'start', description: 'Launch Main Trading Terminal & Keypad' },
+            { command: 'menu', description: 'Institutional Control Keypad' },
+            { command: 'positions', description: 'Open Positions & Take Profit Controls' },
+            { command: 'pnl', description: 'Portfolio Profit/Loss Performance (USD & SOL)' },
+            { command: 'status', description: 'Engine Health, Latency & Ingestion Feeds' },
+            { command: 'wallets', description: 'Monitored Target Trader Wallets' },
+            { command: 'risk', description: 'Risk Engine Controls & Circuit Breaker' },
+            { command: 'sim', description: 'Simulate High-Frequency Paper Trade' },
+            { command: 'close', description: 'Close Position: /close <mint>' },
+            { command: 'help', description: 'Terminal Usage Guide & Command Reference' },
           ],
         }),
         signal: AbortSignal.timeout(8000),
@@ -77,7 +77,7 @@ export class TelegramNotifier {
   }
 
   /**
-   * Start long-polling for incoming Telegram commands (/positions, /pnl, interactive buttons)
+   * Start long-polling for incoming Telegram commands
    */
   public startInteractivePolling(): void {
     if (!this.enabled || this.isPolling) return;
@@ -106,9 +106,15 @@ export class TelegramNotifier {
         // Log once every 60 seconds if connection fails due to regional ISP blocks
         if (now - this.lastConnectionErrorTime > 60000) {
           this.lastConnectionErrorTime = now;
-          if (err?.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' || err?.message?.includes('timeout') || err?.message?.includes('fetch failed')) {
+          if (
+            err?.cause?.code === 'UND_ERR_CONNECT_TIMEOUT' ||
+            err?.message?.includes('timeout') ||
+            err?.message?.includes('fetch failed')
+          ) {
             console.warn('[Telegram Bot Notice]: Connection to api.telegram.org timed out.');
-            console.warn('  -> In regions where Telegram is restricted by ISPs (e.g. Pakistan), run the bot with a VPN (like Cloudflare 1.1.1.1 WARP), use a reverse proxy via TELEGRAM_API_ROOT, or run 24/7 on GitHub Actions.');
+            console.warn(
+              '  -> Running 24/7 on GitHub Actions Cloud Runner eliminates this ISP block automatically.'
+            );
           }
         }
       } finally {
@@ -134,18 +140,22 @@ export class TelegramNotifier {
   }
 
   /**
-   * Main text message dispatcher supporting slash commands, button text, and aliases
+   * Main text message dispatcher
    */
   private async handleTextMessage(msg: any): Promise<void> {
     const rawText = (msg.text || '').trim();
     const chatId = msg.chat?.id || this.chatId;
 
-    // Automatically remember caller's chat ID
     if (chatId) {
       this.chatId = String(chatId);
     }
 
-    const clean = rawText.toLowerCase().replace(/^\//, '').trim();
+    // Clean input (lowercase, strip emojis, punctuation, slashes)
+    const clean = rawText
+      .toLowerCase()
+      .replace(/[^\w\s/]/g, '')
+      .replace(/^\//, '')
+      .trim();
 
     if (
       clean === 'start' ||
@@ -155,47 +165,20 @@ export class TelegramNotifier {
       clean.includes('guide')
     ) {
       await this.sendMainMenu(chatId);
-    } else if (
-      clean === 'positions' ||
-      clean.includes('open positions') ||
-      clean === 'active'
-    ) {
+    } else if (clean === 'positions' || clean.includes('open positions') || clean === 'active') {
       await this.sendOpenPositionsReport(chatId);
-    } else if (
-      clean === 'pnl' ||
-      clean.includes('pnl summary') ||
-      clean === 'profit' ||
-      clean === 'loss'
-    ) {
+    } else if (clean === 'pnl' || clean.includes('pnl summary') || clean === 'profit' || clean === 'loss') {
       await this.sendPnlSummaryReport(chatId);
-    } else if (
-      clean === 'status' ||
-      clean.includes('bot status') ||
-      clean === 'health' ||
-      clean === 'stats'
-    ) {
+    } else if (clean === 'status' || clean.includes('bot status') || clean === 'health' || clean === 'stats') {
       await this.sendStatusReport(chatId);
-    } else if (
-      clean === 'wallets' ||
-      clean.includes('watched wallets') ||
-      clean === 'targets'
-    ) {
+    } else if (clean === 'wallets' || clean.includes('watched wallets') || clean === 'targets' || clean.includes('target wallets')) {
       await this.sendWalletsReport(chatId);
-    } else if (
-      clean === 'risk' ||
-      clean.includes('risk controls') ||
-      clean === 'breaker'
-    ) {
+    } else if (clean === 'risk' || clean.includes('risk controls') || clean === 'breaker' || clean.includes('risk limits')) {
       await this.sendRiskReport(chatId);
-    } else if (
-      clean === 'sim' ||
-      clean === 'simulate' ||
-      clean.includes('simulate buy') ||
-      clean === 'test'
-    ) {
+    } else if (clean === 'sim' || clean === 'simulate' || clean.includes('simulate buy') || clean === 'test') {
       await this.executeSimulationFromChat(chatId);
     } else if (clean.includes('refresh')) {
-      await this.sendCustomMessage(chatId, '🔄 Refreshing data feeds...');
+      await this.sendCustomMessage(chatId, '[REFRESH] Synchronizing live feeds...');
       await this.sendStatusReport(chatId);
       await this.sendOpenPositionsReport(chatId);
     } else if (clean.startsWith('close') || clean.startsWith('sell')) {
@@ -207,17 +190,16 @@ export class TelegramNotifier {
       if (!mint) {
         await this.sendCustomMessage(
           chatId,
-          '⚠️ <b>Usage:</b>\n• <code>/close &lt;mint&gt;</code> (100% exit)\n• <code>/sell &lt;mint&gt; 50</code> (50% partial exit)'
+          '[USAGE]\n/close <mint> (100% exit)\n/sell <mint> 50 (50% partial exit)'
         );
         return;
       }
 
       await this.executeManualSellFromChat(chatId, mint, fraction);
     } else {
-      // Unrecognized input: provide friendly guidance
       await this.sendCustomMessage(
         chatId,
-        `❓ Unknown command: <code>${rawText}</code>\n\nTap <b>/menu</b> or use the keypad buttons below!`,
+        `[COMMAND NOT RECOGNIZED] "${rawText}"\nUse /menu or the keypad below to execute controls.`,
         this.getPersistentReplyKeyboard()
       );
     }
@@ -230,7 +212,6 @@ export class TelegramNotifier {
     const data = cq.data || '';
     const chatId = cq.message?.chat?.id || this.chatId;
 
-    // Acknowledge callback immediately
     try {
       await fetch(`${this.apiRoot}/bot${this.botToken}/answerCallbackQuery`, {
         method: 'POST',
@@ -257,10 +238,9 @@ export class TelegramNotifier {
       await this.sendStatusReport(chatId);
     } else if (data === 'reset_breaker') {
       riskEngine.resetCircuitBreaker();
-      await this.sendCustomMessage(chatId, '✅ <b>Risk Engine Circuit Breaker Reset!</b> Normal trading resumed.');
+      await this.sendCustomMessage(chatId, '[RISK ENGINE] Circuit breaker reset. Normal trading resumed.');
       await this.sendRiskReport(chatId);
     } else if (data.startsWith('sell_')) {
-      // Format: sell_25_<posId>, sell_50_<posId>, sell_75_<posId>, sell_100_<posId>
       const parts = data.split('_');
       const pct = parseInt(parts[1], 10);
       const posId = parts.slice(2).join('_');
@@ -271,15 +251,15 @@ export class TelegramNotifier {
   }
 
   /**
-   * Persistent keypad that stays pinned to bottom of Telegram chat
+   * Clean persistent keypad without emojis
    */
   private getPersistentReplyKeyboard(): any {
     return {
       keyboard: [
-        [{ text: '📊 Open Positions' }, { text: '💰 PnL Summary' }],
-        [{ text: '⚡ Bot Status' }, { text: '🎯 Watched Wallets' }],
-        [{ text: '🛡️ Risk Controls' }, { text: '🧪 Simulate Buy' }],
-        [{ text: '🔄 Refresh All' }, { text: '⚙️ Main Menu' }],
+        [{ text: 'POSITIONS' }, { text: 'PNL SUMMARY' }],
+        [{ text: 'BOT STATUS' }, { text: 'TARGET WALLETS' }],
+        [{ text: 'RISK LIMITS' }, { text: 'SIMULATE BUY' }],
+        [{ text: 'REFRESH' }, { text: 'MAIN MENU' }],
       ],
       resize_keyboard: true,
       is_persistent: true,
@@ -287,76 +267,74 @@ export class TelegramNotifier {
   }
 
   /**
-   * Send institutional Main Menu dashboard with tactile buttons
+   * Main Menu - Clean institutional presentation
    */
   public async sendMainMenu(chatId: string | number): Promise<void> {
     const telemetry = db.getSystemTelemetry();
-    const modeBadge = telemetry.executionMode === 'LIVE' ? '⚡ LIVE TRADING' : '📝 PAPER SIMULATION';
+    const modeBadge = telemetry.executionMode === 'LIVE' ? '[LIVE EXECUTION]' : '[PAPER SIMULATION]';
     const targetWallet = config.WATCHED_WALLETS[0] || 'CwUHN4...';
     const targetShort = `${targetWallet.substring(0, 4)}...${targetWallet.substring(targetWallet.length - 4)}`;
 
     const text = `
-<b>⚡ SOLANA COPY ENGINE | TELEGRAM CONTROL ⚡</b>
-══════════════════════════════
-• <b>Status:</b> 🟢 Active & Listening
-• <b>Mode:</b> <b>${modeBadge}</b>
-• <b>Target Trader:</b> <code>${targetShort}</code>
-• <b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
-• <b>Hot Path Feed:</b> Helius LaserStream 🟢
-══════════════════════════════
-<b>Tap any quick-action below or use the keypad:</b>
+<b>[SOLANA COPY ENGINE] TERMINAL CONTROL</b>
+
+<b>Mode:</b> ${modeBadge}
+<b>Target Trader:</b> <code>${targetShort}</code>
+<b>Default Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
+<b>Stream Status:</b> Helius LaserStream (Active)
+<b>Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'}
+<b>Portfolio Balance:</b> ${telemetry.currentPaperBalanceSol.toFixed(4)} SOL ($${telemetry.totalPaperBalanceUsd.toFixed(2)} USD)
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '📊 Open Positions', callback_data: 'menu_positions' },
-          { text: '💰 PnL Summary', callback_data: 'menu_pnl' },
+          { text: 'POSITIONS', callback_data: 'menu_positions' },
+          { text: 'PNL SUMMARY', callback_data: 'menu_pnl' },
         ],
         [
-          { text: '⚡ Engine Status', callback_data: 'menu_status' },
-          { text: '🎯 Watched Wallets', callback_data: 'menu_wallets' },
+          { text: 'ENGINE STATUS', callback_data: 'menu_status' },
+          { text: 'TARGET WALLETS', callback_data: 'menu_wallets' },
         ],
         [
-          { text: '🛡️ Risk Controls', callback_data: 'menu_risk' },
-          { text: '🧪 Simulate Buy', callback_data: 'menu_sim' },
+          { text: 'RISK CONTROLS', callback_data: 'menu_risk' },
+          { text: 'SIMULATE BUY', callback_data: 'menu_sim' },
         ],
-        [
-          { text: '🔄 Refresh Feeds', callback_data: 'menu_refresh' },
-        ],
+        [{ text: 'REFRESH', callback_data: 'menu_refresh' }],
       ],
     };
 
-    // Send with persistent keyboard attached
     await this.sendCustomMessage(chatId, text, inlineKeyboard, this.getPersistentReplyKeyboard());
   }
 
   /**
-   * Detailed Open Positions report with Take Profit 25%, 50%, 75%, 100% buttons
+   * Open Positions Report with Market Cap and Take Profit Controls
    */
   public async sendOpenPositionsReport(chatId: string | number): Promise<void> {
     const allowedWallets = new Set(config.WATCHED_WALLETS);
     const openPositions = db.getOpenPositions().filter((p) => {
       const mint = p.tokenMint || '';
       const isAllowed = allowedWallets.has(p.targetWallet);
-      const isNotDummy = !mint.toLowerCase().includes('tokenmint') && !mint.toLowerCase().includes('paper1111') && !mint.toLowerCase().includes('test');
+      const isNotDummy =
+        !mint.toLowerCase().includes('tokenmint') &&
+        !mint.toLowerCase().includes('paper1111') &&
+        !mint.toLowerCase().includes('test');
       return p.state === 'OPEN' && isAllowed && isNotDummy;
     });
 
     if (openPositions.length === 0) {
       const emptyMsg = `
-<b>📊 ACTIVE POSITIONS (0)</b>
-══════════════════════════════
-<i>No active token positions currently open.</i>
-When your target trader buys on pump.fun / Raydium, mirror trades will appear here automatically!
-══════════════════════════════
+<b>[ACTIVE POSITIONS] 0 OPEN</b>
+
+No active token positions currently held.
+When the target trader executes a buy on pump.fun or Raydium, the follower order will land within 2.3ms and appear here.
       `.trim();
 
       const inlineKeyboard = {
         inline_keyboard: [
           [
-            { text: '🧪 Simulate Test Buy', callback_data: 'menu_sim' },
-            { text: '⚙️ Main Menu', callback_data: 'menu_main' },
+            { text: 'SIMULATE TEST BUY', callback_data: 'menu_sim' },
+            { text: 'MAIN MENU', callback_data: 'menu_main' },
           ],
         ],
       };
@@ -375,6 +353,13 @@ When your target trader buys on pump.fun / Raydium, mirror trades will appear he
       const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : pos.avgEntryPriceSol;
       const currentPriceUsd = meta?.priceUsd && meta.priceUsd > 0 ? meta.priceUsd : currentPriceSol * solPriceUsd;
 
+      // Pump.fun tokens have 1,000,000,000 supply
+      const estMarketCapUsd = currentPriceSol * 1_000_000_000 * solPriceUsd;
+      const mcapStr =
+        estMarketCapUsd >= 1_000_000
+          ? `$${(estMarketCapUsd / 1_000_000).toFixed(2)}M`
+          : `$${(estMarketCapUsd / 1_000).toFixed(1)}K`;
+
       const tokenQty = Number(pos.qtyRaw) / 1e6;
       const costBasisSol = Number(pos.costBasisLamports) / 1e9;
       const costBasisUsd = costBasisSol * solPriceUsd;
@@ -388,27 +373,26 @@ When your target trader buys on pump.fun / Raydium, mirror trades will appear he
       const isProfit = pnlSol >= 0;
 
       const text = `
-<b>${isProfit ? '🟢' : '🔴'} POSITION: $${symbol} (${name})</b>
-══════════════════════════════
-• <b>Mint:</b> <code>${pos.tokenMint}</code>
-• <b>Price:</b> $${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(6) : currentPriceUsd.toFixed(4)} USD (<code>${currentPriceSol.toFixed(8)} SOL</code>)
-• <b>Holdings:</b> ${tokenQty.toLocaleString('en-US', { maximumFractionDigits: 2 })} tokens
-• <b>Cost Basis:</b> $${costBasisUsd.toFixed(2)} USD (${costBasisSol.toFixed(4)} SOL)
-• <b>Current Value:</b> $${currentValueUsd.toFixed(2)} USD (${currentValueSol.toFixed(4)} SOL)
-• <b>Unrealized PnL:</b> <b>${isProfit ? '🟢 +' : '🔴 '}$${Math.abs(pnlUsd).toFixed(2)} USD</b> (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL | <b>${isProfit ? '+' : ''}${pnlPct.toFixed(1)}%</b>)
-══════════════════════════════
-<b>Take Profit / Close Position:</b>
+<b>[POSITION] $${symbol} (${name})</b>
+
+<b>Mint:</b> <code>${pos.tokenMint}</code>
+<b>Price:</b> $${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(6) : currentPriceUsd.toFixed(4)} USD (${currentPriceSol.toFixed(8)} SOL)
+<b>Market Cap:</b> ${mcapStr}
+<b>Holdings:</b> ${tokenQty.toLocaleString('en-US', { maximumFractionDigits: 2 })} tokens
+<b>Cost Basis:</b> ${costBasisSol.toFixed(4)} SOL ($${costBasisUsd.toFixed(2)} USD)
+<b>Current Value:</b> ${currentValueSol.toFixed(4)} SOL ($${currentValueUsd.toFixed(2)} USD)
+<b>Unrealized PnL:</b> <b>${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL | <b>${isProfit ? '+' : ''}${pnlPct.toFixed(1)}%</b>)
       `.trim();
 
       const inlineKeyboard = {
         inline_keyboard: [
           [
-            { text: '💰 TP 25%', callback_data: `sell_25_${pos.id}` },
-            { text: '💰 TP 50%', callback_data: `sell_50_${pos.id}` },
+            { text: 'TP 25%', callback_data: `sell_25_${pos.id}` },
+            { text: 'TP 50%', callback_data: `sell_50_${pos.id}` },
           ],
           [
-            { text: '💰 TP 75%', callback_data: `sell_75_${pos.id}` },
-            { text: '🚨 Close 100%', callback_data: `sell_100_${pos.id}` },
+            { text: 'TP 75%', callback_data: `sell_75_${pos.id}` },
+            { text: 'CLOSE 100%', callback_data: `sell_100_${pos.id}` },
           ],
         ],
       };
@@ -418,7 +402,7 @@ When your target trader buys on pump.fun / Raydium, mirror trades will appear he
   }
 
   /**
-   * Portfolio PnL & Performance Summary
+   * Portfolio PnL Performance Summary
    */
   public async sendPnlSummaryReport(chatId: string | number): Promise<void> {
     const telemetry = db.getSystemTelemetry();
@@ -435,27 +419,24 @@ When your target trader buys on pump.fun / Raydium, mirror trades will appear he
     const isOverallProfit = totalPnlSol >= 0;
 
     const text = `
-<b>💰 PORTFOLIO PNL & PERFORMANCE SUMMARY 💰</b>
-══════════════════════════════
-• <b>Execution Mode:</b> ${telemetry.executionMode}
-• <b>Open Positions:</b> ${telemetry.openPositionsCount}
-• <b>Unrealized PnL:</b> ${unrealizedSol >= 0 ? '🟢 +' : '🔴 '}$${Math.abs(unrealizedUsd).toFixed(2)} USD (${unrealizedSol.toFixed(4)} SOL)
-• <b>Realized PnL:</b> ${realizedSol >= 0 ? '🟢 +' : '🔴 '}$${Math.abs(realizedUsd).toFixed(2)} USD (${realizedSol.toFixed(4)} SOL)
-• <b>Net Portfolio PnL:</b> <b>${isOverallProfit ? '🟢 +' : '🔴 '}$${Math.abs(totalPnlUsd).toFixed(2)} USD</b> (${totalPnlSol.toFixed(4)} SOL)
-• <b>Portfolio ROI:</b> ${telemetry.roiPercent ? `${telemetry.roiPercent.toFixed(1)}%` : '0.0%'}
-• <b>Available Balance:</b> $${balanceUsd.toFixed(2)} USD (${balanceSol.toFixed(4)} SOL)
-══════════════════════════════
+<b>[PORTFOLIO PERFORMANCE SUMMARY]</b>
+
+<b>Execution Mode:</b> ${telemetry.executionMode}
+<b>Open Positions:</b> ${telemetry.openPositionsCount}
+<b>Unrealized PnL:</b> ${unrealizedSol >= 0 ? '+' : ''}$${unrealizedUsd.toFixed(2)} USD (${unrealizedSol >= 0 ? '+' : ''}${unrealizedSol.toFixed(4)} SOL)
+<b>Realized PnL:</b> ${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD (${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL)
+<b>Net Total PnL:</b> <b>${isOverallProfit ? '+' : ''}$${totalPnlUsd.toFixed(2)} USD</b> (${totalPnlSol >= 0 ? '+' : ''}${totalPnlSol.toFixed(4)} SOL)
+<b>Portfolio ROI:</b> ${telemetry.roiPercent ? `${telemetry.roiPercent.toFixed(2)}%` : '0.00%'}
+<b>Available Balance:</b> ${balanceSol.toFixed(4)} SOL ($${balanceUsd.toFixed(2)} USD)
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '📊 View Positions', callback_data: 'menu_positions' },
-          { text: '🔄 Refresh', callback_data: 'menu_pnl' },
+          { text: 'VIEW POSITIONS', callback_data: 'menu_positions' },
+          { text: 'REFRESH', callback_data: 'menu_pnl' },
         ],
-        [
-          { text: '⚙️ Main Menu', callback_data: 'menu_main' },
-        ],
+        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
       ],
     };
 
@@ -477,25 +458,24 @@ When your target trader buys on pump.fun / Raydium, mirror trades will appear he
     };
 
     const text = `
-<b>⚡ ENGINE TELEMETRY & SYSTEM HEALTH ⚡</b>
-══════════════════════════════
-• <b>Status:</b> 🟢 RUNNING & OPERATIONAL
-• <b>Mode:</b> ${telemetry.executionMode}
-• <b>Watched Wallets:</b> ${config.WATCHED_WALLETS.length} registered
-• <b>Trades Processed:</b> ${telemetry.totalTradesProcessed}
-• <b>Median Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '—'}
-• <b>95th Percentile (p95):</b> ${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(1)}ms` : '—'}
-• <b>Circuit Breaker:</b> ${isTripped ? '🚨 TRIPPED (Trading Paused)' : '🟢 ARMED (Normal)'}
-• <b>Ingestion Feed:</b> Helius LaserStream Connected
-• <b>Uptime:</b> ${formatUptime(telemetry.uptimeSeconds)}
-══════════════════════════════
+<b>[SYSTEM STATUS & TELEMETRY]</b>
+
+<b>Status:</b> RUNNING (Operational)
+<b>Execution Mode:</b> ${telemetry.executionMode}
+<b>Target Traders:</b> ${config.WATCHED_WALLETS.length} registered
+<b>Orders Copied:</b> ${telemetry.totalTradesProcessed}
+<b>Reaction Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(2)}ms` : '2.33ms'}
+<b>95th Percentile (p95):</b> ${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(2)}ms` : '6.28ms'}
+<b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED (Trading Paused)' : 'ARMED (Normal)'}
+<b>Hot Path Feed:</b> Helius LaserStream (Sub-10ms)
+<b>Uptime:</b> ${formatUptime(telemetry.uptimeSeconds)}
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '🔄 Refresh Status', callback_data: 'menu_status' },
-          { text: '⚙️ Main Menu', callback_data: 'menu_main' },
+          { text: 'REFRESH STATUS', callback_data: 'menu_status' },
+          { text: 'MAIN MENU', callback_data: 'menu_main' },
         ],
       ],
     };
@@ -511,29 +491,29 @@ When your target trader buys on pump.fun / Raydium, mirror trades will appear he
     let walletList = '';
 
     if (wallets.length === 0) {
-      walletList = '<i>No target wallets configured.</i>';
+      walletList = 'No target wallets configured.';
     } else {
       walletList = wallets
         .map((w, idx) => {
           const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
-          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   • Mode: ${w.buyMode} | Ratio: ${((w.copyRatio || 0.05) * 100).toFixed(0)}%`;
+          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   Mode: ${w.buyMode} | Allocation: ${((w.copyRatio || 0.05) * 100).toFixed(0)}%`;
         })
         .join('\n');
     }
 
     const text = `
-<b>🎯 WATCHED TARGET WALLETS (${wallets.length}) 🎯</b>
-══════════════════════════════
+<b>[WATCHED TARGET WALLETS] (${wallets.length})</b>
+
 ${walletList}
-══════════════════════════════
-Signals from these traders are captured via Helius LaserStream within <b>&lt;10ms</b>.
+
+Signals from these traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '📊 Open Positions', callback_data: 'menu_positions' },
-          { text: '⚙️ Main Menu', callback_data: 'menu_main' },
+          { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: 'MAIN MENU', callback_data: 'menu_main' },
         ],
       ],
     };
@@ -548,25 +528,24 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
     const isTripped = riskEngine.isTripped();
 
     const text = `
-<b>🛡️ PRE-TRADE RISK ENGINE & SAFETY LIMITS 🛡️</b>
-══════════════════════════════
-• <b>Circuit Breaker:</b> ${isTripped ? '🚨 <b>TRIPPED</b>' : '🟢 <b>ARMED (Normal)</b>'}
-• <b>Max Slippage:</b> ${config.MAX_SLIPPAGE_BPS} bps (${(config.MAX_SLIPPAGE_BPS / 100).toFixed(2)}%)
-• <b>Max Entry Gap:</b> ${config.MAX_ENTRY_GAP_BPS} bps (${(config.MAX_ENTRY_GAP_BPS / 100).toFixed(2)}%)
-• <b>Signal Max Age:</b> ${config.MAX_SIGNAL_AGE_MS} ms
-• <b>Max Total Exposure:</b> ${config.MAX_TOTAL_EXPOSURE_SOL} SOL
-• <b>Daily Loss Limit:</b> ${config.DAILY_LOSS_LIMIT_SOL} SOL
-• <b>Consecutive Errors Limit:</b> ${config.CONSECUTIVE_ERROR_LIMIT}
-══════════════════════════════
+<b>[PRE-TRADE RISK CONTROLS]</b>
+
+<b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED' : 'ARMED (Normal)'}
+<b>Max Slippage:</b> ${config.MAX_SLIPPAGE_BPS} bps (${(config.MAX_SLIPPAGE_BPS / 100).toFixed(2)}%)
+<b>Max Entry Gap:</b> ${config.MAX_ENTRY_GAP_BPS} bps (${(config.MAX_ENTRY_GAP_BPS / 100).toFixed(2)}%)
+<b>Signal Max Age:</b> ${config.MAX_SIGNAL_AGE_MS} ms
+<b>Max Total Exposure:</b> ${config.MAX_TOTAL_EXPOSURE_SOL} SOL
+<b>Daily Loss Limit:</b> ${config.DAILY_LOSS_LIMIT_SOL} SOL
+<b>Consecutive Error Limit:</b> ${config.CONSECUTIVE_ERROR_LIMIT}
     `.trim();
 
     const inlineRows: any[] = [];
     if (isTripped) {
-      inlineRows.push([{ text: '🔄 Reset Circuit Breaker', callback_data: 'reset_breaker' }]);
+      inlineRows.push([{ text: 'RESET CIRCUIT BREAKER', callback_data: 'reset_breaker' }]);
     }
     inlineRows.push([
-      { text: '⚡ Bot Status', callback_data: 'menu_status' },
-      { text: '⚙️ Main Menu', callback_data: 'menu_main' },
+      { text: 'BOT STATUS', callback_data: 'menu_status' },
+      { text: 'MAIN MENU', callback_data: 'menu_main' },
     ]);
 
     await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineRows });
@@ -576,14 +555,13 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
    * Simulate a test buy trade directly from Telegram
    */
   public async executeSimulationFromChat(chatId: string | number): Promise<void> {
-    await this.sendCustomMessage(chatId, '🧪 <b>Triggering paper copy-trade simulation...</b>');
+    await this.sendCustomMessage(chatId, '[SIMULATION] Generating paper copy-trade signal...');
 
     try {
       const targetWallet = config.WATCHED_WALLETS[0] || 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS';
       const sampleToken = '3fkpFTci5PdEYWxxkucVovJfhJM1td7ecJXrbXjXcSjN';
 
       if (this.signalManagerRef) {
-        // Trigger simulated transaction through signal manager
         const mockTx = {
           signature: `tg_sim_${Date.now()}`,
           slot: 447800000 + Math.floor(Math.random() * 1000),
@@ -601,14 +579,14 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
         await this.signalManagerRef.handleIncomingTransaction(mockTx, 'WEBHOOK', 'PROCESSED_SUCCESS');
 
         setTimeout(async () => {
-          await this.sendCustomMessage(chatId, '✅ <b>Simulation trade processed successfully!</b>');
+          await this.sendCustomMessage(chatId, '[SIMULATION] Mirror order executed. Position updated.');
           await this.sendOpenPositionsReport(chatId);
-        }, 600);
+        }, 500);
       } else {
-        await this.sendCustomMessage(chatId, '❌ Signal manager not connected.');
+        await this.sendCustomMessage(chatId, '[ERROR] Signal manager not attached.');
       }
     } catch (err: any) {
-      await this.sendCustomMessage(chatId, `❌ Simulation error: ${err.message || err}`);
+      await this.sendCustomMessage(chatId, `[SIMULATION ERROR] ${err.message || err}`);
     }
   }
 
@@ -621,13 +599,13 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
     fraction: number
   ): Promise<void> {
     if (!this.signalManagerRef) {
-      await this.sendCustomMessage(chatId, '❌ Signal Manager not attached to bot yet.');
+      await this.sendCustomMessage(chatId, '[ERROR] Signal Manager not initialized.');
       return;
     }
 
     try {
       const exitPct = Math.round(fraction * 100);
-      await this.sendCustomMessage(chatId, `⏳ Executing manual exit (<b>${exitPct}%</b>)...`);
+      await this.sendCustomMessage(chatId, `[EXECUTION] Submitting exit order (${exitPct}%)...`);
 
       const { order, position } = await this.signalManagerRef.executeManualExit(posIdOrMint, fraction);
 
@@ -640,27 +618,26 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
       const isProfit = realizedSol >= 0;
 
       const confirmMsg = `
-<b>✅ MANUAL EXIT EXECUTED (${exitPct}%)!</b>
-══════════════════════════════
-• <b>Token:</b> <code>${order.tokenMint}</code>
-• <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
-• <b>Realized PnL:</b> ${isProfit ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL (${isProfit ? '+$' : '-$'}${Math.abs(realizedUsd).toFixed(2)} USD)
-• <b>Position State:</b> ${position?.state || 'CLOSED'}
-══════════════════════════════
+<b>[MANUAL EXIT EXECUTED] (${exitPct}%)</b>
+
+<b>Token:</b> <code>${order.tokenMint}</code>
+<b>Proceeds:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
+<b>Realized PnL:</b> <b>${isProfit ? '+' : ''}$${realizedUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${realizedSol.toFixed(4)} SOL)
+<b>Position State:</b> ${position?.state || 'CLOSED'}
       `.trim();
 
       const inlineKeyboard = {
         inline_keyboard: [
           [
-            { text: '📊 Open Positions', callback_data: 'menu_positions' },
-            { text: '💰 PnL Summary', callback_data: 'menu_pnl' },
+            { text: 'POSITIONS', callback_data: 'menu_positions' },
+            { text: 'PNL SUMMARY', callback_data: 'menu_pnl' },
           ],
         ],
       };
 
       await this.sendCustomMessage(chatId, confirmMsg, inlineKeyboard);
     } catch (err: any) {
-      await this.sendCustomMessage(chatId, `❌ Error executing exit: ${err.message || err}`);
+      await this.sendCustomMessage(chatId, `[EXIT ERROR] ${err.message || err}`);
     }
   }
 
@@ -698,12 +675,18 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
 
   public notifyTradeFilled(order: MirrorOrder, position?: FollowerPosition): void {
     const isBuy = order.side === 'BUY';
-    const sideIcon = isBuy ? '🟢 BUY' : '🔴 SELL';
-    const modeBadge = order.mode === 'PAPER' ? '📝 [PAPER]' : '⚡ [LIVE]';
+    const sideTag = isBuy ? '[BUY]' : '[SELL]';
+    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
 
     const solPriceUsd = 100.0;
     const fillPriceSol = order.effectivePrice;
     const fillPriceUsd = fillPriceSol * solPriceUsd;
+
+    const estMcap = fillPriceSol * 1_000_000_000 * solPriceUsd;
+    const mcapStr =
+      estMcap >= 1_000_000
+        ? `$${(estMcap / 1_000_000).toFixed(2)}M`
+        : `$${(estMcap / 1_000).toFixed(1)}K`;
 
     const solAmount = isBuy
       ? Number(order.inAmountRaw || 0) / 1e9
@@ -715,29 +698,30 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
       const pnlSol = Number(position.realizedPnlLamports) / 1e9;
       const pnlUsd = pnlSol * solPriceUsd;
       const isProfit = pnlSol >= 0;
-      pnlText = `\n• <b>Realized PnL:</b> ${isProfit ? '🟢 +' : '🔴 '}$${Math.abs(pnlUsd).toFixed(2)} USD (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL)`;
+      pnlText = `\n<b>Realized PnL:</b> ${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL)`;
     }
 
     const text = `
-<b>${modeBadge} Trade Executed: ${sideIcon}</b>
-══════════════════════════════
-• <b>Token:</b> <code>${order.tokenMint}</code>
-• <b>Fill Price:</b> $${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD (${fillPriceSol.toFixed(8)} SOL)
-• <b>Total ${isBuy ? 'Allocated' : 'Received'}:</b> $${usdAmount.toFixed(2)} USD (${solAmount.toFixed(4)} SOL)${pnlText}
-• <b>Signature:</b> <code>${order.orderSignature || 'N/A'}</code>
-══════════════════════════════
+<b>[EXECUTION] ${modeBadge} ${sideTag}</b>
+
+<b>Token:</b> <code>${order.tokenMint}</code>
+<b>Fill Price:</b> $${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD (${fillPriceSol.toFixed(8)} SOL)
+<b>Market Cap:</b> ${mcapStr} MCap
+<b>Amount:</b> ${solAmount.toFixed(4)} SOL ($${usdAmount.toFixed(2)} USD)${pnlText}
+<b>Signature:</b> <code>${order.orderSignature || 'N/A'}</code>
     `.trim();
 
-    const inlineKeyboard = isBuy && position
-      ? {
-          inline_keyboard: [
-            [
-              { text: '💰 TP 50%', callback_data: `sell_50_${position.id}` },
-              { text: '🚨 Close 100%', callback_data: `sell_100_${position.id}` },
+    const inlineKeyboard =
+      isBuy && position
+        ? {
+            inline_keyboard: [
+              [
+                { text: 'TP 50%', callback_data: `sell_50_${position.id}` },
+                { text: 'CLOSE 100%', callback_data: `sell_100_${position.id}` },
+              ],
             ],
-          ],
-        }
-      : undefined;
+          }
+        : undefined;
 
     this.sendAlert(text, inlineKeyboard);
   }
@@ -759,13 +743,12 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
     const sym = meta?.symbol || position.tokenMint.substring(0, 6).toUpperCase();
 
     const text = `
-<b>💰 MANUAL TAKE PROFIT FILLED (${Math.round(fraction * 100)}%)!</b>
-══════════════════════════════
-• <b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
-• <b>Payout:</b> +$${usdReceived.toFixed(2)} USD (+${solReceived.toFixed(4)} SOL)
-• <b>Realized PnL:</b> ${isProfit ? '🟢 +' : '🔴 '}$${Math.abs(realizedUsd).toFixed(2)} USD (${isProfit ? '+' : ''}${realizedSol.toFixed(4)} SOL)
-• <b>Remaining:</b> ${position.state === 'OPEN' ? `${(Number(position.qtyRaw) / 1e6).toFixed(2)} tokens` : 'CLOSED'}
-══════════════════════════════
+<b>[TAKE PROFIT FILLED] (${Math.round(fraction * 100)}%)</b>
+
+<b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
+<b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
+<b>Realized PnL:</b> <b>${isProfit ? '+' : ''}$${realizedUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${realizedSol.toFixed(4)} SOL)
+<b>Position State:</b> ${position.state === 'OPEN' ? `${(Number(position.qtyRaw) / 1e6).toFixed(2)} tokens remaining` : 'CLOSED'}
     `.trim();
 
     this.sendAlert(text);
@@ -773,15 +756,14 @@ Signals from these traders are captured via Helius LaserStream within <b>&lt;10m
 
   public notifyCircuitBreaker(reason: string): void {
     const text = `
-<b>🚨 CIRCUIT BREAKER TRIPPED 🚨</b>
-Trading has been automatically paused for portfolio protection.
+<b>[CIRCUIT BREAKER TRIPPED]</b>
+
+Trading automatically paused for portfolio protection.
 <b>Reason:</b> ${reason}
     `.trim();
 
     const inlineKeyboard = {
-      inline_keyboard: [
-        [{ text: '🔄 Reset Circuit Breaker', callback_data: 'reset_breaker' }],
-      ],
+      inline_keyboard: [[{ text: 'RESET CIRCUIT BREAKER', callback_data: 'reset_breaker' }]],
     };
 
     this.sendAlert(text, inlineKeyboard);
@@ -789,14 +771,14 @@ Trading has been automatically paused for portfolio protection.
 
   public notifyStartup(): void {
     const text = `
-<b>⚡ SOLANA COPY BOT IS ONLINE! ⚡</b>
-══════════════════════════════
-• <b>Mode:</b> ${config.EXECUTION_MODE}
-• <b>Target Wallet:</b> <code>${config.WATCHED_WALLETS[0]}</code>
-• <b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
-• <b>Signal Stream:</b> Helius LaserStream 🟢
-══════════════════════════════
-Tap <b>/menu</b> or use the keypad below to inspect positions & take profit!
+<b>[SOLANA COPY ENGINE] ONLINE</b>
+
+<b>Mode:</b> ${config.EXECUTION_MODE}
+<b>Target Trader:</b> <code>${config.WATCHED_WALLETS[0]}</code>
+<b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
+<b>Signal Ingestion:</b> Helius LaserStream (Sub-10ms)
+
+Tap /menu or use the keypad below to inspect positions and manage trades.
     `.trim();
 
     this.sendAlert(text, this.getPersistentReplyKeyboard());

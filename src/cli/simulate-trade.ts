@@ -124,10 +124,10 @@ async function runFullSimulation() {
 
   const sellRes100 = await signalManager.handleIncomingTransaction(sellTx100, 'HELIUS_PRECONFIRMATION', 'SEEN_PRECONF');
   const finalPos = db.getPosition(TARGET_WALLET, TOKEN_MINT);
-  console.log('✅ Bot 100% Full Liquidation Executed:');
+  console.log('[EXECUTED] Bot 100% Full Liquidation:');
   console.log(`   - Final Sold Tokens: ${(Number(sellRes100.order?.inAmountRaw || 0) / 1e6).toLocaleString()} tokens`);
   console.log(`   - Final Position State: [${finalPos?.state}]`);
-  console.log(`   - Total Locked Realized PnL: +${(Number(finalPos?.realizedPnlLamports || 0) / 1e9).toFixed(4)} SOL 💰`);
+  console.log(`   - Total Locked Realized PnL: +${(Number(finalPos?.realizedPnlLamports || 0) / 1e9).toFixed(4)} SOL`);
 
   console.log('\n---------------------------------------------------------------');
   console.log('   FULL SIMULATION COMPLETE: ALL FORMULAS & EXITS VERIFIED!   ');
