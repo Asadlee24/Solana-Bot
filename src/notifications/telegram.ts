@@ -66,6 +66,19 @@ Trading has been paused for safety.
 
     this.sendAlert(text);
   }
+
+  public notifyStartup(): void {
+    const text = `
+<b>⚡ SOLANA COPY BOT IS NOW LIVE! ⚡</b>
+<b>Mode:</b> ${config.EXECUTION_MODE}
+<b>Target Wallet:</b> <code>${config.WATCHED_WALLETS[0]}</code>
+<b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
+<b>Status:</b> Listening via Helius LaserStream 🟢
+    `.trim();
+
+    this.sendAlert(text);
+  }
 }
 
 export const telegramNotifier = new TelegramNotifier();
+

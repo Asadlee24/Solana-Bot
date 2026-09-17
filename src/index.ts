@@ -1,6 +1,7 @@
 import { createApiServer } from './api/server.js';
 import { config } from './config/index.js';
 import { db } from './db/database.js';
+import { telegramNotifier } from './notifications/telegram.js';
 import { HeliusWebSocketStream } from './streams/helius-ws.js';
 import { rpcPoller } from './streams/rpc-poller.js';
 import { signalManager } from './streams/signal-manager.js';
@@ -34,6 +35,7 @@ async function bootstrap() {
     },
     onOpen: () => {
       console.info('[Stream] Hot path signal ingestion active via Helius LaserStream');
+      telegramNotifier.notifyStartup();
     },
     onError: (err) => {
       console.warn('[Stream Warning]:', err.message);
