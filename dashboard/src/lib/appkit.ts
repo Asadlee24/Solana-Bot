@@ -4,10 +4,14 @@ import { SolanaAdapter } from '@reown/appkit-adapter-solana';
 
 // Read Reown Project ID from environment (public client identifier)
 const rawProjectId = import.meta.env.VITE_REOWN_PROJECT_ID;
-export const projectId = typeof rawProjectId === 'string' ? rawProjectId.trim() : '';
+export const isProjectConfigured = Boolean(typeof rawProjectId === 'string' && rawProjectId.trim().length > 0);
 
-// Guard: Project ID must be provided to initialize AppKit cloud services
-export const isAppKitAvailable = Boolean(projectId && projectId.length > 0);
+// Use configured project ID or fallback ID so the AppKit modal singleton is always safe
+export const projectId = isProjectConfigured 
+  ? (rawProjectId as string).trim() 
+  : 'b56e18d47c72ab683b10814fe9495694';
+
+export const isAppKitAvailable = isProjectConfigured;
 
 // Initialize native Solana Adapter (zero EVM / wagmi dependencies)
 export const solanaAdapter = new SolanaAdapter();
@@ -21,35 +25,32 @@ export const appKitMetadata = {
   icons: [`${origin}/favicon.ico`],
 };
 
-// Global AppKit instance - initialized only if project ID is configured
+// Global AppKit instance - always initialized to guarantee hooks do not crash
 export let appKitModal: any = null;
 
-if (isAppKitAvailable) {
-  try {
-    appKitModal = createAppKit({
-      adapters: [solanaAdapter],
-      networks: [solana],
-      defaultNetwork: solana,
-      metadata: appKitMetadata,
-      projectId,
-      themeMode: 'dark',
-      themeVariables: {
-        '--w3m-accent': '#14f195',
-        '--w3m-color-mix': '#0b0e17',
-        '--w3m-border-radius-master': '8px',
-        '--w3m-font-family': 'JetBrains Mono, ui-monospace, monospace',
-      },
-      features: {
-        analytics: false,
-        email: false,
-        socials: false,
-        swaps: false,
-        onramp: false,
-      },
-      allWallets: 'SHOW',
-    });
-  } catch (err) {
-    console.warn('[AppKit] Failed to initialize AppKit modal:', err);
-    appKitModal = null;
-  }
+try {
+  appKitModal = createAppKit({
+    adapters: [solanaAdapter],
+    networks: [solana],
+    defaultNetwork: solana,
+    metadata: appKitMetadata,
+    projectId,
+    themeMode: 'dark',
+    themeVariables: {
+      '--w3m-accent': '#14f195',
+      '--w3m-color-mix': '#0b0e17',
+      '--w3m-border-radius-master': '8px',
+      '--w3m-font-family': 'JetBrains Mono, ui-monospace, monospace',
+    },
+    features: {
+      analytics: false,
+      email: false,
+      socials: false,
+      swaps: false,
+      onramp: false,
+    },
+    allWallets: 'SHOW',
+  });
+} catch (err) {
+  console.warn('[AppKit] Failed to initialize AppKit modal:', err);
 }
