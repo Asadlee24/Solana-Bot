@@ -19,7 +19,16 @@ interface Telemetry {
   watchedWalletsCount: number;
   openPositionsCount: number;
   totalTradesProcessed: number;
+  initialPaperBalanceSol?: number;
+  currentPaperBalanceSol?: number;
+  solPriceUsd?: number;
+  totalPaperBalanceUsd?: number;
   totalRealizedPnlSol: number;
+  totalRealizedPnlUsd?: number;
+  totalUnrealizedPnlSol?: number;
+  totalNetPnlSol?: number;
+  totalNetPnlUsd?: number;
+  roiPercent?: number;
   circuitBreakerTripped: boolean;
   consecutiveErrors: number;
   latencyP50Ms: number;
@@ -37,6 +46,13 @@ interface Position {
   costBasisLamports: string;
   avgEntryPriceSol: number;
   realizedPnlLamports: string;
+  unrealizedPnlLamports?: string;
+  currentPriceSol?: number;
+  currentPriceUsd?: number;
+  currentValueSol?: number;
+  currentValueUsd?: number;
+  unrealizedPnlSol?: number;
+  unrealizedPnlPct?: number;
   state: string;
   metadata?: TokenMeta;
 }
@@ -250,18 +266,25 @@ export default function App() {
           </div>
         </div>
 
-        {/* Realized Profit Card */}
+        {/* Live Net Profit Card */}
         <div className="card">
           <div className="metric-label">
-            <span>Total Realized Profit</span>
-            <span className="badge badge-buy">NET PROFIT</span>
+            <span>Total Net Profit (PnL)</span>
+            <span className="badge badge-floating">
+              <span className="live-pulse-dot" style={{ width: 6, height: 6, marginRight: 4 }}></span>
+              LIVE FLOATING + REALIZED
+            </span>
           </div>
           <div className="metric-value text-green">
-            +{telemetry.totalRealizedPnlSol?.toFixed(4) || '0.1126'} <span style={{ fontSize: 16 }}>SOL</span>
+            +{((telemetry.totalNetPnlSol !== undefined ? telemetry.totalNetPnlSol : telemetry.totalRealizedPnlSol) || 0).toFixed(4)} <span style={{ fontSize: 16 }}>SOL</span>
           </div>
-          <div className="metric-sub" style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span className="text-green">+${telemetry.totalRealizedPnlUsd?.toFixed(2) || '11.26'} USD</span>
-            <span className="badge-mc">ROI: +{telemetry.roiPercent || '1.13'}%</span>
+          <div className="metric-sub" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="text-green">+${((telemetry.totalNetPnlUsd !== undefined ? telemetry.totalNetPnlUsd : telemetry.totalRealizedPnlUsd) || 0).toFixed(2)} USD</span>
+            <span className="badge-mc">ROI: +{telemetry.roiPercent || '0.0'}%</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'flex', justifyContent: 'space-between' }}>
+            <span>Closed: +{(telemetry.totalRealizedPnlSol || 0).toFixed(4)} SOL</span>
+            <span style={{ color: 'var(--neon-emerald)', fontWeight: 600 }}>Floating: +{(telemetry.totalUnrealizedPnlSol || 0).toFixed(4)} SOL</span>
           </div>
         </div>
 
@@ -350,6 +373,107 @@ export default function App() {
               </span>
             </div>
           </div>
+
+          {/* Live Active Holdings Highlight Banner */}
+          {positions.filter((p) => p.state === 'OPEN').length > 0 && (
+            <div className="live-holdings-box">
+              <div className="holdings-header">
+                <div className="holdings-title">
+                  <span className="live-pulse-dot"></span>
+                  <span>Currently Holding Live Trader Position ({positions.filter((p) => p.state === 'OPEN').length})</span>
+                </div>
+                <span className="badge badge-floating">REAL-TIME DEX PRICE SYNC</span>
+              </div>
+              {positions
+                .filter((p) => p.state === 'OPEN')
+                .map((p) => {
+                  const meta = p.metadata;
+                  const symbol = meta?.symbol || p.tokenMint.substring(0, 5);
+                  const name = meta?.name || 'Token';
+                  const pnlSol = p.unrealizedPnlSol || 0;
+                  const pnlPct = p.unrealizedPnlPct || 0;
+                  const isPos = pnlSol >= 0;
+
+                  return (
+                    <div key={p.id} className="holding-card-row">
+                      <div className="holding-token-info">
+                        {meta?.imageUrl ? (
+                          <img
+                            src={meta.imageUrl}
+                            alt={symbol}
+                            className="token-logo"
+                            style={{ width: 38, height: 38, borderRadius: '50%' }}
+                          />
+                        ) : (
+                          <div className="token-logo-fallback" style={{ width: 38, height: 38, fontSize: 13 }}>
+                            {symbol.substring(0, 2)}
+                          </div>
+                        )}
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14 }}>
+                            ${symbol} <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>({name})</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            <code>
+                              {p.tokenMint.substring(0, 6)}...{p.tokenMint.substring(p.tokenMint.length - 4)}
+                            </code>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="holding-stats-group">
+                        <div className="stat-item">
+                          <span className="stat-label">Buy Cost</span>
+                          <span className="stat-val">{(Number(p.costBasisLamports) / 1e9).toFixed(4)} SOL</span>
+                        </div>
+                        <div className="stat-item">
+                          <span className="stat-label">Entry Price</span>
+                          <span className="stat-val">{p.avgEntryPriceSol.toFixed(8)} SOL</span>
+                        </div>
+                        <div className="stat-item">
+                          <span className="stat-label">Live Price</span>
+                          <span className="stat-val" style={{ color: 'var(--neon-cyan)' }}>
+                            {p.currentPriceSol ? p.currentPriceSol.toFixed(8) : p.avgEntryPriceSol.toFixed(8)} SOL
+                          </span>
+                        </div>
+                        <div className="stat-item">
+                          <span className="stat-label">Current Value</span>
+                          <span className="stat-val">
+                            {p.currentValueSol ? `${p.currentValueSol.toFixed(4)} SOL` : `${(Number(p.costBasisLamports) / 1e9).toFixed(4)} SOL`}
+                            {p.currentValueUsd ? ` (~$${p.currentValueUsd.toFixed(2)})` : ''}
+                          </span>
+                        </div>
+                        <div className="stat-item">
+                          <span className="stat-label">Live Floating Profit</span>
+                          <span className={`stat-val ${isPos ? 'stat-profit-glow' : 'text-rose'}`}>
+                            {isPos ? `+${pnlSol.toFixed(4)} SOL (+${pnlPct.toFixed(1)}%)` : `${pnlSol.toFixed(4)} SOL (${pnlPct.toFixed(1)}%)`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="links-group">
+                        <a
+                          href={meta?.dexScreenerUrl || `https://dexscreener.com/solana/${p.tokenMint}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="action-link link-dex"
+                        >
+                          📈 DexScreener
+                        </a>
+                        <a
+                          href={meta?.pumpFunUrl || `https://pump.fun/${p.tokenMint}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="action-link link-pump"
+                        >
+                          💊 Pump.fun
+                        </a>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
 
           <div className="table-wrapper">
             <table className="data-table">
@@ -689,7 +813,9 @@ export default function App() {
                   <th>Quantity</th>
                   <th>Cost Basis</th>
                   <th>Avg Entry (SOL)</th>
-                  <th>Realized PnL</th>
+                  <th>Current Price</th>
+                  <th>Current Value</th>
+                  <th>Floating Profit (Live PnL)</th>
                   <th>State</th>
                   <th>Live Charts</th>
                 </tr>
@@ -697,7 +823,7 @@ export default function App() {
               <tbody>
                 {positions.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="empty-state">
+                    <td colSpan={9} className="empty-state">
                       No open positions. Mirror engine will automatically open positions on target buys.
                     </td>
                   </tr>
@@ -706,6 +832,9 @@ export default function App() {
                     const meta = p.metadata;
                     const symbol = meta?.symbol || p.tokenMint.substring(0, 5);
                     const name = meta?.name || 'Token';
+                    const pnlSol = p.unrealizedPnlSol || 0;
+                    const pnlPct = p.unrealizedPnlPct || 0;
+                    const isPos = pnlSol >= 0;
 
                     return (
                       <tr key={p.id}>
@@ -729,9 +858,34 @@ export default function App() {
                         </td>
                         <td>{(Number(p.qtyRaw) / 1e6).toLocaleString()}</td>
                         <td>{(Number(p.costBasisLamports) / 1e9).toFixed(4)} SOL</td>
-                        <td>{p.avgEntryPriceSol.toFixed(8)}</td>
-                        <td className={Number(p.realizedPnlLamports) >= 0 ? 'text-green' : 'text-rose'}>
-                          {(Number(p.realizedPnlLamports) / 1e9).toFixed(4)} SOL
+                        <td style={{ fontFamily: 'var(--font-mono)' }}>{p.avgEntryPriceSol.toFixed(8)} SOL</td>
+                        <td>
+                          <div style={{ color: 'var(--neon-cyan)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                            {p.currentPriceSol ? p.currentPriceSol.toFixed(8) : p.avgEntryPriceSol.toFixed(8)} SOL
+                          </div>
+                          {p.currentPriceUsd ? (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                              ~${p.currentPriceUsd.toFixed(6)} USD
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>
+                            {p.currentValueSol ? `${p.currentValueSol.toFixed(4)} SOL` : `${(Number(p.costBasisLamports) / 1e9).toFixed(4)} SOL`}
+                          </div>
+                          {p.currentValueUsd ? (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                              ~${p.currentValueUsd.toFixed(2)} USD
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>
+                          <div className={isPos ? 'stat-profit-glow' : 'text-rose'} style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                            {isPos ? `+${pnlSol.toFixed(4)} SOL` : `${pnlSol.toFixed(4)} SOL`}
+                          </div>
+                          <div style={{ fontSize: 11, color: isPos ? 'var(--neon-emerald)' : 'var(--neon-rose)', fontWeight: 600 }}>
+                            {isPos ? `+${pnlPct.toFixed(1)}%` : `${pnlPct.toFixed(1)}%`}
+                          </div>
                         </td>
                         <td>
                           <span className={`badge ${p.state === 'OPEN' ? 'badge-open' : 'badge-closed'}`}>

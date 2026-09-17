@@ -213,6 +213,9 @@ export interface SystemTelemetry {
   totalPaperBalanceUsd: number;
   totalRealizedPnlSol: number;
   totalRealizedPnlUsd: number;
+  totalUnrealizedPnlSol?: number;
+  totalNetPnlSol?: number;
+  totalNetPnlUsd?: number;
   roiPercent: number;
   circuitBreakerTripped: boolean;
   consecutiveErrors: number;

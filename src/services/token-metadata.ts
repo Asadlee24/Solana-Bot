@@ -3,6 +3,7 @@ export interface TokenMetadata {
   name: string;
   symbol: string;
   priceUsd: number;
+  priceSol?: number;
   fdvUsd: number;
   liquidityUsd: number;
   dexScreenerUrl: string;
@@ -25,8 +26,8 @@ export class TokenMetadataService {
     }
 
     const cached = this.cache.get(mint);
-    if (cached && Date.now() - cached.updatedAt < 60000) {
-      // 1 minute cache
+    if (cached && Date.now() - cached.updatedAt < 10000) {
+      // 10 second cache for responsive real-time PnL
       return cached;
     }
 
@@ -63,6 +64,7 @@ export class TokenMetadataService {
           name: pair.baseToken?.name || 'Unknown Token',
           symbol: pair.baseToken?.symbol || 'TOKEN',
           priceUsd: parseFloat(pair.priceUsd || '0'),
+          priceSol: parseFloat(pair.priceNative || '0'),
           fdvUsd: pair.fdv || 0,
           liquidityUsd: pair.liquidity?.usd || 0,
           dexScreenerUrl: pair.url || `https://dexscreener.com/solana/${mint}`,

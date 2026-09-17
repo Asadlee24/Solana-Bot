@@ -36,16 +36,47 @@ export function createApiServer() {
   });
 
   app.get('/api/positions', async (_req: Request, res: Response) => {
+    const allowedWallets = new Set(config.WATCHED_WALLETS);
     const open = db.getOpenPositions().filter((pos) => {
       const mint = pos.tokenMint || '';
-      return !mint.toLowerCase().includes('tokenmint') && !mint.toLowerCase().includes('paper1111') && !mint.toLowerCase().includes('test');
+      const isAllowed = allowedWallets.has(pos.targetWallet);
+      const isNotDummy = !mint.toLowerCase().includes('tokenmint') && !mint.toLowerCase().includes('paper1111') && !mint.toLowerCase().includes('test');
+      return isAllowed && isNotDummy;
     });
+
+    const solPriceUsd = 100.0;
     const enriched = await Promise.all(
       open.map(async (pos) => {
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
+        const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : pos.avgEntryPriceSol;
+        const currentPriceUsd = meta?.priceUsd && meta.priceUsd > 0 ? meta.priceUsd : (currentPriceSol * solPriceUsd);
+
+        // SPL pump.fun tokens have 6 decimals: raw / 1e6 = tokens
+        const tokenQty = Number(pos.qtyRaw) / 1e6;
+        const costBasisSol = Number(pos.costBasisLamports) / 1e9;
+        const currentValueSol = tokenQty * currentPriceSol;
+        const currentValueUsd = currentValueSol * solPriceUsd;
+
+        const unrealizedPnlSol = currentValueSol - costBasisSol;
+        const unrealizedPnlPct = costBasisSol > 0 ? (unrealizedPnlSol / costBasisSol) * 100 : 0;
+        const unrealizedPnlLamports = Math.round(unrealizedPnlSol * 1e9).toString();
+
+        try {
+          db.updateUnrealizedPnl(pos.id, unrealizedPnlLamports);
+        } catch {
+          // ignore
+        }
+
         return {
           ...pos,
           metadata: meta,
+          currentPriceSol,
+          currentPriceUsd,
+          currentValueSol: Number(currentValueSol.toFixed(4)),
+          currentValueUsd: Number(currentValueUsd.toFixed(2)),
+          unrealizedPnlSol: Number(unrealizedPnlSol.toFixed(4)),
+          unrealizedPnlPct: Number(unrealizedPnlPct.toFixed(2)),
+          unrealizedPnlLamports,
         };
       })
     );

@@ -176,6 +176,12 @@ export class DBManager {
   }
 
   private seedDefaultWallets() {
+    // Delete any wallet that is NOT in config.WATCHED_WALLETS
+    if (config.WATCHED_WALLETS.length > 0) {
+      const placeholders = config.WATCHED_WALLETS.map(() => '?').join(',');
+      this.db.prepare(`DELETE FROM watched_wallets WHERE wallet NOT IN (${placeholders})`).run(...config.WATCHED_WALLETS);
+    }
+
     const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM watched_wallets');
     const row = countStmt.get() as { count: number };
     if (row.count === 0 && config.WATCHED_WALLETS.length > 0) {
@@ -186,7 +192,7 @@ export class DBManager {
       for (const w of config.WATCHED_WALLETS) {
         insertStmt.run(
           w,
-          'Primary Target',
+          'Favorite Trader',
           config.DEFAULT_SIZING_MODE,
           (config.FIXED_BUY_SOL * 1e9).toString(),
           config.COPY_RATIO,
@@ -477,6 +483,15 @@ export class DBManager {
     return stmt.all(limit);
   }
 
+  public updateUnrealizedPnl(id: string, unrealizedPnlLamports: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE positions
+      SET unrealized_pnl_raw = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    stmt.run(unrealizedPnlLamports, Date.now(), id);
+  }
+
   public getRecentOrders(limit: number = 30): any[] {
     const stmt = this.db.prepare(`
       SELECT o.*, 
@@ -507,7 +522,9 @@ export class DBManager {
     const ordersRow = this.db.prepare("SELECT COUNT(*) as count FROM mirror_orders WHERE status = 'FILLED'").get() as any;
 
     const pnlRow = this.db.prepare(`
-      SELECT SUM(CAST(realized_pnl_raw AS INTEGER)) as totalPnl
+      SELECT 
+        COALESCE(SUM(CAST(realized_pnl_raw AS INTEGER)), 0) as totalRealizedPnl,
+        COALESCE(SUM(CASE WHEN state = 'OPEN' THEN CAST(unrealized_pnl_raw AS INTEGER) ELSE 0 END), 0) as totalUnrealizedPnl
       FROM positions
     `).get() as any;
 
@@ -531,13 +548,17 @@ export class DBManager {
 
     const lastSample = this.db.prepare('SELECT observed_at FROM latency_samples ORDER BY id DESC LIMIT 1').get() as any;
 
-    const totalPnlSol = (pnlRow?.totalPnl || 0) / 1e9;
+    const totalRealizedPnlSol = (pnlRow?.totalRealizedPnl || 0) / 1e9;
+    const totalUnrealizedPnlSol = (pnlRow?.totalUnrealizedPnl || 0) / 1e9;
+    const totalNetPnlSol = totalRealizedPnlSol + totalUnrealizedPnlSol;
+
     const initialPaperBalanceSol = 10.0;
-    const currentPaperBalanceSol = Number((initialPaperBalanceSol + totalPnlSol).toFixed(4));
+    const currentPaperBalanceSol = Number((initialPaperBalanceSol + totalNetPnlSol).toFixed(4));
     const solPriceUsd = 100.0;
     const totalPaperBalanceUsd = Number((currentPaperBalanceSol * solPriceUsd).toFixed(2));
-    const totalRealizedPnlUsd = Number((totalPnlSol * solPriceUsd).toFixed(2));
-    const roiPercent = Number(((totalPnlSol / initialPaperBalanceSol) * 100).toFixed(2));
+    const totalRealizedPnlUsd = Number((totalRealizedPnlSol * solPriceUsd).toFixed(2));
+    const totalNetPnlUsd = Number((totalNetPnlSol * solPriceUsd).toFixed(2));
+    const roiPercent = Number(((totalNetPnlSol / initialPaperBalanceSol) * 100).toFixed(2));
 
     return {
       uptimeSeconds: Math.floor(process.uptime()),
@@ -549,8 +570,11 @@ export class DBManager {
       currentPaperBalanceSol,
       solPriceUsd,
       totalPaperBalanceUsd,
-      totalRealizedPnlSol: Number(totalPnlSol.toFixed(4)),
+      totalRealizedPnlSol: Number(totalRealizedPnlSol.toFixed(4)),
       totalRealizedPnlUsd,
+      totalUnrealizedPnlSol: Number(totalUnrealizedPnlSol.toFixed(4)),
+      totalNetPnlSol: Number(totalNetPnlSol.toFixed(4)),
+      totalNetPnlUsd,
       roiPercent,
       circuitBreakerTripped: false,
       consecutiveErrors: 0,
