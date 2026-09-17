@@ -153,7 +153,12 @@ export function createApiServer() {
     res.flushHeaders();
 
     const sendEvent = (event: string, data: any) => {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      try {
+        const safeJson = JSON.stringify(data, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
+        res.write(`event: ${event}\ndata: ${safeJson}\n\n`);
+      } catch (e) {
+        // Avoid crashing stream on serialization edge-cases
+      }
     };
 
     // Listeners for real-time manager events
