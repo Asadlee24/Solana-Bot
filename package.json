@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "vite build dashboard && node scripts/post-build.js",
+    "build": "vite build dashboard && node scripts/post-build.js && tsc",
     "build:server": "tsc",
     "build:all": "vite build dashboard && node scripts/post-build.js && tsc",
     "test": "vitest run",
