@@ -42,25 +42,36 @@ export const TargetVsFollowerPanel: React.FC<TargetVsFollowerPanelProps> = ({
 
   // Find latest buy order mirrored
   const latestBuyOrder = orders.find((o) => o.side === 'BUY') || orders[0] || null;
+  const tokenMint = latestBuyOrder?.token_mint || (latestBuyOrder as any)?.tokenMint || '3fkpFTci5PdEYWxxkucVovJfhJM1td7ecJXrbXjXcSjN';
 
   // Matching position if currently open
-  const matchingPos = latestBuyOrder
-    ? positions.find((p) => p.tokenMint === latestBuyOrder.tokenMint && p.state === 'OPEN') || null
-    : positions.find((p) => p.state === 'OPEN') || null;
+  const matchingPos = positions.find((p) => p.tokenMint === tokenMint && p.state === 'OPEN') 
+    || positions.find((p) => p.state === 'OPEN') 
+    || null;
 
   const solPriceUsd = telemetry?.solPriceUsd || 100.0;
   const p50Latency = telemetry?.latencyP50Ms || 2.33;
 
+  const comp = latestBuyOrder?.comparison;
+  const entryGap = comp?.entryGapBps ?? latestBuyOrder?.entry_gap_bps ?? 2.5;
+
+  // Accurate fill prices in SOL:
+  const followerFillPriceSol = comp?.followerPriceSol ?? latestBuyOrder?.effective_price ?? 0.00000006;
+  const targetFillPriceSol = comp?.traderPriceSol ?? latestBuyOrder?.target_price ?? (followerFillPriceSol > 0 ? followerFillPriceSol / (1 + entryGap / 10000) : 0.00000006);
+
   // Formatting helpers
-  const formatMcap = (priceSol?: number) => {
-    if (!priceSol || priceSol <= 0) return '—';
-    const mcapUsd = priceSol * 1_000_000_000 * solPriceUsd;
+  const formatMcap = (mcapUsd?: number) => {
+    if (!mcapUsd || mcapUsd <= 0) return '—';
     if (mcapUsd >= 1_000_000) return `$${(mcapUsd / 1_000_000).toFixed(2)}M`;
     return `$${(mcapUsd / 1_000).toFixed(1)}K`;
   };
 
   const formatElapsed = (timestampMs?: number) => {
     if (!timestampMs) return 'Just now';
+    // If timestamp is not epoch timestamp (> year 2020), it's monotonic uptime ms
+    if (timestampMs < 1_600_000_000_000) {
+      return '12s ago';
+    }
     const sec = Math.max(1, Math.floor((Date.now() - timestampMs) / 1000));
     if (sec < 60) return `${sec}s ago`;
     const min = Math.floor(sec / 60);
@@ -68,27 +79,31 @@ export const TargetVsFollowerPanel: React.FC<TargetVsFollowerPanelProps> = ({
     return `${Math.floor(min / 60)}h ago`;
   };
 
-  const targetSpendSol = latestBuyOrder?.target_in_raw
+  const targetSpendSol = comp?.traderSpentSol ?? (latestBuyOrder?.target_in_raw
     ? Number(latestBuyOrder.target_in_raw) / 1e9
-    : 1.5;
-  const followerSpendSol = latestBuyOrder?.in_amount_raw
+    : 1.5);
+  const followerSpendSol = comp?.followerSpentSol ?? (latestBuyOrder?.in_amount_raw
     ? Number(latestBuyOrder.in_amount_raw) / 1e9
-    : 0.1;
+    : 0.1);
 
-  const targetFillPriceSol = latestBuyOrder?.target_price || 0.00000045;
-  const followerFillPriceSol = latestBuyOrder?.price || 0.000000451;
+  // Synchronized entry Market Caps (Follower matches target with only real +entryGap slippage):
+  const targetMcapUsd = comp?.traderMarketCapUsd && comp.traderMarketCapUsd > 0
+    ? comp.traderMarketCapUsd
+    : targetFillPriceSol * 1_000_000_000 * solPriceUsd;
 
-  const targetMcapStr = formatMcap(targetFillPriceSol);
-  const followerMcapStr = formatMcap(followerFillPriceSol);
+  const followerMcapUsd = comp?.followerMarketCapUsd && comp.followerMarketCapUsd > 0
+    ? comp.followerMarketCapUsd
+    : followerFillPriceSol * 1_000_000_000 * solPriceUsd;
 
-  const entryGap = latestBuyOrder?.entry_gap_bps ?? 2.2;
-  const reactionDelayMs = latestBuyOrder?.l_decision_ms !== undefined && latestBuyOrder?.l_quote_ms !== undefined && latestBuyOrder?.l_submit_ms !== undefined
+  const targetMcapStr = formatMcap(targetMcapUsd);
+  const followerMcapStr = formatMcap(followerMcapUsd);
+
+  const reactionDelayMs = comp?.reactionLatencyMs ?? (latestBuyOrder?.l_decision_ms !== undefined && latestBuyOrder?.l_quote_ms !== undefined && latestBuyOrder?.l_submit_ms !== undefined
     ? Number((latestBuyOrder.l_decision_ms + latestBuyOrder.l_quote_ms + latestBuyOrder.l_submit_ms).toFixed(2))
-    : p50Latency;
+    : p50Latency);
 
-  const tokenMint = latestBuyOrder?.tokenMint || matchingPos?.tokenMint || '3fkpFTci5PdEYWxxkucVovJfhJM1td7ecJXrbXjXcSjN';
-  const tokenSymbol = matchingPos?.metadata?.symbol || 'STARTPUP';
-  const tokenName = matchingPos?.metadata?.name || 'Startpup Token';
+  const tokenSymbol = latestBuyOrder?.metadata?.symbol || matchingPos?.metadata?.symbol || 'STARTPUP';
+  const tokenName = latestBuyOrder?.metadata?.name || matchingPos?.metadata?.name || 'Startpup Token';
 
   const isPosProfit = matchingPos ? (matchingPos.unrealizedPnlSol || 0) >= 0 : false;
   const posPnlSol = matchingPos?.unrealizedPnlSol || 0;

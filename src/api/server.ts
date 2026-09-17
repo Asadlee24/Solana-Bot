@@ -142,16 +142,10 @@ export function createApiServer() {
         const traderPrice = hasMeasuredTargetPrice ? order.target_price : (followerPrice > 0 ? followerPrice * 0.985 : 0);
 
         const totalSupply = 1_000_000_000;
-        let followerMarketCap = meta && meta.fdvUsd && meta.fdvUsd > 0
-          ? meta.fdvUsd
-          : followerPrice * totalSupply * solPriceUsd;
-
-        let traderMarketCap = 0;
-        if (followerPrice > 0 && traderPrice > 0) {
-          traderMarketCap = followerMarketCap * (traderPrice / followerPrice);
-        } else {
-          traderMarketCap = followerMarketCap * 0.985;
-        }
+        const followerMarketCap = followerPrice * totalSupply * solPriceUsd;
+        const traderMarketCap = traderPrice > 0
+          ? traderPrice * totalSupply * solPriceUsd
+          : (followerMarketCap > 0 ? followerMarketCap * 0.9975 : 0);
 
         const isBuy = order.side === 'BUY';
         const hasMeasuredTargetSpend = Boolean(isBuy ? order.target_in_raw : order.target_out_raw);
