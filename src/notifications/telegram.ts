@@ -1342,7 +1342,7 @@ Check any trader's live win rate, hold time, and profit before copying!
     );
 
     try {
-      const result = await traderAnalyzerService.analyzeWallet(address, 40);
+      const result = await traderAnalyzerService.analyzeWallet(address, 25);
       const isWatched = config.WATCHED_WALLETS.includes(address) || Boolean(db.getWatchedWallet(address));
 
       const solscanLink = `<a href="https://solscan.io/account/${address}">Solscan</a>`;
@@ -1350,6 +1350,9 @@ Check any trader's live win rate, hold time, and profit before copying!
 
       const pnlSign = result.netPnlSol >= 0 ? '+' : '';
       const pnlColor = result.netPnlSol >= 0 ? '🟢' : '🔴';
+      const safeStyle = result.tradingStyle.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeRec = result.recommendation.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeBadge = result.verdictBadge.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
       const text = `
 🧠 <b>[TRADER WIN-RATE & SCORE REPORT]</b>
@@ -1357,7 +1360,7 @@ Check any trader's live win rate, hold time, and profit before copying!
 <b>Wallet:</b> <code>${address}</code>
 <b>Links:</b> ${solscanLink} | ${gmgnLink}
 
-<b>${result.verdictBadge}</b>
+<b>${safeBadge}</b>
 
 ━━━━━━━━━━━━━━━━━━━
 <b>📊 PERFORMANCE METRICS:</b>
@@ -1366,11 +1369,11 @@ Check any trader's live win rate, hold time, and profit before copying!
 • <b>Completed Rounds:</b> <b>${result.completedRounds}</b> tokens
 • <b>Net PnL:</b> ${pnlColor} <b>${pnlSign}${result.netPnlSol.toFixed(3)} SOL</b> (${pnlSign}$${result.netPnlUsd.toFixed(2)} USD)
 • <b>Avg Hold Time:</b> <b>${result.avgHoldTimeFormatted}</b>
-• <b>Trading Style:</b> <code>${result.tradingStyle}</code>
+• <b>Trading Style:</b> <code>${safeStyle}</code>
 
 ━━━━━━━━━━━━━━━━━━━
 <b>💡 RECOMMENDATION:</b>
-<i>${result.recommendation}</i>
+<i>${safeRec}</i>
       `.trim();
 
       const inlineKeyboardRows: any[] = [];

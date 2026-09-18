@@ -40,7 +40,7 @@ export class TraderAnalyzerService {
    * Comprehensive On-Chain Trader Analysis
    * Scans last 40-50 transactions to calculate real Win Rate, PnL & Hold Time
    */
-  public async analyzeWallet(address: string, maxLimit = 40): Promise<TraderAnalysisResult> {
+  public async analyzeWallet(address: string, maxLimit = 25): Promise<TraderAnalysisResult> {
     const trimmed = address.trim();
     new PublicKey(trimmed); // Validate format
 
@@ -48,7 +48,7 @@ export class TraderAnalyzerService {
     if (config.HELIUS_API_KEY) {
       try {
         const url = `https://api.helius.xyz/v0/addresses/${trimmed}/transactions?api-key=${config.HELIUS_API_KEY}&limit=${maxLimit}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
         if (res.ok) {
           const data = (await res.json()) as any;
           if (Array.isArray(data)) {
@@ -69,7 +69,7 @@ export class TraderAnalyzerService {
   }
 
   /**
-   * Fallback using standard Solana RPC parsed transactions
+   * Fallback using standard Solana RPC parsed transactions (batched)
    */
   private async fetchViaRpc(address: string, limit: number): Promise<any[]> {
     try {
@@ -77,22 +77,25 @@ export class TraderAnalyzerService {
       const sigs = await this.connection.getSignaturesForAddress(pubkey, { limit }, 'confirmed');
       if (!sigs || sigs.length === 0) return [];
 
-      const parsedList: any[] = [];
-      for (const s of sigs) {
-        if (s.err) continue; // Skip failed txs
-        try {
-          const parsed = await this.connection.getParsedTransaction(s.signature, {
-            maxSupportedTransactionVersion: 0,
-            commitment: 'confirmed',
-          });
-          if (!parsed) continue;
+      const validSigs = sigs.filter((s) => !s.err).map((s) => s.signature);
+      if (validSigs.length === 0) return [];
 
-          // Normalize to Helius-like structure
+      const parsedTransactions = await this.connection.getParsedTransactions(validSigs, {
+        maxSupportedTransactionVersion: 0,
+        commitment: 'confirmed',
+      });
+
+      const parsedList: any[] = [];
+      for (let i = 0; i < parsedTransactions.length; i++) {
+        const parsed = parsedTransactions[i];
+        if (!parsed) continue;
+
+        try {
+          const sig = validSigs[i];
           const preTokens = parsed.meta?.preTokenBalances || [];
           const postTokens = parsed.meta?.postTokenBalances || [];
           const tokenTransfers: any[] = [];
 
-          // Compare token deltas
           for (const post of postTokens) {
             const pre = preTokens.find((p) => p.accountIndex === post.accountIndex);
             const preAmt = BigInt(pre?.uiTokenAmount?.amount || '0');
@@ -108,7 +111,6 @@ export class TraderAnalyzerService {
             }
           }
 
-          // Native SOL delta
           const accountKeys = parsed.transaction.message.accountKeys.map((k: any) =>
             typeof k === 'string' ? k : k.pubkey.toBase58()
           );
@@ -128,7 +130,7 @@ export class TraderAnalyzerService {
           }
 
           parsedList.push({
-            signature: s.signature,
+            signature: sig,
             timestamp: parsed.blockTime || Math.floor(Date.now() / 1000),
             type: tokenTransfers.length > 0 ? 'SWAP' : 'UNKNOWN',
             source: 'RPC_PARSED',
@@ -136,7 +138,7 @@ export class TraderAnalyzerService {
             nativeTransfers,
           });
         } catch {
-          // Skip on individual transaction failure
+          // Skip individual failed parse
         }
       }
       return parsedList;
@@ -271,13 +273,13 @@ export class TraderAnalyzerService {
     if (totalSwaps === 0) {
       tradingStyle = 'Non-Trading / Distribution Script';
     } else if (avgHoldSeconds > 0 && avgHoldSeconds < 30) {
-      tradingStyle = '⚡ Hyper Sniper / Instant Dumper (<30s exits)';
+      tradingStyle = '⚡ Hyper Sniper / Instant Dumper (under 30s exits)';
     } else if (avgHoldSeconds >= 30 && avgHoldSeconds < 300) {
-      tradingStyle = '🏎️ Fast Scalper (<5m holding)';
+      tradingStyle = '🏎️ Fast Scalper (under 5m holding)';
     } else if (avgHoldSeconds >= 300 && avgHoldSeconds < 3600) {
       tradingStyle = '🎯 Swing Trader (5m - 60m holding)';
     } else if (avgHoldSeconds >= 3600) {
-      tradingStyle = '💎 Gem Holder / Investor (>1h holding)';
+      tradingStyle = '💎 Gem Holder / Investor (over 1h holding)';
     } else {
       tradingStyle = 'DEX Trader';
     }
