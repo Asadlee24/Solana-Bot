@@ -81,12 +81,8 @@ export class TelegramNotifier {
         if (id.trim()) ids.add(id.trim());
       });
     }
-    // Whitelist operator's known Telegram accounts (Asad Lee)
+    // Whitelist operator's sole authorized Telegram account (@Asadaly2)
     ids.add('7080909965');
-    ids.add('6180068450');
-    if (this.chatId && this.chatId.trim() !== '') {
-      ids.add(this.chatId.trim());
-    }
     return Array.from(ids);
   }
 
