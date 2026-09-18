@@ -80,7 +80,7 @@ export class AutoExitManager {
           continue;
         }
 
-        // 2. Check Stop-Loss Trigger (-25% Anti-Rug)
+        // 2. Check Stop-Loss Trigger (-50% Anti-Rug)
         if (config.AUTO_SL_ENABLED && pnlPct <= -config.AUTO_SL_LOSS_PCT) {
           await this.triggerStopLoss(pos, pnlPct, meta || undefined);
           continue;

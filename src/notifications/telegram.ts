@@ -300,11 +300,11 @@ export class TelegramNotifier {
       await this.sendTpSlReport(chatId);
     } else if (clean === 'sl_off' || clean === 'sloff' || clean === 'disable_sl') {
       (config as any).AUTO_SL_ENABLED = false;
-      await this.sendCustomMessage(chatId, '🔴 <b>Anti-Rug Stop-Loss (-25%) has been TURNED OFF.</b>\nBot will NOT automatically cut losses on dumps.');
+      await this.sendCustomMessage(chatId, `🔴 <b>Anti-Rug Stop-Loss (-${config.AUTO_SL_LOSS_PCT}%) has been TURNED OFF.</b>\nBot will NOT automatically cut losses on dumps.`);
       await this.sendTpSlReport(chatId);
     } else if (clean === 'sl_on' || clean === 'slon' || clean === 'enable_sl') {
       (config as any).AUTO_SL_ENABLED = true;
-      await this.sendCustomMessage(chatId, '🟢 <b>Anti-Rug Stop-Loss (-25%) has been TURNED ON.</b>\nBot will automatically emergency cut if token drops by -25%.');
+      await this.sendCustomMessage(chatId, `🟢 <b>Anti-Rug Stop-Loss (-${config.AUTO_SL_LOSS_PCT}%) has been TURNED ON.</b>\nBot will automatically emergency cut if token drops by -${config.AUTO_SL_LOSS_PCT}%.`);
     } else if (clean === 'cooldown' || clean.includes('cooldown') || clean === 'guard' || clean.includes('fast finger') || clean.includes('spam') || clean === 'never_rebuy' || clean.includes('never rebuy') || clean.includes('locked')) {
       await this.sendCooldownReport(chatId);
     } else if (clean === 'clear_cooldown' || clean === 'clearcooldown' || clean.includes('clear cooldown')) {
@@ -397,7 +397,7 @@ export class TelegramNotifier {
       await this.sendTpSlReport(chatId);
     } else if (data === 'toggle_sl') {
       (config as any).AUTO_SL_ENABLED = !config.AUTO_SL_ENABLED;
-      const status = config.AUTO_SL_ENABLED ? '🟢 <b>TURNED ON (-25% Emergency Cut)</b>' : '🔴 <b>TURNED OFF</b>';
+      const status = config.AUTO_SL_ENABLED ? `🟢 <b>TURNED ON (-${config.AUTO_SL_LOSS_PCT}% Emergency Cut)</b>` : '🔴 <b>TURNED OFF</b>';
       await this.sendCustomMessage(chatId, `🛡️ Anti-Rug Stop-Loss is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
@@ -662,7 +662,7 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const minToArmUsd = minToArm * solPriceUsd;
 
       const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
-      const slStatus = config.AUTO_SL_ENABLED ? '🟢 ON (-25% Anti-Rug)' : '🔴 OFF';
+      const slStatus = config.AUTO_SL_ENABLED ? `🟢 ON (-${config.AUTO_SL_LOSS_PCT}% Anti-Rug)` : '🔴 OFF';
       const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
         ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Fast-Finger Shield)`
         : '🔴 OFF';
@@ -771,7 +771,7 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
     }
 
     const tpStatus = config.AUTO_TP_ENABLED ? '🟢 +100% (Sell 50%)' : '🔴 OFF';
-    const slStatus = config.AUTO_SL_ENABLED ? '🟢 -25% (Cut 100%)' : '🔴 OFF';
+    const slStatus = config.AUTO_SL_ENABLED ? `🟢 -${config.AUTO_SL_LOSS_PCT}% (Cut 100%)` : '🔴 OFF';
     const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
       ? '🔒 Lifetime Lock (1x)'
       : '🔴 OFF';

@@ -80,7 +80,7 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
     autoExitManager.stop();
   });
 
-  it('triggers 100% Emergency Stop-Loss when token dumps by -25%', async () => {
+  it('triggers 100% Emergency Stop-Loss when token dumps by -50%', async () => {
     const testMint = 'SLMint111111111111111111111111111111111111111';
     const testPos = {
       id: 'pos_sl_test',
@@ -101,14 +101,14 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
     vi.spyOn(db, 'getOpenPositions').mockReturnValue([testPos]);
     vi.spyOn(telegramNotifier, 'notifyAutoStopLoss').mockImplementation(() => {});
 
-    // Token price is 0.000035 SOL (-30% drop vs entry 0.00005)
+    // Token price is 0.000020 SOL (-60% drop vs entry 0.00005)
     vi.spyOn(tokenMetadataService, 'getTokenMetadata').mockResolvedValue({
       mint: testMint,
       name: 'Dump Token',
       symbol: 'DUMP',
-      priceUsd: 0.0035,
-      priceSol: 0.000035,
-      fdvUsd: 35000,
+      priceUsd: 0.0020,
+      priceSol: 0.000020,
+      fdvUsd: 20000,
       liquidityUsd: 10000,
       dexScreenerUrl: '',
       pumpFunUrl: '',
@@ -125,9 +125,9 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
         side: 'SELL',
         tokenMint: testMint,
         inAmountRaw: '1000000000',
-        outAmountRaw: '35000000',
-        minOutAmountRaw: '34000000',
-        effectivePrice: 0.000035,
+        outAmountRaw: '20000000',
+        minOutAmountRaw: '19000000',
+        effectivePrice: 0.000020,
         quotedAt: 0n,
         priorityFeeLamports: 0n,
         tipLamports: 0n,
