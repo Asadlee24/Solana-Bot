@@ -14,6 +14,8 @@ export interface TraderAnalysisResult {
   totalTransactionsScanned: number;
   totalSwaps: number;
   completedRounds: number;
+  openHolds: number;
+  openInvestedSol: number;
   profitableRounds: number;
   losingRounds: number;
   winRatePct: number;
@@ -80,8 +82,9 @@ export class TraderAnalyzerService {
       const validSigs = sigs.filter((s) => !s.err).map((s) => s.signature);
       if (validSigs.length === 0) return [];
 
+      // Modern Solana DEX swaps use version 1 (or 0)
       const parsedTransactions = await this.connection.getParsedTransactions(validSigs, {
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: 1,
         commitment: 'confirmed',
       });
 
@@ -102,17 +105,19 @@ export class TraderAnalyzerService {
             const postAmt = BigInt(post?.uiTokenAmount?.amount || '0');
             const delta = postAmt - preAmt;
             if (delta !== 0n && post.mint) {
+              const decimals = post.uiTokenAmount.decimals ?? 6;
+              const isUserAccount = post.owner === address;
               tokenTransfers.push({
                 mint: post.mint,
-                tokenAmount: Number(delta < 0n ? -delta : delta) / 10 ** (post.uiTokenAmount.decimals || 6),
-                fromUserAccount: delta < 0n ? address : 'other',
-                toUserAccount: delta > 0n ? address : 'other',
+                tokenAmount: Number(delta < 0n ? -delta : delta) / 10 ** decimals,
+                fromUserAccount: delta < 0n && isUserAccount ? address : 'other',
+                toUserAccount: delta > 0n && isUserAccount ? address : 'other',
               });
             }
           }
 
           const accountKeys = parsed.transaction.message.accountKeys.map((k: any) =>
-            typeof k === 'string' ? k : k.pubkey.toBase58()
+            typeof k === 'string' ? k : k.pubkey?.toBase58() || k.toBase58?.() || String(k)
           );
           const targetIdx = accountKeys.indexOf(address);
           const nativeTransfers: any[] = [];
@@ -159,63 +164,99 @@ export class TraderAnalyzerService {
     for (const tx of txs) {
       const tokenTransfers = tx.tokenTransfers || [];
       const nativeTransfers = tx.nativeTransfers || [];
+
+      // 1. Calculate net SOL flow for the target address in this transaction
+      let solSpentLamports = 0;
+      let solReceivedLamports = 0;
+
+      for (const n of nativeTransfers) {
+        if (n.fromUserAccount === address) solSpentLamports += Number(n.amount || 0);
+        if (n.toUserAccount === address) solReceivedLamports += Number(n.amount || 0);
+      }
+
+      // Check accountData for native balance changes if available
+      const targetAcc = (tx.accountData || []).find((a: any) => a.account === address);
+      if (targetAcc && targetAcc.nativeBalanceChange) {
+        const chg = Number(targetAcc.nativeBalanceChange);
+        if (chg < 0) {
+          solSpentLamports = Math.max(solSpentLamports, -chg);
+        } else if (chg > 0) {
+          solReceivedLamports = Math.max(solReceivedLamports, chg);
+        }
+      }
+
+      // 2. Identify token transfers specifically involving target address
+      const buys: Array<{ mint: string; amount?: number }> = [];
+      const sells: Array<{ mint: string; amount?: number }> = [];
+
+      for (const t of tokenTransfers) {
+        if (!t.mint || t.mint === 'So11111111111111111111111111111111111111112') continue;
+        if (t.toUserAccount === address) {
+          buys.push({ mint: t.mint, amount: t.tokenAmount });
+        } else if (t.fromUserAccount === address) {
+          sells.push({ mint: t.mint, amount: t.tokenAmount });
+        }
+      }
+
+      // Check accountData tokenBalanceChanges for target address
+      if (targetAcc && Array.isArray(targetAcc.tokenBalanceChanges)) {
+        for (const chg of targetAcc.tokenBalanceChanges) {
+          if (!chg.mint || chg.mint === 'So11111111111111111111111111111111111111112') continue;
+          const rawAmt = BigInt(chg.rawTokenAmount?.tokenAmount || '0');
+          const decimals = chg.rawTokenAmount?.decimals ?? 6;
+          if (rawAmt > 0n && !buys.some((b) => b.mint === chg.mint)) {
+            buys.push({ mint: chg.mint, amount: Number(rawAmt) / 10 ** decimals });
+          } else if (rawAmt < 0n && !sells.some((s) => s.mint === chg.mint)) {
+            sells.push({ mint: chg.mint, amount: Number(-rawAmt) / 10 ** decimals });
+          }
+        }
+      }
+
+      // A real DEX swap requires either a recognized swap venue or counter-balancing SOL exchange
       const isKnownSwap =
         tx.type === 'SWAP' ||
         tx.source === 'PUMP_FUN' ||
         tx.source === 'RAYDIUM' ||
         tx.source === 'JUPITER' ||
         tx.source === 'ORCA';
+      const hasMeaningfulSolFlow = (solSpentLamports + solReceivedLamports) > 50_000;
+      const isSwapTx = isKnownSwap || hasMeaningfulSolFlow;
 
-      // Net SOL spent or received in this transaction
-      let solDeltaLamports = 0;
-      for (const n of nativeTransfers) {
-        if (n.fromUserAccount === address) solDeltaLamports += n.amount; // Spent
-        if (n.toUserAccount === address) solDeltaLamports -= n.amount; // Received
-      }
-
-      // A real DEX swap requires either a recognized swap venue/type OR counter-balancing SOL flow
-      // Pure SPL transfers (airdrops/spam distribution) have 0 SOL exchange and are filtered
-      const hasMeaningfulSolFlow = Math.abs(solDeltaLamports) > 50_000;
-      const isRealSwap = isKnownSwap || (hasMeaningfulSolFlow && tokenTransfers.length > 0);
-
-      if (!isRealSwap) {
+      // A real swap FOR THIS WALLET requires actual token buy or sell activity within a DEX swap
+      const hasTokenTrade = buys.length > 0 || sells.length > 0;
+      if (!isSwapTx || !hasTokenTrade) {
+        // Not a trade for this wallet (e.g. passive bundling account, token airdrop, or spam transfer)
         continue;
       }
 
       totalSwaps++;
 
-      for (const t of tokenTransfers) {
-        // Skip wrapped SOL mint
-        if (t.mint === 'So11111111111111111111111111111111111111112') continue;
-        const mint = t.mint;
-        if (!mint) continue;
+      const timestamp = tx.timestamp || Math.floor(Date.now() / 1000);
+      const approxSol = Math.abs(solSpentLamports - solReceivedLamports) / 1e9;
 
-        if (!tradesByMint.has(mint)) {
-          tradesByMint.set(mint, []);
-        }
+      for (const b of buys) {
+        if (!tradesByMint.has(b.mint)) tradesByMint.set(b.mint, []);
+        tradesByMint.get(b.mint)!.push({
+          side: 'BUY',
+          solSpent: approxSol > 0 ? approxSol : 0.05,
+          timestamp,
+        });
+      }
 
-        const solAmtApprox = Math.abs(solDeltaLamports) / 1e9;
-
-        if (t.toUserAccount === address) {
-          // Trader received tokens = BUY
-          tradesByMint.get(mint)!.push({
-            side: 'BUY',
-            solSpent: solAmtApprox,
-            timestamp: tx.timestamp || Math.floor(Date.now() / 1000),
-          });
-        } else if (t.fromUserAccount === address) {
-          // Trader transferred out tokens = SELL
-          tradesByMint.get(mint)!.push({
-            side: 'SELL',
-            solSpent: solAmtApprox,
-            timestamp: tx.timestamp || Math.floor(Date.now() / 1000),
-          });
-        }
+      for (const s of sells) {
+        if (!tradesByMint.has(s.mint)) tradesByMint.set(s.mint, []);
+        tradesByMint.get(s.mint)!.push({
+          side: 'SELL',
+          solSpent: approxSol > 0 ? approxSol : 0.05,
+          timestamp,
+        });
       }
     }
 
     const recentTrades: CompletedTradeRound[] = [];
     let completedRounds = 0;
+    let openHolds = 0;
+    let openInvestedSol = 0;
     let profitableRounds = 0;
     let losingRounds = 0;
     let totalHoldSeconds = 0;
@@ -250,6 +291,10 @@ export class TraderAnalyzerService {
           pnlSol,
           isWin,
         });
+      } else if (buys.length > 0 && sells.length === 0) {
+        openHolds++;
+        const buyCost = buys.reduce((acc, b) => acc + b.solSpent, 0);
+        openInvestedSol += buyCost;
       }
     }
 
@@ -268,18 +313,20 @@ export class TraderAnalyzerService {
       }
     }
 
-    // Classification of trading style
+    // Classification of trading style (no < or > characters for safe HTML rendering)
     let tradingStyle = 'Unknown';
     if (totalSwaps === 0) {
-      tradingStyle = 'Non-Trading / Distribution Script';
+      tradingStyle = 'Non-Trading / Bundler Script';
     } else if (avgHoldSeconds > 0 && avgHoldSeconds < 30) {
-      tradingStyle = '⚡ Hyper Sniper / Instant Dumper (under 30s exits)';
+      tradingStyle = '⚡ Hyper Sniper (under 30s exits)';
     } else if (avgHoldSeconds >= 30 && avgHoldSeconds < 300) {
       tradingStyle = '🏎️ Fast Scalper (under 5m holding)';
     } else if (avgHoldSeconds >= 300 && avgHoldSeconds < 3600) {
       tradingStyle = '🎯 Swing Trader (5m - 60m holding)';
     } else if (avgHoldSeconds >= 3600) {
-      tradingStyle = '💎 Gem Holder / Investor (over 1h holding)';
+      tradingStyle = '💎 Gem Holder (over 1h holding)';
+    } else if (openHolds > 0 && completedRounds === 0) {
+      tradingStyle = '🛒 Token Accumulator (Holding positions)';
     } else {
       tradingStyle = 'DEX Trader';
     }
@@ -301,14 +348,19 @@ export class TraderAnalyzerService {
       recommendation = 'Wallet has no recent transactions on-chain.';
     } else if (totalSwaps === 0) {
       verdict = 'SPAM_BOT';
-      verdictTitle = 'SCAM / SPAM BOT DETECTED';
-      verdictBadge = '🚨 SCAM / SPAM BOT (0 DEX Swaps)';
-      recommendation = 'DO NOT COPY! Wallet is an automated transfer/airdrop spam script. Zero real DEX swaps found.';
+      verdictTitle = 'NO DEX SWAPS DETECTED';
+      verdictBadge = '🚨 NO DEX SWAPS DETECTED (SPAM BOT / PASSIVE)';
+      recommendation = 'DO NOT COPY! Wallet does not execute DEX swaps. It only appears in bundling/spam transactions without trading.';
+    } else if (completedRounds === 0 && openHolds > 0) {
+      verdict = 'SAFE_TO_COPY';
+      verdictTitle = 'ACTIVE BUYER (HOLDING TOKENS)';
+      verdictBadge = '🟡 ACTIVE BUYER (Holding Tokens)';
+      recommendation = `Trader bought ${openHolds} token(s) (${openInvestedSol.toFixed(2)} SOL deployed) with no sales yet in this window. Monitor in paper mode.`;
     } else if (avgHoldSeconds > 0 && avgHoldSeconds < 30) {
       verdict = 'HIGH_RISK_SNIPER';
       verdictTitle = 'HIGH RISK SNIPER / DUMPER';
       verdictBadge = '⚠️ HIGH RISK SNIPER (Dumps in seconds)';
-      recommendation = `CAUTION! This trader dumps positions within ${avgHoldTimeFormatted}. If copied, network latency may cause you to exit at a loss.`;
+      recommendation = `CAUTION! This trader dumps positions within ${avgHoldTimeFormatted}. Network latency may cause you to exit at a loss.`;
     } else if (winRatePct >= 60 && avgHoldSeconds >= 300) {
       verdict = 'SAFE_TO_COPY';
       verdictTitle = 'HIGH QUALITY TRADER — SAFE TO COPY';
@@ -336,6 +388,8 @@ export class TraderAnalyzerService {
       totalTransactionsScanned,
       totalSwaps,
       completedRounds,
+      openHolds,
+      openInvestedSol,
       profitableRounds,
       losingRounds,
       winRatePct,

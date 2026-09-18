@@ -51,6 +51,7 @@ export class TelegramNotifier {
             { command: 'positions', description: 'Open Positions & Close Controls' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
             { command: 'targets', description: 'View & Manage Watched Target Traders' },
+            { command: 'score', description: 'Analyze Trader Win-Rate & PnL: /score <wallet>' },
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
             { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
@@ -275,38 +276,16 @@ export class TelegramNotifier {
       clean.startsWith('analyze') ||
       clean.includes('trader score')
     ) {
-      const parts = rawText.split(/\s+/);
-      // Check if a Solana base58 address was passed anywhere in the message
-      const solanaAddress = parts.find((p: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p.trim()));
-      if (solanaAddress) {
-        await this.handleTraderScore(chatId, solanaAddress);
+      // Robust Base58 Solana public key extraction anywhere in the message (handles newlines, spaces, colons)
+      const base58Match = rawText.match(/[1-9A-HJ-NP-Za-km-z]{32,44}/);
+      if (base58Match) {
+        await this.handleTraderScore(chatId, base58Match[0]);
         return;
       }
 
-      // Check if user passed an address token (excluding command keywords and emojis)
-      const nonCommandTokens = parts.filter(
-        (p: string) => !/^(trader|score|traderscore|trader_score|analyze|\/trader_score|\/traderscore|\/score|\/analyze|🧠)$/i.test(p.replace(/^[^\w/]+|[^\w]+$/g, ''))
-      );
-
-      if (nonCommandTokens.length > 0) {
-        const candidate = nonCommandTokens[0].replace(/^[^\w]+|[^\w]+$/g, '');
-        if (candidate.length >= 32 && candidate.length <= 44) {
-          await this.handleTraderScore(chatId, candidate);
-          return;
-        }
-      }
-
-      // If no address given (e.g. user pressed '🧠 TRADER SCORE' or typed '/trader_score'):
-      // If there is only 1 watched target wallet, auto-analyze it directly for instant convenience!
-      const dbWallets = db.getWatchedWallets();
-      const configWallets = config.WATCHED_WALLETS;
-      const allWallets = Array.from(new Set([...configWallets, ...dbWallets.map((w) => w.wallet)]));
-
-      if (allWallets.length === 1) {
-        await this.handleTraderScore(chatId, allWallets[0]);
-      } else {
-        await this.promptTraderScoreInput(chatId);
-      }
+      // If user typed '/score' or '/trader_score' without an address:
+      // Show the dedicated analyzer prompt with quick one-tap buttons
+      await this.promptTraderScoreInput(chatId);
     } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawText)) {
       await this.handleDirectAddressInput(chatId, rawText);
     } else if (clean === 'tpsl' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag')) {
@@ -1353,6 +1332,25 @@ Check any trader's live win rate, hold time, and profit before copying!
       const safeRec = result.recommendation.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const safeBadge = result.verdictBadge.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+      let metricsText = '';
+      if (result.totalSwaps === 0) {
+        metricsText = `
+• <b>Total DEX Swaps:</b> <b>0</b> (${result.totalTransactionsScanned} txs scanned)
+• <b>Active Trading:</b> None detected
+• <b>Activity Profile:</b> Passive bundling / transfer script
+        `.trim();
+      } else {
+        const holdInfo = result.openHolds > 0 ? ` (+${result.openHolds} holding)` : '';
+        metricsText = `
+• <b>Win Rate:</b> <b>${result.completedRounds > 0 ? `${result.winRatePct.toFixed(1)}%` : (result.openHolds > 0 ? 'Accumulating' : 'N/A')}</b> (${result.profitableRounds}W / ${result.losingRounds}L)
+• <b>Total DEX Swaps:</b> <b>${result.totalSwaps}</b> / ${result.totalTransactionsScanned} txs
+• <b>Completed Rounds:</b> <b>${result.completedRounds}</b> tokens${holdInfo}
+• <b>Net PnL:</b> ${pnlColor} <b>${pnlSign}${result.netPnlSol.toFixed(3)} SOL</b> (${pnlSign}$${result.netPnlUsd.toFixed(2)} USD)
+• <b>Avg Hold Time:</b> <b>${result.avgHoldTimeFormatted}</b>
+• <b>Trading Style:</b> <code>${safeStyle}</code>
+        `.trim();
+      }
+
       const text = `
 🧠 <b>[TRADER WIN-RATE & SCORE REPORT]</b>
 
@@ -1363,12 +1361,7 @@ Check any trader's live win rate, hold time, and profit before copying!
 
 ━━━━━━━━━━━━━━━━━━━
 <b>📊 PERFORMANCE METRICS:</b>
-• <b>Win Rate:</b> <b>${result.completedRounds > 0 ? `${result.winRatePct.toFixed(1)}%` : 'N/A'}</b> (${result.profitableRounds} Wins / ${result.losingRounds} Losses)
-• <b>Total DEX Swaps:</b> <b>${result.totalSwaps}</b> / ${result.totalTransactionsScanned} txs
-• <b>Completed Rounds:</b> <b>${result.completedRounds}</b> tokens
-• <b>Net PnL:</b> ${pnlColor} <b>${pnlSign}${result.netPnlSol.toFixed(3)} SOL</b> (${pnlSign}$${result.netPnlUsd.toFixed(2)} USD)
-• <b>Avg Hold Time:</b> <b>${result.avgHoldTimeFormatted}</b>
-• <b>Trading Style:</b> <code>${safeStyle}</code>
+${metricsText}
 
 ━━━━━━━━━━━━━━━━━━━
 <b>💡 RECOMMENDATION:</b>
@@ -1376,7 +1369,7 @@ Check any trader's live win rate, hold time, and profit before copying!
       `.trim();
 
       const inlineKeyboardRows: any[] = [];
-      if (!isWatched && result.verdict !== 'SPAM_BOT') {
+      if (!isWatched && result.totalSwaps > 0 && result.verdict !== 'SPAM_BOT') {
         inlineKeyboardRows.push([
           { text: '➕ Copy-Trade This Wallet', callback_data: `add_wallet_${address}` },
         ]);
@@ -1675,14 +1668,30 @@ ${lockedSummary}
         payload.reply_markup = defaultKeyboard;
       }
 
-      await fetch(url, {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(10000),
       });
-    } catch {
-      // Ignored
+
+      if (!res.ok) {
+        const errJson = (await res.json().catch(() => ({}))) as any;
+        console.warn(`[Telegram sendMessage Failed (${res.status})]:`, errJson?.description || errJson);
+        // Fallback: If Telegram rejected due to HTML parse formatting error, strip HTML tags and resend as plain text
+        if (payload.parse_mode) {
+          delete payload.parse_mode;
+          payload.text = text.replace(/<[^>]*>/g, '');
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(10000),
+          }).catch(() => {});
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Telegram sendCustomMessage Error]: ${err?.message || err}`);
     }
   }
 
