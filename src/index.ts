@@ -14,7 +14,16 @@ async function bootstrap() {
   // Startup self-test for execution wallet (prints ONLY public key)
   executionWalletManager.logStartupStatus();
 
-  // STRICT: LIVE mode starts DISARMED by default. Requires explicit operator arming via /api/live/arm
+  // Auto-arm LIVE mode on startup if safety checks & wallet balance pass
+  if (config.EXECUTION_MODE === 'LIVE') {
+    const armRes = await liveEngine.arm();
+    if (armRes.armed) {
+      console.info(`[LIVE ENGINE ARMED] Automatically armed on startup with wallet ${executionWalletManager.getPublicKeyBase58()}`);
+    } else {
+      console.warn(`[LIVE ENGINE STARTUP] Could not auto-arm on startup: ${armRes.reason}`);
+    }
+  }
+
   const liveStatus = liveEngine.getStatus();
 
   const walletPubkey = executionWalletManager.getPublicKeyBase58();
