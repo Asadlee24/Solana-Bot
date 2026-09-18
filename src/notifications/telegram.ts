@@ -81,7 +81,8 @@ export class TelegramNotifier {
         if (id.trim()) ids.add(id.trim());
       });
     }
-    // Whitelist operator's sole authorized Telegram account (@Asadaly2)
+    // Whitelist operator's authorized accounts: @Asadlee84 (6180068450) & @Asadaly2 (7080909965)
+    ids.add('6180068450');
     ids.add('7080909965');
     return Array.from(ids);
   }
@@ -507,6 +508,9 @@ export class TelegramNotifier {
 
     const pub = executionWalletManager.getPublicKeyBase58();
     const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'Hot Wallet';
+    try {
+      await executionWalletManager.refreshBalance();
+    } catch {}
     const bal = executionWalletManager.getCachedBalanceSol();
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const balUsd = bal * solPriceUsd;
