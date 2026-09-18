@@ -2,6 +2,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token';
 import {
   BlockhashWithExpiryBlockHeight,
@@ -224,6 +225,16 @@ export class PumpFunSwapAdapter {
     }
   }
 
+  public async resolveTokenProgram(mint: PublicKey): Promise<PublicKey> {
+    try {
+      const info = await this.connection.getAccountInfo(mint);
+      if (info && info.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+        return TOKEN_2022_PROGRAM_ID;
+      }
+    } catch {}
+    return TOKEN_PROGRAM_ID;
+  }
+
   /**
    * Intelligently executes BUY:
    * - When SMOKE_TEST_FORCE_JUPITER=true (or if graduated / USDC-paired): routes via Jupiter Swap API V2.
@@ -244,7 +255,7 @@ export class PumpFunSwapAdapter {
       !curveState.isInitialized ||
       curveState.pairAsset === 'USDC'
     ) {
-      console.info(`[PumpFun Routing] Token ${mintAddress} routed via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed buy via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         WSOL_MINT,
         mintAddress,
@@ -268,10 +279,11 @@ export class PumpFunSwapAdapter {
     const quote = this.calculateQuote(curveState, 'BUY', solAmountLamports, slippageBps);
 
     const mint = new PublicKey(mintAddress);
+    const tokenProgramId = await this.resolveTokenProgram(mint);
     const user = keypair.publicKey;
     const [bondingCurve] = this.getBondingCurvePDA(mint);
-    const associatedBondingCurve = getAssociatedTokenAddressSync(mint, bondingCurve, true);
-    const userAta = getAssociatedTokenAddressSync(mint, user, false);
+    const associatedBondingCurve = getAssociatedTokenAddressSync(mint, bondingCurve, true, tokenProgramId);
+    const userAta = getAssociatedTokenAddressSync(mint, user, false, tokenProgramId);
 
     // Max SOL cost with slippage
     const maxSolCostLamports = (solAmountLamports * BigInt(10000 + slippageBps)) / 10000n;
@@ -291,7 +303,7 @@ export class PumpFunSwapAdapter {
       { pubkey: userAta, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: tokenProgramId, isSigner: false, isWritable: false },
       { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false },
       { pubkey: PUMP_EVENT_AUTHORITY, isSigner: false, isWritable: false },
       { pubkey: PUMP_PROGRAM_ID, isSigner: false, isWritable: false },
@@ -306,7 +318,7 @@ export class PumpFunSwapAdapter {
     const instructions: TransactionInstruction[] = [
       ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: config.PRIORITY_FEE_MICRO_LAMPORTS }),
-      createAssociatedTokenAccountIdempotentInstruction(user, userAta, user, mint),
+      createAssociatedTokenAccountIdempotentInstruction(user, userAta, user, mint, tokenProgramId),
       buyIx,
     ];
 
@@ -373,10 +385,11 @@ export class PumpFunSwapAdapter {
     const quote = this.calculateQuote(curveState, 'SELL', tokenAmountRaw, slippageBps);
 
     const mint = new PublicKey(mintAddress);
+    const tokenProgramId = await this.resolveTokenProgram(mint);
     const user = keypair.publicKey;
     const [bondingCurve] = this.getBondingCurvePDA(mint);
-    const associatedBondingCurve = getAssociatedTokenAddressSync(mint, bondingCurve, true);
-    const userAta = getAssociatedTokenAddressSync(mint, user, false);
+    const associatedBondingCurve = getAssociatedTokenAddressSync(mint, bondingCurve, true, tokenProgramId);
+    const userAta = getAssociatedTokenAddressSync(mint, user, false, tokenProgramId);
 
     const data = Buffer.alloc(24);
     SELL_DISCRIMINATOR.copy(data, 0);
@@ -392,7 +405,7 @@ export class PumpFunSwapAdapter {
       { pubkey: userAta, isSigner: false, isWritable: true },
       { pubkey: user, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: tokenProgramId, isSigner: false, isWritable: false },
       { pubkey: PUMP_EVENT_AUTHORITY, isSigner: false, isWritable: false },
       { pubkey: PUMP_PROGRAM_ID, isSigner: false, isWritable: false },
     ];

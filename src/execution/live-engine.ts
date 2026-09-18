@@ -220,6 +220,10 @@ export class LiveExecutionEngine {
       }
     }
 
+    if (!isBuy && BigInt(rawInAmount) <= 0n) {
+      throw new Error('Follower holds 0 balance to sell');
+    }
+
     // Initial order record (Pending)
     const order: MirrorOrder = {
       orderId,
@@ -242,8 +246,8 @@ export class LiveExecutionEngine {
     db.saveMirrorOrder(order);
 
     try {
-      let signedTx: VersionedTransaction;
-      let latestBlockhash: BlockhashWithExpiryBlockHeight;
+      let signedTx!: VersionedTransaction;
+      let latestBlockhash!: BlockhashWithExpiryBlockHeight;
       let expectedOutRaw = '0';
       let effectivePrice = targetIntent.estimatedPrice;
       let isJupiterManaged = false;
@@ -261,40 +265,48 @@ export class LiveExecutionEngine {
         }
       }
 
+      let useJupiter = !isDirectPumpBondingCurve;
+
       if (isDirectPumpBondingCurve) {
-        // Direct Pump.fun Bonding Curve execution
-        if (isBuy) {
-          const pumpResult = await pumpFunSwapAdapter.buildAndSignBuy(
-            keypair,
-            mirrorIntent.tokenMint,
-            BigInt(rawInAmount),
-            config.MAX_SLIPPAGE_BPS
-          );
-          signedTx = pumpResult.transaction;
-          latestBlockhash = pumpResult.latestBlockhash;
-          expectedOutRaw = pumpResult.outAmountRaw;
-          effectivePrice = pumpResult.effectivePriceSol;
-          if (pumpResult.routedViaJupiter && pumpResult.jupiterOrder) {
-            isJupiterManaged = true;
-            jupOrderResponse = pumpResult.jupiterOrder;
+        try {
+          if (isBuy) {
+            const pumpResult = await pumpFunSwapAdapter.buildAndSignBuy(
+              keypair,
+              mirrorIntent.tokenMint,
+              BigInt(rawInAmount),
+              config.MAX_SLIPPAGE_BPS
+            );
+            signedTx = pumpResult.transaction;
+            latestBlockhash = pumpResult.latestBlockhash;
+            expectedOutRaw = pumpResult.outAmountRaw;
+            effectivePrice = pumpResult.effectivePriceSol;
+            if (pumpResult.routedViaJupiter && pumpResult.jupiterOrder) {
+              isJupiterManaged = true;
+              jupOrderResponse = pumpResult.jupiterOrder;
+            }
+          } else {
+            const pumpResult = await pumpFunSwapAdapter.buildAndSignSell(
+              keypair,
+              mirrorIntent.tokenMint,
+              BigInt(rawInAmount),
+              config.MAX_SLIPPAGE_BPS
+            );
+            signedTx = pumpResult.transaction;
+            latestBlockhash = pumpResult.latestBlockhash;
+            expectedOutRaw = pumpResult.outAmountRaw;
+            effectivePrice = pumpResult.effectivePriceSol;
+            if (pumpResult.routedViaJupiter && pumpResult.jupiterOrder) {
+              isJupiterManaged = true;
+              jupOrderResponse = pumpResult.jupiterOrder;
+            }
           }
-        } else {
-          const pumpResult = await pumpFunSwapAdapter.buildAndSignSell(
-            keypair,
-            mirrorIntent.tokenMint,
-            BigInt(rawInAmount),
-            config.MAX_SLIPPAGE_BPS
-          );
-          signedTx = pumpResult.transaction;
-          latestBlockhash = pumpResult.latestBlockhash;
-          expectedOutRaw = pumpResult.outAmountRaw;
-          effectivePrice = pumpResult.effectivePriceSol;
-          if (pumpResult.routedViaJupiter && pumpResult.jupiterOrder) {
-            isJupiterManaged = true;
-            jupOrderResponse = pumpResult.jupiterOrder;
-          }
+        } catch (pumpErr: any) {
+          console.warn(`[PumpFun Fallback] Direct bonding curve build failed (${pumpErr.message}). Routing via Jupiter Swap API V2.`);
+          useJupiter = true;
         }
-      } else {
+      }
+
+      if (useJupiter) {
         // Standard / Graduated / Multi-venue execution via official Jupiter Swap API V2
         isJupiterManaged = true;
         const inputMint = isBuy ? WSOL_MINT : mirrorIntent.tokenMint;

@@ -114,6 +114,13 @@ export class SignalManager extends EventEmitter {
       return { intent: swapIntent, order: null };
     }
 
+    // Skip SELL orders if follower wallet holds 0 balance of this token
+    if (swapIntent.side === 'SELL' && BigInt(mirrorIntent.requestedInAmountRaw || '0') <= 0n) {
+      console.info(`[SKIP SELL] Follower holds 0 balance of token ${swapIntent.tokenMint}. Skipping unheld sell.`);
+      telegramNotifier.notifyTargetDetected(swapIntent, 'RISK_REJECTED', 'No balance held in wallet to sell');
+      return { intent: swapIntent, order: null };
+    }
+
     // Mark as acted to prevent duplicate execution across feeds
     dedupeEngine.markActed(tx.signature);
 

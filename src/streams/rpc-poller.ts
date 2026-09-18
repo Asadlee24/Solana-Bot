@@ -73,7 +73,7 @@ export class SolanaRpcPoller {
 
       const observedAt = process.hrtime.bigint();
       const txRes = await this.connection.getParsedTransaction(latestSig, {
-        maxSupportedTransactionVersion: 1,
+        maxSupportedTransactionVersion: 0,
         commitment: 'confirmed',
       });
 
