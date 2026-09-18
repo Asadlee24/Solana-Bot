@@ -1524,10 +1524,15 @@ ${statusText}
       ? `<a href="https://solscan.io/tx/${order.orderSignature}">${order.orderSignature.slice(0, 8)}...</a>`
       : 'Simulated';
 
+    const triggerText = isBuy
+      ? 'Copied Target Trader BUY'
+      : (order.targetSignature ? 'Copied Target Trader SELL (Exit with Trader)' : 'Auto TP/SL or Manual Exit');
+
     const text = `
 ⚡ <b>[EXECUTION] ${modeBadge} ${sideTag}</b>
 
 <b>Token:</b> <code>${order.tokenMint}</code>
+<b>Trigger:</b> ${triggerText}
 <b>Fill Price:</b> $${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD (${fillPriceSol.toFixed(8)} SOL)
 <b>Market Cap:</b> ${mcapStr} MCap
 <b>Amount:</b> ${solAmount.toFixed(4)} SOL ($${usdAmount.toFixed(2)} USD)${pnlText}
