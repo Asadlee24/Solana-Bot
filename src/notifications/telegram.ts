@@ -211,6 +211,22 @@ export class TelegramNotifier {
       await this.handleDirectAddressInput(chatId, rawText);
     } else if (clean === 'tpsl' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag')) {
       await this.sendTpSlReport(chatId);
+    } else if (clean === 'tp_off' || clean === 'tpoff' || clean === 'disable_tp') {
+      (config as any).AUTO_TP_ENABLED = false;
+      await this.sendCustomMessage(chatId, '🔴 <b>Auto Take-Profit (+100% Moonbag) has been TURNED OFF.</b>\nBot will NOT automatically sell at 2x.');
+      await this.sendTpSlReport(chatId);
+    } else if (clean === 'tp_on' || clean === 'tpon' || clean === 'enable_tp') {
+      (config as any).AUTO_TP_ENABLED = true;
+      await this.sendCustomMessage(chatId, '🟢 <b>Auto Take-Profit (+100% Moonbag) has been TURNED ON.</b>\nBot will automatically sell 50% at 2x (+100% profit).');
+      await this.sendTpSlReport(chatId);
+    } else if (clean === 'sl_off' || clean === 'sloff' || clean === 'disable_sl') {
+      (config as any).AUTO_SL_ENABLED = false;
+      await this.sendCustomMessage(chatId, '🔴 <b>Anti-Rug Stop-Loss (-25%) has been TURNED OFF.</b>\nBot will NOT automatically cut losses on dumps.');
+      await this.sendTpSlReport(chatId);
+    } else if (clean === 'sl_on' || clean === 'slon' || clean === 'enable_sl') {
+      (config as any).AUTO_SL_ENABLED = true;
+      await this.sendCustomMessage(chatId, '🟢 <b>Anti-Rug Stop-Loss (-25%) has been TURNED ON.</b>\nBot will automatically emergency cut if token drops by -25%.');
+      await this.sendTpSlReport(chatId);
     } else if (clean === 'risk' || clean.includes('risk controls') || clean === 'breaker' || clean.includes('risk limits')) {
       await this.sendRiskReport(chatId);
     } else if (clean === 'sim' || clean === 'simulate' || clean.includes('simulate buy') || clean === 'test') {
@@ -273,6 +289,16 @@ export class TelegramNotifier {
     } else if (data === 'menu_wallets') {
       await this.sendWalletsReport(chatId);
     } else if (data === 'menu_tpsl') {
+      await this.sendTpSlReport(chatId);
+    } else if (data === 'toggle_tp') {
+      (config as any).AUTO_TP_ENABLED = !config.AUTO_TP_ENABLED;
+      const status = config.AUTO_TP_ENABLED ? '🟢 <b>TURNED ON (+100% Moonbag)</b>' : '🔴 <b>TURNED OFF</b>';
+      await this.sendCustomMessage(chatId, `🎯 Auto Take-Profit is now ${status}.`);
+      await this.sendTpSlReport(chatId);
+    } else if (data === 'toggle_sl') {
+      (config as any).AUTO_SL_ENABLED = !config.AUTO_SL_ENABLED;
+      const status = config.AUTO_SL_ENABLED ? '🟢 <b>TURNED ON (-25% Emergency Cut)</b>' : '🔴 <b>TURNED OFF</b>';
+      await this.sendCustomMessage(chatId, `🛡️ Anti-Rug Stop-Loss is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
       await this.sendRiskReport(chatId);
@@ -1431,11 +1457,11 @@ Trading automatically paused for portfolio protection.
   public async sendTpSlReport(chatId: string | number): Promise<void> {
     const tpText = config.AUTO_TP_ENABLED
       ? `🟢 <b>Enabled:</b> Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}% when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   <i>(Principal returned to wallet, remaining 50% rides as free moonbag)</i>`
-      : '🔴 <b>Disabled</b>';
+      : '🔴 <b>Disabled</b> (Auto-TP is OFF)';
 
     const slText = config.AUTO_SL_ENABLED
       ? `🟢 <b>Enabled:</b> Emergency exit 100% when token drops to <b>-${config.AUTO_SL_LOSS_PCT}%</b>\n   <i>(Protects capital against sudden rugpulls & dumps)</i>`
-      : '🔴 <b>Disabled</b>';
+      : '🔴 <b>Disabled</b> (Auto-SL is OFF)';
 
     const text = `
 🎯 <b>[AUTOMATED TAKE-PROFIT & STOP-LOSS]</b>
@@ -1447,10 +1473,16 @@ ${tpText}
 ${slText}
 
 <b>Price Monitoring Frequency:</b> Every ${(config.AUTO_EXIT_POLL_INTERVAL_MS / 1000).toFixed(1)}s
+
+Tap below to turn Auto-TP or Auto-SL ON or OFF anytime:
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
+        [
+          { text: config.AUTO_TP_ENABLED ? '🔴 Turn OFF Auto-TP' : '🟢 Turn ON Auto-TP', callback_data: 'toggle_tp' },
+          { text: config.AUTO_SL_ENABLED ? '🔴 Turn OFF Auto-SL' : '🟢 Turn ON Auto-SL', callback_data: 'toggle_sl' },
+        ],
         [
           { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
           { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
