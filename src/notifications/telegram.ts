@@ -258,15 +258,13 @@ export class TelegramNotifier {
       clean.startsWith('trader_score') ||
       clean.startsWith('traderscore') ||
       clean.startsWith('score') ||
-      clean.startsWith('analyze')
+      clean.startsWith('analyze') ||
+      clean.includes('trader score')
     ) {
       const parts = rawText.split(/\s+/);
       const address = parts[1];
       if (!address) {
-        await this.sendCustomMessage(
-          chatId,
-          'ℹ️ <b>Usage:</b> <code>/trader_score &lt;wallet_address&gt;</code>\nExample: <code>/trader_score CwUHN4...hJqS</code>\n\nScans past trades on-chain to analyze Win Rate %, PnL, Hold Time & safety score.'
-        );
+        await this.promptTraderScoreInput(chatId);
         return;
       }
       await this.handleTraderScore(chatId, address);
@@ -421,6 +419,8 @@ export class TelegramNotifier {
         chatId,
         '🎯 <b>[ADD TARGET TRADER]</b>\n\nPaste a Solana wallet address directly in this chat, or type:\n<code>/add_target &lt;wallet_address&gt; [label]</code>\n\nExample:\n<code>/add_target CwUHN4...hJqS Alpha Whale</code>'
       );
+    } else if (data === 'prompt_trader_score') {
+      await this.promptTraderScoreInput(chatId);
     }
   }
 
@@ -434,8 +434,8 @@ export class TelegramNotifier {
         keyboard: [
           [{ text: 'POSITIONS' }, { text: 'WALLET BALANCE' }],
           [{ text: 'ACTIVATE BOT' }, { text: 'DEACTIVATE BOT' }],
-          [{ text: 'TARGET TRADERS' }, { text: 'CLOSE ALL' }],
-          [{ text: 'BOT STATUS' }, { text: 'MAIN MENU' }],
+          [{ text: 'TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
+          [{ text: 'CLOSE ALL' }, { text: 'MAIN MENU' }],
         ],
         resize_keyboard: true,
         is_persistent: true,
@@ -445,7 +445,7 @@ export class TelegramNotifier {
     return {
       keyboard: [
         [{ text: 'POSITIONS' }, { text: 'PNL SUMMARY' }],
-        [{ text: 'TARGET TRADERS' }, { text: 'BOT STATUS' }],
+        [{ text: 'TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
         [{ text: 'CLOSE ALL' }, { text: 'SIMULATE BUY' }],
         [{ text: 'REFRESH' }, { text: 'MAIN MENU' }],
       ],
@@ -751,8 +751,12 @@ ${balanceBlock}
           { text: 'ENGINE STATUS', callback_data: 'menu_status' },
         ],
         [
-          { text: 'CLOSE ALL POSITIONS', callback_data: 'action_close_all' },
           { text: 'TARGET WALLETS', callback_data: 'menu_wallets' },
+          { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
+        ],
+        [
+          { text: 'CLOSE ALL POSITIONS', callback_data: 'action_close_all' },
+          { text: 'REFRESH', callback_data: 'menu_main' },
         ],
         [
           { text: '🎯 AUTO TP / SL', callback_data: 'menu_tpsl' },
@@ -760,7 +764,6 @@ ${balanceBlock}
         ],
         [
           { text: '🛡️ RISK CONTROLS', callback_data: 'menu_risk' },
-          { text: 'REFRESH', callback_data: 'menu_main' },
         ],
       ],
     };
@@ -1196,6 +1199,46 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
     }
 
     await this.sendWalletsReport(chatId);
+  }
+
+  /**
+   * Interactive prompt for Trader Score with quick buttons for watched wallets
+   */
+  public async promptTraderScoreInput(chatId: string | number): Promise<void> {
+    const dbWallets = db.getWatchedWallets();
+    const configWallets = config.WATCHED_WALLETS;
+    const allWallets = Array.from(new Set([...configWallets, ...dbWallets.map((w) => w.wallet)]));
+
+    const inlineKeyboardRows: any[] = [];
+    for (const w of allWallets) {
+      const match = dbWallets.find((dbw) => dbw.wallet === w);
+      const short = `${w.substring(0, 4)}...${w.substring(w.length - 4)}`;
+      const label = match?.label || short;
+      inlineKeyboardRows.push([
+        { text: `📊 Score ${label}`, callback_data: `score_${w}` },
+      ]);
+    }
+
+    inlineKeyboardRows.push([
+      { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
+      { text: 'MAIN MENU', callback_data: 'menu_main' },
+    ]);
+
+    const text = `
+🧠 <b>[TARGET TRADER WIN-RATE & PNL ANALYZER]</b>
+
+Check any trader's live win rate, hold time, and profit before copying!
+
+<b>How to use:</b>
+1. Tap any watched trader button below to score them instantly.
+2. Or send: <code>/trader_score &lt;wallet_address&gt;</code>
+3. Or simply paste any Solana address directly into this chat!
+
+<b>Example:</b>
+<code>/trader_score CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS</code>
+    `.trim();
+
+    await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineKeyboardRows });
   }
 
   /**
