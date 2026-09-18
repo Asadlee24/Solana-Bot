@@ -24,7 +24,7 @@ async function bootstrap() {
   =============================================================
      ⚡ LOW-LATENCY SOLANA COPY-TRADING BOT (MVP 2026) ⚡
   =============================================================
-  - Mode:               [${config.EXECUTION_MODE}] ${config.EXECUTION_MODE === 'LIVE' ? (liveStatus.isArmed ? '● LIVE ARMED' : '○ LIVE DISARMED') : '(Paper Simulation)'}
+  - Mode:               [${config.EXECUTION_MODE}] ${config.EXECUTION_MODE === 'LIVE' ? (liveStatus.isArmed ? '● BOT ACTIVATED' : '○ BOT DEACTIVATED') : '(Paper Simulation)'}
   - Execution Wallet:   ${walletPubkey || 'None (PAPER mode)'}
   - Wallet Balance:     ${walletBalSol.toFixed(4)} SOL (Reserve: ${config.MIN_SOL_RESERVE_SOL} SOL | Spendable: ${spendableSol.toFixed(4)} SOL)
   - Jupiter Engine:     Swap API V2 (/order + /execute)

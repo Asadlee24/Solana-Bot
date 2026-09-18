@@ -86,7 +86,7 @@ export const Topbar: React.FC<TopbarProps> = ({
 
   const handleKillSwitch = async () => {
     const confirmStop = window.confirm(
-      'EMERGENCY STOP LIVE TRADING?\n\nThis will immediately disarm the automated execution engine. No further live trades will be copied until explicitly re-armed.'
+      'DEACTIVATE BOT?\n\nAre you sure you want to deactivate automated live trading? No further live trades will be copied until reactivated.'
     );
     if (!confirmStop) return;
 
@@ -98,24 +98,29 @@ export const Topbar: React.FC<TopbarProps> = ({
         onRefresh();
       }
     } catch (err) {
-      alert('Failed to trigger kill switch: ' + String(err));
+      alert('Failed to deactivate bot: ' + String(err));
     } finally {
       setIsArmingOrKilling(false);
     }
   };
 
   const handleArmSwitch = async () => {
+    const confirmStart = window.confirm(
+      'ACTIVATE BOT?\n\nAre you sure you want to activate automated live trading? Real funds will be used to copy trades.'
+    );
+    if (!confirmStart) return;
+
     try {
       setIsArmingOrKilling(true);
       const res = await fetch('/api/live/arm', { method: 'POST' });
       const data = await res.json();
       if (!data.success) {
-        alert('Cannot Arm Live Trading:\n\n' + data.reason);
+        alert('Cannot Activate Bot:\n\n' + data.reason);
       }
       await fetchLiveStatus();
       onRefresh();
     } catch (err) {
-      alert('Failed to arm live trading: ' + String(err));
+      alert('Failed to activate bot: ' + String(err));
     } finally {
       setIsArmingOrKilling(false);
     }
@@ -205,10 +210,10 @@ export const Topbar: React.FC<TopbarProps> = ({
               }}
             >
               {liveStatus?.isArmed
-                ? 'LIVE ARMED'
+                ? 'BOT ACTIVATED'
                 : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
                     ? 'SMOKE TEST COMPLETE'
-                    : 'LIVE DISARMED')}
+                    : 'BOT DEACTIVATED')}
             </span>
           )}
         </div>
@@ -221,7 +226,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               className="btn-kill-switch"
               onClick={handleKillSwitch}
               disabled={isArmingOrKilling}
-              title="STOP LIVE TRADING immediately disarms execution hot wallet"
+              title="DEACTIVATE BOT pauses automated execution"
               style={{
                 background: 'rgba(239,68,68,0.15)',
                 color: '#ef4444',
@@ -237,7 +242,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               }}
             >
               <ShieldX size={12} />
-              <span>STOP LIVE</span>
+              <span>DEACTIVATE BOT</span>
             </button>
           ) : (
             <button
@@ -245,7 +250,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               className="btn-arm-switch"
               onClick={handleArmSwitch}
               disabled={isArmingOrKilling}
-              title="Re-evaluate safety checks and Arm Live Execution"
+              title="Activate Bot for automated live copy-trading"
               style={{
                 background: 'rgba(16,185,129,0.15)',
                 color: '#10b981',
@@ -261,7 +266,7 @@ export const Topbar: React.FC<TopbarProps> = ({
               }}
             >
               <ShieldCheck size={12} />
-              <span>ARM LIVE</span>
+              <span>ACTIVATE BOT</span>
             </button>
           )
         )}
@@ -270,10 +275,10 @@ export const Topbar: React.FC<TopbarProps> = ({
         <Badge variant={isLive ? (liveStatus?.isArmed ? 'live' : 'warn') : 'paper'} size="sm">
           {isLive
             ? (liveStatus?.isArmed
-                ? '● LIVE ARMED'
+                ? '● BOT ACTIVATED'
                 : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
                     ? '✔ SMOKE TEST COMPLETE'
-                    : '○ LIVE DISARMED'))
+                    : '○ BOT DEACTIVATED'))
             : 'PAPER SIM'}
         </Badge>
 

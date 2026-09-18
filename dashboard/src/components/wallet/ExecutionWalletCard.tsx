@@ -43,7 +43,7 @@ export const ExecutionWalletCard: React.FC = () => {
 
   const handleKill = async () => {
     const confirmKill = window.confirm(
-      'EMERGENCY STOP LIVE TRADING?\n\nThis will immediately disarm the automated execution engine. No further live trades will be copied until explicitly re-armed.'
+      'DEACTIVATE BOT?\n\nAre you sure you want to deactivate automated live trading? No further live trades will be copied until reactivated.'
     );
     if (!confirmKill) return;
 
@@ -54,23 +54,28 @@ export const ExecutionWalletCard: React.FC = () => {
         await fetchStatus();
       }
     } catch (err) {
-      alert('Error triggering kill switch: ' + String(err));
+      alert('Error deactivating bot: ' + String(err));
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleArm = async () => {
+    const confirmArm = window.confirm(
+      'ACTIVATE BOT?\n\nAre you sure you want to activate automated live trading? Real funds will be used to copy trades.'
+    );
+    if (!confirmArm) return;
+
     try {
       setActionLoading(true);
       const res = await fetch('/api/live/arm', { method: 'POST' });
       const data = await res.json();
       if (!data.success) {
-        alert('Cannot Arm Live Execution:\n\n' + data.reason);
+        alert('Cannot Activate Bot:\n\n' + data.reason);
       }
       await fetchStatus();
     } catch (err) {
-      alert('Error arming live engine: ' + String(err));
+      alert('Error activating bot: ' + String(err));
     } finally {
       setActionLoading(false);
     }
@@ -115,10 +120,10 @@ export const ExecutionWalletCard: React.FC = () => {
           <Badge variant={isLive ? (isArmed ? 'live' : 'danger') : 'paper'} size="sm">
             {isLive
               ? (isArmed
-                  ? '● LIVE ARMED'
+                  ? '● BOT ACTIVATED'
                   : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
                       ? 'SMOKE TEST COMPLETE'
-                      : '○ LIVE DISARMED'))
+                      : '○ BOT DEACTIVATED'))
               : 'PAPER SIMULATION'}
           </Badge>
           <button
@@ -270,10 +275,10 @@ export const ExecutionWalletCard: React.FC = () => {
             )}
             <span style={{ color: isArmed ? '#10b981' : '#ef4444' }}>
               {isArmed
-                ? 'Execution Engine Armed and Ready'
+                ? 'Bot Activated and Ready'
                 : (liveStatus?.smokeTestTradesCount && liveStatus.smokeTestTradesCount >= 1
-                    ? 'SMOKE TEST COMPLETE — LIVE DISARMED'
-                    : 'Execution Engine Disarmed')}
+                    ? 'SMOKE TEST COMPLETE — BOT DEACTIVATED'
+                    : 'Bot Deactivated')}
             </span>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
@@ -303,7 +308,7 @@ export const ExecutionWalletCard: React.FC = () => {
                 }}
               >
                 <ShieldX size={13} />
-                <span>STOP LIVE TRADING</span>
+                <span>DEACTIVATE BOT</span>
               </button>
             ) : (
               <button
@@ -325,7 +330,7 @@ export const ExecutionWalletCard: React.FC = () => {
                 }}
               >
                 <ShieldCheck size={13} />
-                <span>ARM LIVE TRADING</span>
+                <span>ACTIVATE BOT</span>
               </button>
             )
           )}

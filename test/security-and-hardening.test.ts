@@ -281,6 +281,69 @@ describe('Security Hardening & Audit Verification Suite', () => {
       expect(sample.lDecisionMs).toBeCloseTo(2.0, 1);
     });
   });
+
+  describe('9. Activate & Deactivate Confirmation Guard Flow', () => {
+    it('prompts confirmation when activate is triggered and provides confirm button', async () => {
+      let promptSent = false;
+      let promptKeyboard: any = null;
+      const origSendCustomMessage = telegramNotifier.sendCustomMessage;
+
+      (telegramNotifier as any).sendCustomMessage = async (
+        _chatId: string | number,
+        text: string,
+        inlineKeyboard?: any
+      ) => {
+        if (text.includes('CONFIRM BOT ACTIVATION')) {
+          promptSent = true;
+          promptKeyboard = inlineKeyboard;
+        }
+      };
+
+      try {
+        const origMode = config.EXECUTION_MODE;
+        (config as any).EXECUTION_MODE = 'LIVE';
+        await telegramNotifier.promptActivateConfirmation('12345');
+        (config as any).EXECUTION_MODE = origMode;
+
+        expect(promptSent).toBe(true);
+        expect(promptKeyboard).toBeDefined();
+        const buttons = promptKeyboard.inline_keyboard.flat();
+        expect(buttons.some((b: any) => b.callback_data === 'confirm_activate')).toBe(true);
+        expect(buttons.some((b: any) => b.callback_data === 'menu_main')).toBe(true);
+      } finally {
+        telegramNotifier.sendCustomMessage = origSendCustomMessage;
+      }
+    });
+
+    it('prompts confirmation when deactivate is triggered and provides confirm button', async () => {
+      let promptSent = false;
+      let promptKeyboard: any = null;
+      const origSendCustomMessage = telegramNotifier.sendCustomMessage;
+
+      (telegramNotifier as any).sendCustomMessage = async (
+        _chatId: string | number,
+        text: string,
+        inlineKeyboard?: any
+      ) => {
+        if (text.includes('CONFIRM BOT DEACTIVATION')) {
+          promptSent = true;
+          promptKeyboard = inlineKeyboard;
+        }
+      };
+
+      try {
+        await telegramNotifier.promptDeactivateConfirmation('12345');
+        expect(promptSent).toBe(true);
+        expect(promptKeyboard).toBeDefined();
+        const buttons = promptKeyboard.inline_keyboard.flat();
+        expect(buttons.some((b: any) => b.callback_data === 'confirm_deactivate')).toBe(true);
+        expect(buttons.some((b: any) => b.callback_data === 'menu_main')).toBe(true);
+      } finally {
+        telegramNotifier.sendCustomMessage = origSendCustomMessage;
+      }
+    });
+  });
 });
+
 
 

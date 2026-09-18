@@ -216,7 +216,7 @@ export const TargetVsFollowerPanel: React.FC<TargetVsFollowerPanelProps> = ({
               <div style={{ fontSize: '10px', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>EXECUTION MODE</div>
               <div className="mono font-semibold" style={{ fontSize: '12px', color: telemetry?.liveEngineArmed ? '#14f195' : '#eab308', marginTop: '2px' }}>
                 {telemetry?.executionMode === 'LIVE'
-                  ? (telemetry.liveEngineArmed ? '● LIVE ARMED' : '○ LIVE DISARMED')
+                  ? (telemetry.liveEngineArmed ? '● BOT ACTIVATED' : '○ BOT DEACTIVATED')
                   : 'PAPER SIM'}
               </div>
             </div>

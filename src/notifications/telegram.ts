@@ -45,8 +45,10 @@ export class TelegramNotifier {
             { command: 'start', description: 'Launch Trading Terminal & Keypad' },
             { command: 'menu', description: 'Main Control Menu' },
             { command: 'balance', description: 'Real On-Chain Wallet Balance' },
-            { command: 'arm', description: 'ARM Live Engine (Enable Live Trading)' },
-            { command: 'disarm', description: 'Emergency DISARM (Pause Trading)' },
+            { command: 'activate', description: 'Activate Bot (Start Live Trading)' },
+            { command: 'deactivate', description: 'Deactivate Bot (Pause Live Trading)' },
+            { command: 'arm', description: 'Activate Bot (Alias)' },
+            { command: 'disarm', description: 'Deactivate Bot (Alias)' },
             { command: 'positions', description: 'Open Positions & Close Controls' },
             { command: 'close', description: 'Close Position: /close <mint>' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
@@ -198,9 +200,25 @@ export class TelegramNotifier {
       clean.includes('guide')
     ) {
       await this.sendMainMenu(chatId);
-    } else if (clean === 'arm' || clean.includes('arm engine') || clean === 'start trading') {
-      await this.handleArmCommand(chatId);
-    } else if (clean === 'disarm' || clean.includes('disarm') || clean === 'kill' || clean === 'stop') {
+    } else if (
+      clean === 'activate' ||
+      clean === 'activate bot' ||
+      clean === 'start bot' ||
+      clean === 'arm' ||
+      clean.includes('arm engine') ||
+      clean === 'start trading'
+    ) {
+      await this.promptActivateConfirmation(chatId);
+    } else if (
+      clean === 'deactivate' ||
+      clean === 'deactivate bot' ||
+      clean === 'stop bot' ||
+      clean === 'disarm' ||
+      clean.includes('disarm') ||
+      clean === 'stop'
+    ) {
+      await this.promptDeactivateConfirmation(chatId);
+    } else if (clean === 'kill') {
       await this.handleDisarmCommand(chatId);
     } else if (clean === 'balance' || clean === 'wallet' || clean.includes('wallet balance')) {
       await this.sendBalanceReport(chatId);
@@ -318,9 +336,13 @@ export class TelegramNotifier {
       await this.sendMainMenu(chatId);
     } else if (data === 'menu_balance') {
       await this.sendBalanceReport(chatId);
-    } else if (data === 'action_arm') {
+    } else if (data === 'action_arm' || data === 'action_activate') {
+      await this.promptActivateConfirmation(chatId);
+    } else if (data === 'confirm_activate' || data === 'confirm_arm') {
       await this.handleArmCommand(chatId);
-    } else if (data === 'action_disarm') {
+    } else if (data === 'action_disarm' || data === 'action_deactivate') {
+      await this.promptDeactivateConfirmation(chatId);
+    } else if (data === 'confirm_deactivate' || data === 'confirm_disarm') {
       await this.handleDisarmCommand(chatId);
     } else if (data === 'action_close_all') {
       await this.executeCloseAllFromChat(chatId);
@@ -390,7 +412,7 @@ export class TelegramNotifier {
       return {
         keyboard: [
           [{ text: 'POSITIONS' }, { text: 'WALLET BALANCE' }],
-          [{ text: 'ARM ENGINE' }, { text: 'DISARM ENGINE' }],
+          [{ text: 'ACTIVATE BOT' }, { text: 'DEACTIVATE BOT' }],
           [{ text: 'TARGET TRADERS' }, { text: 'CLOSE ALL' }],
           [{ text: 'BOT STATUS' }, { text: 'MAIN MENU' }],
         ],
@@ -412,13 +434,88 @@ export class TelegramNotifier {
   }
 
   /**
-   * ARM Live Engine Handler
+   * Prompt confirmation before Activating Live Engine
+   */
+  public async promptActivateConfirmation(chatId: string | number): Promise<void> {
+    if (config.EXECUTION_MODE !== 'LIVE') {
+      await this.sendCustomMessage(
+        chatId,
+        'ℹ️ <b>[PAPER MODE ACTIVE]</b>\nBot is currently configured in PAPER simulation mode (zero capital risk). Set <code>EXECUTION_MODE=LIVE</code> to activate real swaps.'
+      );
+      return;
+    }
+
+    const pub = executionWalletManager.getPublicKeyBase58();
+    const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'Hot Wallet';
+    const bal = executionWalletManager.getCachedBalanceSol();
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const balUsd = bal * solPriceUsd;
+    const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+    const targetWallet = config.WATCHED_WALLETS[0] || '1 target trader';
+    const targetShort = `${targetWallet.substring(0, 4)}...${targetWallet.substring(targetWallet.length - 4)}`;
+
+    const text = `
+⚠️ <b>[CONFIRM BOT ACTIVATION]</b>
+
+Are you sure you want to <b>ACTIVATE</b> the bot for real trading?
+
+• <b>Execution Mode:</b> REAL MAINNET
+• <b>Active Signer:</b> <code>${shortPub}</code>
+• <b>Wallet Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)
+• <b>Trade Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
+• <b>Target Trader:</b> <code>${targetShort}</code>
+
+<i>⚡ Once confirmed, the bot will immediately begin copying trades in real-time with your funds.</i>
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ YES, ACTIVATE BOT', callback_data: 'confirm_activate' },
+          { text: '❌ CANCEL', callback_data: 'menu_main' },
+        ],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
+  }
+
+  /**
+   * Prompt confirmation before Deactivating Live Engine
+   */
+  public async promptDeactivateConfirmation(chatId: string | number): Promise<void> {
+    const text = `
+⚠️ <b>[CONFIRM BOT DEACTIVATION]</b>
+
+Are you sure you want to <b>DEACTIVATE</b> the bot?
+
+• <b>Status:</b> Live trading execution will pause immediately.
+• <b>Target Signals:</b> No new buy/sell orders will be copied.
+• <b>Positions:</b> Open positions remain safe and can still be managed.
+
+<i>Tap below to confirm deactivation.</i>
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '🛑 YES, DEACTIVATE BOT', callback_data: 'confirm_deactivate' },
+          { text: '❌ CANCEL', callback_data: 'menu_main' },
+        ],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
+  }
+
+  /**
+   * Activate Bot Handler
    */
   public async handleArmCommand(chatId: string | number): Promise<void> {
     if (config.EXECUTION_MODE !== 'LIVE') {
       await this.sendCustomMessage(
         chatId,
-        'ℹ️ <b>[PAPER MODE ACTIVE]</b>\nBot is currently configured in PAPER simulation mode (zero capital risk). Set <code>EXECUTION_MODE=LIVE</code> to arm real swaps.'
+        'ℹ️ <b>[PAPER MODE ACTIVE]</b>\nBot is currently configured in PAPER simulation mode (zero capital risk). Set <code>EXECUTION_MODE=LIVE</code> to activate real swaps.'
       );
       return;
     }
@@ -437,7 +534,7 @@ export class TelegramNotifier {
       const reserveUsd = config.MIN_SOL_RESERVE_SOL * solPriceUsd;
 
       const text = `
-🟢 <b>[LIVE ENGINE ARMED]</b>
+🟢 <b>[BOT ACTIVATED]</b>
 
 <b>Active Signer:</b> <code>${pub}</code>
 <b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
@@ -451,7 +548,7 @@ export class TelegramNotifier {
 
       const inlineKeyboard = {
         inline_keyboard: [
-          [{ text: 'EMERGENCY DISARM', callback_data: 'action_disarm' }],
+          [{ text: '🔴 DEACTIVATE BOT', callback_data: 'action_deactivate' }],
           [{ text: 'OPEN POSITIONS', callback_data: 'menu_positions' }, { text: 'MAIN MENU', callback_data: 'menu_main' }],
         ],
       };
@@ -459,7 +556,7 @@ export class TelegramNotifier {
       await this.sendCustomMessage(chatId, text, inlineKeyboard, this.getPersistentReplyKeyboard());
     } else {
       const text = `
-🔴 <b>[ARM REFUSED / DISARMED]</b>
+🔴 <b>[ACTIVATION REFUSED]</b>
 
 <b>Reason:</b> ${result.reason}
 <b>Required Action:</b> Check that your wallet has at least 0.03 SOL and <code>LIVE_TRADING_ACK=I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK</code> is set.
@@ -468,7 +565,7 @@ export class TelegramNotifier {
       const inlineKeyboard = {
         inline_keyboard: [
           [{ text: 'CHECK BALANCE', callback_data: 'menu_balance' }],
-          [{ text: 'RETRY ARM', callback_data: 'action_arm' }],
+          [{ text: '🔄 RETRY ACTIVATION', callback_data: 'action_activate' }],
         ],
       };
 
@@ -477,21 +574,21 @@ export class TelegramNotifier {
   }
 
   /**
-   * DISARM Live Engine Handler
+   * Deactivate Bot Handler
    */
   public async handleDisarmCommand(chatId: string | number): Promise<void> {
-    liveEngine.kill('Operator disarmed via Telegram command');
+    liveEngine.kill('Operator deactivated bot via Telegram command');
 
     const text = `
-🔴 <b>[LIVE ENGINE DISARMED]</b>
+🔴 <b>[BOT DEACTIVATED]</b>
 
 Trading execution paused. The bot will continue watching and logging signals, but <b>NO real transactions will be submitted</b>.
-Tap <b>ARM ENGINE</b> when you are ready to resume.
+Tap <b>ACTIVATE BOT</b> when you are ready to resume.
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
-        [{ text: 'ARM ENGINE', callback_data: 'action_arm' }],
+        [{ text: '🟢 ACTIVATE BOT', callback_data: 'action_activate' }],
         [{ text: 'WALLET BALANCE', callback_data: 'menu_balance' }, { text: 'MAIN MENU', callback_data: 'menu_main' }],
       ],
     };
@@ -525,13 +622,13 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
       const text = `
 💰 <b>[LIVE EXECUTION HOT WALLET]</b>
 
-<b>Status:</b> ${isArmed ? '🟢 <b>LIVE ARMED</b>' : '🔴 <b>LIVE DISARMED</b>'}
+<b>Status:</b> ${isArmed ? '🟢 <b>BOT ACTIVATED</b>' : '🔴 <b>BOT DEACTIVATED</b>'}
 <b>Public Address:</b> <code>${pub || 'Not Configured'}</code>
 <b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
 <b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL ($${spendableUsd.toFixed(2)} USD)
 <b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD) (Protected)
 <b>Fixed Trade Size:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
-<b>Minimum Balance to Arm:</b> ${minToArm.toFixed(2)} SOL ($${minToArmUsd.toFixed(2)} USD) (Passed)
+<b>Minimum Balance to Activate:</b> ${minToArm.toFixed(2)} SOL ($${minToArmUsd.toFixed(2)} USD) (Passed)
 
 🔗 <a href="https://solscan.io/account/${pub}">View Wallet on Solscan</a>
       `.trim();
@@ -539,7 +636,7 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
       const inlineKeyboard = {
         inline_keyboard: [
           [
-            { text: isArmed ? 'DISARM ENGINE' : 'ARM ENGINE', callback_data: isArmed ? 'action_disarm' : 'action_arm' },
+            { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
             { text: 'REFRESH BALANCE', callback_data: 'menu_balance' },
           ],
           [
@@ -587,7 +684,7 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
     const telemetry = db.getSystemTelemetry();
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
-    const modeBadge = isLive ? (isArmed ? '🟢 [LIVE ARMED]' : '🔴 [LIVE DISARMED]') : '[PAPER SIMULATION]';
+    const modeBadge = isLive ? (isArmed ? '🟢 [BOT ACTIVATED]' : '🔴 [BOT DEACTIVATED]') : '[PAPER SIMULATION]';
     const targetWallet = config.WATCHED_WALLETS[0] || 'CwUHN4...';
     const targetShort = `${targetWallet.substring(0, 4)}...${targetWallet.substring(targetWallet.length - 4)}`;
 
@@ -629,7 +726,7 @@ ${balanceBlock}
           { text: isLive ? 'WALLET BALANCE' : 'PNL SUMMARY', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
         ],
         [
-          { text: isArmed ? 'DISARM ENGINE' : 'ARM ENGINE', callback_data: isArmed ? 'action_disarm' : 'action_arm' },
+          { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
           { text: 'ENGINE STATUS', callback_data: 'menu_status' },
         ],
         [
@@ -677,7 +774,7 @@ ${balanceBlock}
 <b>[ACTIVE POSITIONS] 0 OPEN</b>
 
 No active token positions currently held.
-<b>Mode:</b> ${isLive ? (isArmed ? '🟢 LIVE ARMED' : '🔴 LIVE DISARMED') : 'PAPER'}
+<b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}
 ${isLive ? `<b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)` : ''}
 
 When target trader executes a swap on pump.fun or Raydium, the follower order will land immediately and appear here with instant Close buttons.
@@ -686,7 +783,7 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       const inlineKeyboard = {
         inline_keyboard: [
           [
-            { text: isArmed ? 'DISARM ENGINE' : 'ARM ENGINE', callback_data: isArmed ? 'action_disarm' : 'action_arm' },
+            { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
             { text: 'WALLET BALANCE', callback_data: 'menu_balance' },
           ],
           [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
@@ -908,12 +1005,12 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
 <b>[SYSTEM STATUS & TELEMETRY]</b>
 
 <b>Status:</b> RUNNING (Operational)
-<b>Mode:</b> ${isLive ? (isArmed ? '🟢 LIVE ARMED' : '🔴 LIVE DISARMED') : 'PAPER'}${walletLine}
+<b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}${walletLine}
 <b>Target Traders:</b> ${config.WATCHED_WALLETS.length} registered
 <b>Orders Copied:</b> ${telemetry.totalTradesProcessed}
 <b>Reaction Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(2)}ms` : '2.33ms'}
 <b>95th Percentile (p95):</b> ${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(2)}ms` : '6.28ms'}
-<b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED (Trading Paused)' : 'ARMED (Normal)'}
+<b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED (Trading Paused)' : 'ACTIVE (Normal)'}
 <b>Hot Path Feed:</b> Helius LaserStream (Sub-10ms)
 <b>Uptime:</b> ${formatUptime(telemetry.uptimeSeconds)}
     `.trim();
@@ -921,7 +1018,7 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: isArmed ? 'DISARM ENGINE' : 'ARM ENGINE', callback_data: isArmed ? 'action_disarm' : 'action_arm' },
+          { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
           { text: 'WALLET BALANCE', callback_data: 'menu_balance' },
         ],
         [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
@@ -1359,10 +1456,10 @@ ${cooldownText}
     if (actionTaken === 'COPIED') {
       statusText = '✅ <b>Follower Order Submitted</b>';
     } else if (actionTaken === 'DISARMED_SKIP') {
-      statusText = `⏸️ <b>Trade Skipped: Live Engine is DISARMED</b>\n<i>(${reason || 'Safety lock active'})</i>`;
+      statusText = `⏸️ <b>Trade Skipped: Bot is DEACTIVATED</b>\n<i>(${reason || 'Safety lock active'})</i>`;
       buttons = {
         inline_keyboard: [
-          [{ text: '🟢 ARM ENGINE NOW', callback_data: 'action_arm' }],
+          [{ text: '🟢 ACTIVATE BOT NOW', callback_data: 'action_activate' }],
           [{ text: 'WALLET BALANCE', callback_data: 'menu_balance' }],
         ],
       };
@@ -1618,13 +1715,13 @@ Tap below to turn Auto-TP or Auto-SL ON or OFF anytime:
     const text = `
 ⚡ <b>[SOLANA COPY ENGINE] ONLINE</b>
 
-<b>Mode:</b> ${isLive ? (isArmed ? '🟢 LIVE ARMED' : '🔴 LIVE DISARMED') : 'PAPER'}
+<b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}
 <b>Target Trader:</b> <code>${config.WATCHED_WALLETS[0]}</code>
 <b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL | $${sizingUsd.toFixed(2)} USD)
 <b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)
 <b>Ingestion:</b> Helius LaserStream (Sub-10ms)
 
-Tap <b>ARM ENGINE</b> or use the interactive keypad below to manage trades and close positions.
+Tap <b>ACTIVATE BOT</b> or use the interactive keypad below to manage trades and close positions.
     `.trim();
 
     this.sendAlert(text, this.getPersistentReplyKeyboard());
