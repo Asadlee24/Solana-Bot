@@ -661,6 +661,12 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
       const minToArmUsd = minToArm * solPriceUsd;
 
+      const telemetry = db.getSystemTelemetry();
+      const realizedSol = telemetry.totalRealizedPnlSol || 0;
+      const realizedUsd = realizedSol * solPriceUsd;
+      const closedTrades = telemetry.totalTradesClosed || 0;
+      const winRate = telemetry.winRatePct ?? 0;
+
       const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
       const slStatus = config.AUTO_SL_ENABLED ? `🟢 ON (-${config.AUTO_SL_LOSS_PCT}% Anti-Rug)` : '🔴 OFF';
       const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
@@ -677,6 +683,8 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
 <b>Public Address:</b> <code>${pub || 'Not Configured'}</code>
 <b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
 <b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL ($${spendableUsd.toFixed(2)} USD)
+<b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
+<b>Closed Trades:</b> ${closedTrades} (${winRate.toFixed(1)}% Win Rate)
 <b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD) (Protected)
 <b>Fixed Trade Size:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
 <b>Minimum Balance to Activate:</b> ${minToArm.toFixed(2)} SOL ($${minToArmUsd.toFixed(2)} USD) (Passed)
@@ -755,12 +763,15 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const liveBalUsd = liveBal * solPriceUsd;
       const liveSpendableUsd = liveSpendable * solPriceUsd;
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+      const realizedSol = telemetry.totalRealizedPnlSol || 0;
+      const realizedUsd = realizedSol * solPriceUsd;
 
       balanceBlock = `
 💼 <b>CAPITAL & WALLET</b>
 • <b>Signer:</b> <code>${shortPub}</code>
 • <b>Balance:</b> <b>${liveBal.toFixed(4)} SOL</b> ($${liveBalUsd.toFixed(2)})
 • <b>Spendable:</b> ${liveSpendable.toFixed(4)} SOL ($${liveSpendableUsd.toFixed(2)})
+• <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)})</b>
 • <b>Buy Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)})
       `.trim();
     } else {
@@ -865,6 +876,9 @@ ${divider}
       const isArmed = isLive && liveEngine.getStatus().isArmed;
       const bal = executionWalletManager.getCachedBalanceSol();
       const balUsd = bal * solPriceUsd;
+      const telemetry = db.getSystemTelemetry();
+      const realizedSol = telemetry.totalRealizedPnlSol || 0;
+      const realizedUsd = realizedSol * solPriceUsd;
 
       const emptyMsg = `
 <b>[ACTIVE POSITIONS] 0 OPEN</b>
@@ -872,6 +886,8 @@ ${divider}
 No active token positions currently held.
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}
 ${isLive ? `<b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)` : ''}
+<b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
+<b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
 
 When target trader executes a swap on pump.fun or Raydium, the follower order will land immediately and appear here with instant Close buttons.
       `.trim();
@@ -1055,6 +1071,7 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
 
 <b>Execution Mode:</b> ${isLive ? 'LIVE' : 'PAPER'}
 <b>Open Positions:</b> ${telemetry.openPositionsCount}
+<b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
 <b>Unrealized PnL:</b> ${unrealizedSol >= 0 ? '+' : ''}$${unrealizedUsd.toFixed(2)} USD (${unrealizedSol >= 0 ? '+' : ''}${unrealizedSol.toFixed(4)} SOL)
 <b>Realized PnL:</b> ${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD (${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL)
 <b>Net Total PnL:</b> <b>${isOverallProfit ? '+' : ''}$${totalPnlUsd.toFixed(2)} USD</b> (${totalPnlSol >= 0 ? '+' : ''}${totalPnlSol.toFixed(4)} SOL)
@@ -1100,6 +1117,10 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       walletLine = `\n<b>Hot Wallet:</b> <code>${shortPub}</code> (${bal.toFixed(4)} SOL | $${(bal * solPrice).toFixed(2)} USD)`;
     }
 
+    const solPrice = await tokenMetadataService.getSolPriceUsd();
+    const realizedSol = telemetry.totalRealizedPnlSol || 0;
+    const realizedUsd = realizedSol * solPrice;
+
     const text = `
 <b>[SYSTEM STATUS & TELEMETRY]</b>
 
@@ -1107,6 +1128,8 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}${walletLine}
 <b>Target Traders:</b> ${config.WATCHED_WALLETS.length} registered
 <b>Orders Copied:</b> ${telemetry.totalTradesProcessed}
+<b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
+<b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
 <b>Reaction Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(2)}ms` : '2.33ms'}
 <b>95th Percentile (p95):</b> ${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(2)}ms` : '6.28ms'}
 <b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED (Trading Paused)' : 'ACTIVE (Normal)'}

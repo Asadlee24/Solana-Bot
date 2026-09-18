@@ -26,6 +26,7 @@ export class DBManager {
     this.db = new Database(dbPath);
     this.initPragmas();
     this.initSchema();
+    this.seedHistoricalTrades();
   }
 
   private initPragmas() {
@@ -659,6 +660,16 @@ export class DBManager {
       FROM positions
     `).get() as any;
 
+    const closedRows = this.db.prepare(`
+      SELECT 
+        COUNT(*) as closedCount,
+        SUM(CASE WHEN CAST(realized_pnl_raw AS INTEGER) > 0 THEN 1 ELSE 0 END) as winCount
+      FROM positions WHERE state = 'CLOSED'
+    `).get() as any;
+    const totalTradesClosed = closedRows?.closedCount || 0;
+    const winTrades = closedRows?.winCount || 0;
+    const winRatePct = totalTradesClosed > 0 ? Number(((winTrades / totalTradesClosed) * 100).toFixed(1)) : 0;
+
     const latencyRows = this.db.prepare(`
       SELECT l_decision_ms + l_quote_ms + l_submit_ms as total_ms, entry_gap_bps
       FROM latency_samples ORDER BY id DESC LIMIT 100
@@ -697,6 +708,8 @@ export class DBManager {
       watchedWalletsCount: walletsRow?.count || 0,
       openPositionsCount: positionsRow?.count || 0,
       totalTradesProcessed: ordersRow?.count || 0,
+      totalTradesClosed,
+      winRatePct,
       initialPaperBalanceSol,
       currentPaperBalanceSol,
       solPriceUsd,
@@ -715,6 +728,196 @@ export class DBManager {
       avgEntryGapBps: Number(avgGap.toFixed(1)),
       lastSignalTimestamp: lastSample?.observed_at || Date.now(),
     };
+  }
+
+  private seedHistoricalTrades(): void {
+    const historicalTrades = [
+      {
+        id: 'hist_pos_cxz_917',
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: 'CXZ4zAn6wV39jWQua8GfduzABUjyMadoY63A5GAnpump',
+        qtyRaw: '0',
+        costBasisLamports: '51580000',
+        avgEntryPriceSol: 5.647e-8,
+        realizedPnlLamports: '-24300000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789665499000,
+        updatedAt: 1789665887000,
+        closedAt: 1789665887000,
+        buySig: '4Ja2iqNBgFtEgNAGugvrEQd2451nWPjpvNWmFazF98PM54hXqXG7BezSEgc16q3uVXWTQg41iN1qGwvRjah5ppaS',
+        sellSig: '4WZsaTVQe3tP6eoQSgqtrmUbgFN7nsLQ3ag5n8t4atXZP6yUejb8bn6iwq7TszFXe7nZYtaasSBodYmNWTzpdmtL',
+        inTokens: '913354711223',
+        outLamports: '27280000',
+      },
+      {
+        id: 'hist_pos_bzv_917',
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: 'BZV1duQoQt3znWkakzzSCLUmLbE7RFtj9FRPPxx4pump',
+        qtyRaw: '0',
+        costBasisLamports: '51380000',
+        avgEntryPriceSol: 4.619e-8,
+        realizedPnlLamports: '20300000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789669017000,
+        updatedAt: 1789669103000,
+        closedAt: 1789669103000,
+        buySig: '3MiZFEEYVQGGqjvaLSKQJJFGRZwpqG2w2D7cYXWmD3d3LX6ZX2GXeVzYKxgPNASz1y73tLkjnpUhEbm5MaN4MhD1',
+        sellSig: '5SUJrUGeTVXq15dTYh4XMHVAepHEKR3Azfz6fcCa9vgq4fLoASNXqik3yUMcuKg3eQS1KQ5Hs1BgonVC28SGsiWL',
+        inTokens: '1112305446967',
+        outLamports: '71680000',
+      },
+      {
+        id: 'hist_pos_9y6_918',
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: '9y6hXFBFN1fJGfAAYgkXVVfQATG1mEJsmTrCXcT6pump',
+        qtyRaw: '0',
+        costBasisLamports: '51490000',
+        avgEntryPriceSol: 9.442e-8,
+        realizedPnlLamports: '-10730000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789718023000,
+        updatedAt: 1789718028000,
+        closedAt: 1789718028000,
+        buySig: '3HdjoUzsUNiH5DdQCAsn11TkDbtQtVY7W9JZXBJK7d3yzWXpF2fdsS5pGJFS65nFtLxv9hL1LRKfTPBSUnvVAxQF',
+        sellSig: '5E9rcCGUxgmrNSJmMjf2FjXaJDgxcvn4oyKwcBuF2sPMTQxLFWgZ6dsvaYt6RcDqBZeGqeDfPRrr1t7tLhQLp2Bt',
+        inTokens: '545325126035',
+        outLamports: '40760000',
+      },
+      {
+        id: 'hist_pos_agb_918',
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: 'AgbU9crd7rgU43pnfFvwunh2RhT8m74c7eezcuBYpump',
+        qtyRaw: '0',
+        costBasisLamports: '50190000',
+        avgEntryPriceSol: 1.167e-7,
+        realizedPnlLamports: '-5570000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789732191000,
+        updatedAt: 1789732196000,
+        closedAt: 1789732196000,
+        buySig: '3D3bzFJxKPufvdvakMK63CDsiyv4vv1aDG1dd7Cn398oFVipUUzkkXSLMBy3acTfVqJwwSLqhAffRdE9GUwZpe3D',
+        sellSig: '2wrqPB6MsXdtXE2HjNQwAN4CPB6Q6dsmyRdyeSw9iyRH7P8VkZhQhigmoZ52bkS5TbXvYpjeYqwBjByG7xHKrJhJ',
+        inTokens: '430123777880',
+        outLamports: '44620000',
+      },
+      {
+        id: 'hist_pos_br1_918',
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: '8T6rjb3eFjcj4gpJ2oztFg6fceqYfgrRmifPiBx5pump',
+        qtyRaw: '0',
+        costBasisLamports: '51510000',
+        avgEntryPriceSol: 6.294e-8,
+        realizedPnlLamports: '-4380000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789747385000,
+        updatedAt: 1789749342000,
+        closedAt: 1789749342000,
+        buySig: 'P7vjS7oKiVe1N2BYJLWKfDKfCvrv3LURXQu1Jm3T6LYNZLFuwjqJVL4psZBokumR8AbxGUb6vMKDFqU1VsmAwmG',
+        sellSig: 'xdfHPnH3yJTf9qQGUAxBo4e6aLiVnTfbP9x1SdG5GPikv4ccskcc8nE2CcjGjMUbL2jQZ8oCVoShq1JYoyN4X9v',
+        inTokens: '818352297559',
+        outLamports: '47130000',
+      },
+      {
+        id: 'hist_pos_1bjz_918',
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: '1BjZRVA2NDnYdw9JrVNckC93HAScUVTLJZq6iAmpQeb',
+        qtyRaw: '0',
+        costBasisLamports: '52984786',
+        avgEntryPriceSol: 7.436e-8,
+        realizedPnlLamports: '18785214',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789749257000,
+        updatedAt: 1789749405000,
+        closedAt: 1789749405000,
+        buySig: '45nSXTWjyQEeCZ2hdhKFnhZUSDmNS7AL5xecXaaP4AQrbNdXVcb3QFTtrZnhN5KHg7nab8B7u6p4okaWj4gEmxRF',
+        sellSig: '44tLPEUDydYqoxR4F5F1o6yNWbvMGve6BhtrpMecs4hjWgayuQtnMdkgbv81XQHQRE37e8KkNJBfJcmMtWgvsP3z',
+        inTokens: '712569935054',
+        outLamports: '71770000',
+      },
+    ];
+
+    const posStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO positions (
+        id, target_wallet, token_mint, qty_raw, cost_basis_raw, avg_entry_price,
+        realized_pnl_raw, unrealized_pnl_raw, state, opened_at, updated_at, closed_at, tp1_triggered, peak_pnl_pct
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const orderStmt = this.db.prepare(`
+      INSERT OR IGNORE INTO mirror_orders (
+        order_id, intent_id, target_signature, signature, mode, side, token_mint,
+        in_amount_raw, out_amount_raw, min_out_raw, effective_price, quote_at, landed_at, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertMany = this.db.transaction(() => {
+      for (const t of historicalTrades) {
+        posStmt.run(
+          t.id,
+          t.targetWallet,
+          t.tokenMint,
+          t.qtyRaw,
+          t.costBasisLamports,
+          t.avgEntryPriceSol,
+          t.realizedPnlLamports,
+          t.unrealizedPnlLamports,
+          t.state,
+          t.openedAt,
+          t.updatedAt,
+          t.closedAt,
+          0,
+          0
+        );
+
+        // Buy order
+        orderStmt.run(
+          `ord_buy_${t.id}`,
+          `int_buy_${t.id}`,
+          t.buySig,
+          t.buySig,
+          'LIVE',
+          'BUY',
+          t.tokenMint,
+          t.costBasisLamports,
+          t.inTokens,
+          t.inTokens,
+          t.avgEntryPriceSol,
+          t.openedAt,
+          t.openedAt,
+          'FILLED'
+        );
+
+        // Sell order
+        orderStmt.run(
+          `ord_sell_${t.id}`,
+          `int_sell_${t.id}`,
+          t.sellSig,
+          t.sellSig,
+          'LIVE',
+          'SELL',
+          t.tokenMint,
+          t.inTokens,
+          t.outLamports,
+          t.outLamports,
+          Number(t.outLamports) / Number(t.inTokens),
+          t.closedAt,
+          t.closedAt,
+          'FILLED'
+        );
+      }
+    });
+
+    try {
+      insertMany();
+    } catch (err: any) {
+      console.warn('[DB] Failed seeding historical trades:', err.message || err);
+    }
   }
 
   public close() {

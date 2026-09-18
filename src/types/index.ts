@@ -235,6 +235,8 @@ export interface SystemTelemetry {
   watchedWalletsCount: number;
   openPositionsCount: number;
   totalTradesProcessed: number;
+  totalTradesClosed?: number;
+  winRatePct?: number;
   initialPaperBalanceSol: number;
   currentPaperBalanceSol: number;
   solPriceUsd: number;

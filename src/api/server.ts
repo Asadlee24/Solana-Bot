@@ -130,6 +130,14 @@ export function createApiServer() {
     const telemetry = db.getSystemTelemetry();
     telemetry.circuitBreakerTripped = riskEngine.isTripped();
 
+    try {
+      const liveSolPrice = await tokenMetadataService.getSolPriceUsd();
+      if (liveSolPrice > 0) {
+        telemetry.solPriceUsd = liveSolPrice;
+        telemetry.totalRealizedPnlUsd = Number((telemetry.totalRealizedPnlSol * liveSolPrice).toFixed(2));
+      }
+    } catch {}
+
     // Dynamically calculate live floating PnL from active positions
     const open = await getEnrichedPositions();
     const liveFloatingSol = open.reduce((acc, p) => acc + (p.unrealizedPnlSol || 0), 0);
