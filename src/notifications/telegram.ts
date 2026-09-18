@@ -778,65 +778,64 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
 
       balanceBlock = `
-┌ 💼 <b>HOT WALLET & CAPITAL</b>
-├ <b>Address:</b> <code>${shortPub}</code>
-├ <b>Total Balance:</b> <b>${liveBal.toFixed(4)} SOL</b> (≈ $${liveBalUsd.toFixed(2)} USD)
-├ <b>Available Spend:</b> <b>${liveSpendable.toFixed(4)} SOL</b> (≈ $${liveSpendableUsd.toFixed(2)} USD)
-└ <b>Trade Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (≈ $${sizingUsd.toFixed(2)} USD / buy)
+💼 <b>CAPITAL & WALLET</b>
+• <b>Signer:</b> <code>${shortPub}</code>
+• <b>Balance:</b> <b>${liveBal.toFixed(4)} SOL</b> ($${liveBalUsd.toFixed(2)})
+• <b>Spendable:</b> ${liveSpendable.toFixed(4)} SOL ($${liveSpendableUsd.toFixed(2)})
+• <b>Buy Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)})
       `.trim();
     } else {
       balanceBlock = `
-┌ 💼 <b>PORTFOLIO (PAPER)</b>
-└ <b>Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b> ($${telemetry.totalPaperBalanceUsd.toFixed(2)} USD)
+💼 <b>PORTFOLIO (PAPER)</b>
+• <b>Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b> ($${telemetry.totalPaperBalanceUsd.toFixed(2)})
       `.trim();
     }
 
-    const tpStatus = config.AUTO_TP_ENABLED ? '🟢 <b>+100%</b> (Sell 50% Moonbag)' : '🔴 OFF';
-    const slStatus = config.AUTO_SL_ENABLED ? '🟢 <b>-25%</b> (Sell 100% Anti-Rug)' : '🔴 OFF';
+    const tpStatus = config.AUTO_TP_ENABLED ? '🟢 +100% (Sell 50%)' : '🔴 OFF';
+    const slStatus = config.AUTO_SL_ENABLED ? '🟢 -25% (Cut 100%)' : '🔴 OFF';
     const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
-      ? '🔒 <b>Strict 1-Trade / Coin (Never Re-Buy)</b>'
+      ? '🔒 Lifetime Lock (1x)'
       : '🔴 OFF';
 
     const text = `
-╔══════════════════════════════════╗
-  ⚡ <b>SOLANA COPY TRADING ENGINE</b> ⚡
-╚══════════════════════════════════╝
+⚡ <b>SOLANA COPY TRADING</b> ⚡
+━━━━━━━━━━━━━━━━━━━━
 
 <b>Status:</b> ${isLive ? (isArmed ? '🟢 <b>LIVE & ACTIVATED</b>' : '🔴 <b>LIVE (PAUSED)</b>') : '🟡 <b>PAPER SIMULATION</b>'}
 
 ${balanceBlock}
 
-┌ 🎯 <b>COPY TARGET</b>
-├ <b>Trader:</b> <code>${targetShort}</code>
-└ <b>Stream:</b> ⚡ Helius LaserStream (p50: ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'})
+🎯 <b>TARGET TRADER</b>
+• <b>Trader:</b> <code>${targetShort}</code>
+• <b>Speed:</b> ⚡ ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'} (LaserStream)
 
-┌ 🛡️ <b>SAFETY & RISK GUARDS</b>
-├ <b>Auto Take-Profit:</b> ${tpStatus}
-├ <b>Anti-Rug Stop-Loss:</b> ${slStatus}
-├ <b>Re-Buy Protection:</b> ${neverRebuyStatus}
-└ <b>Preflight Simulation:</b> 🛡️ <b>Enforced (Zero Gas Loss)</b>
+🛡️ <b>SAFETY & RISK GUARDS</b>
+• <b>Take-Profit:</b> ${tpStatus}
+• <b>Stop-Loss:</b> ${slStatus}
+• <b>Re-Buy:</b> ${neverRebuyStatus}
+• <b>Preflight:</b> 🛡️ Simulated (0 Loss)
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
-          { text: isLive ? '💼 WALLET BALANCE' : '📈 PNL SUMMARY', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
+          { text: '📊 POSITIONS', callback_data: 'menu_positions' },
+          { text: isLive ? '💼 BALANCE' : '📈 PNL', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
         ],
         [
-          { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-          { text: '⚙️ ENGINE STATUS', callback_data: 'menu_status' },
+          { text: isArmed ? '🔴 PAUSE BOT' : '🟢 ACTIVATE', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
+          { text: '⚙️ STATUS', callback_data: 'menu_status' },
         ],
         [
-          { text: '🎯 AUTO TP / SL', callback_data: 'menu_tpsl' },
+          { text: '🎯 AUTO TP/SL', callback_data: 'menu_tpsl' },
           { text: '🛡️ RISK LIMITS', callback_data: 'menu_risk' },
         ],
         [
-          { text: '👥 TARGET TRADERS', callback_data: 'menu_wallets' },
+          { text: '👥 TARGETS', callback_data: 'menu_wallets' },
           { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
         ],
         [
-          { text: '🚨 CLOSE ALL POSITIONS', callback_data: 'action_close_all' },
+          { text: '🚨 CLOSE ALL', callback_data: 'action_close_all' },
           { text: '🔄 REFRESH', callback_data: 'menu_main' },
         ],
       ],
