@@ -776,9 +776,10 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       ? '🔒 Lifetime Lock (1x)'
       : '🔴 OFF';
 
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
     const text = `
 ⚡ <b>SOLANA COPY TRADING</b> ⚡
-━━━━━━━━━━━━━━━━━━━━
+${divider}
 
 <b>Status:</b> ${isLive ? (isArmed ? '🟢 <b>LIVE & ACTIVATED</b>' : '🔴 <b>LIVE (PAUSED)</b>') : '🟡 <b>PAPER SIMULATION</b>'}
 
@@ -793,6 +794,7 @@ ${balanceBlock}
 • <b>Stop-Loss:</b> ${slStatus}
 • <b>Re-Buy:</b> ${neverRebuyStatus}
 • <b>Preflight:</b> 🛡️ Simulated (0 Loss)
+${divider}
     `.trim();
 
     const inlineKeyboard = {
@@ -1351,21 +1353,24 @@ Check any trader's live win rate, hold time, and profit before copying!
         `.trim();
       }
 
+      const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
       const text = `
 🧠 <b>[TRADER WIN-RATE & SCORE REPORT]</b>
+${divider}
 
 <b>Wallet:</b> <code>${address}</code>
 <b>Links:</b> ${solscanLink} | ${gmgnLink}
 
 <b>${safeBadge}</b>
 
-━━━━━━━━━━━━━━━━━━━
+${divider}
 <b>📊 PERFORMANCE METRICS:</b>
 ${metricsText}
 
-━━━━━━━━━━━━━━━━━━━
+${divider}
 <b>💡 RECOMMENDATION:</b>
 <i>${safeRec}</i>
+${divider}
       `.trim();
 
       const inlineKeyboardRows: any[] = [];
