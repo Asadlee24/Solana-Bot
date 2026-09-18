@@ -1,6 +1,7 @@
 import { createApiServer } from './api/server.js';
 import { config } from './config/index.js';
 import { db } from './db/database.js';
+import { autoExitManager } from './engine/auto-exit-manager.js';
 import { liveEngine } from './execution/live-engine.js';
 import { executionWalletManager } from './execution/wallet-manager.js';
 import { telegramNotifier } from './notifications/telegram.js';
@@ -58,7 +59,6 @@ async function bootstrap() {
     },
     onOpen: () => {
       console.info('[Stream] Hot path signal ingestion active via Helius LaserStream');
-      telegramNotifier.notifyStartup();
     },
     onError: (err) => {
       console.warn('[Stream Warning]:', err.message);
@@ -75,9 +75,13 @@ async function bootstrap() {
   // Start live mainnet RPC poller in parallel for 100% failover redundancy
   rpcPoller.start();
 
+  // Start Automated Take-Profit & Stop-Loss Engine
+  autoExitManager.start(signalManager);
+
   // Graceful shutdown
   const shutdown = () => {
     console.info('\n[Shutdown] Stopping bot cleanly...');
+    autoExitManager.stop();
     heliusWs.stop();
     rpcPoller.stop();
     server.close();

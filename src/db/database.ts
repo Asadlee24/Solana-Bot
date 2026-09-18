@@ -147,6 +147,8 @@ export class DBManager {
           opened_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
           closed_at INTEGER,
+          tp1_triggered INTEGER DEFAULT 0,
+          peak_pnl_pct REAL DEFAULT 0,
           UNIQUE(target_wallet, token_mint)
         );
         CREATE TABLE IF NOT EXISTS position_lots (
@@ -195,6 +197,8 @@ export class DBManager {
     safeAddColumn('mirror_orders', 'actual_fee_raw TEXT');
     safeAddColumn('mirror_orders', 'landing_provider TEXT');
     safeAddColumn('mirror_orders', 'reconciliation_source TEXT');
+    safeAddColumn('positions', 'tp1_triggered INTEGER DEFAULT 0');
+    safeAddColumn('positions', 'peak_pnl_pct REAL DEFAULT 0');
 
     // Seed default watched wallets if empty
     this.seedDefaultWallets();
@@ -401,11 +405,17 @@ export class DBManager {
              qty_raw as qtyRaw, cost_basis_raw as costBasisLamports,
              avg_entry_price as avgEntryPriceSol, realized_pnl_raw as realizedPnlLamports,
              unrealized_pnl_raw as unrealizedPnlLamports, state,
-             opened_at as openedAt, updated_at as updatedAt, closed_at as closedAt
+             opened_at as openedAt, updated_at as updatedAt, closed_at as closedAt,
+             tp1_triggered as tp1Triggered, peak_pnl_pct as peakPnlPct
       FROM positions WHERE target_wallet = ? AND token_mint = ?
     `);
     const row = stmt.get(targetWallet, tokenMint) as any;
-    return row || null;
+    if (!row) return null;
+    return {
+      ...row,
+      tp1Triggered: Boolean(row.tp1Triggered),
+      peakPnlPct: Number(row.peakPnlPct || 0),
+    };
   }
 
   public getOpenPositions(): FollowerPosition[] {
@@ -414,10 +424,16 @@ export class DBManager {
              qty_raw as qtyRaw, cost_basis_raw as costBasisLamports,
              avg_entry_price as avgEntryPriceSol, realized_pnl_raw as realizedPnlLamports,
              unrealized_pnl_raw as unrealizedPnlLamports, state,
-             opened_at as openedAt, updated_at as updatedAt, closed_at as closedAt
+             opened_at as openedAt, updated_at as updatedAt, closed_at as closedAt,
+             tp1_triggered as tp1Triggered, peak_pnl_pct as peakPnlPct
       FROM positions WHERE state = 'OPEN'
     `);
-    return stmt.all() as any[];
+    const rows = stmt.all() as any[];
+    return rows.map((r) => ({
+      ...r,
+      tp1Triggered: Boolean(r.tp1Triggered),
+      peakPnlPct: Number(r.peakPnlPct || 0),
+    }));
   }
 
   public savePosition(pos: FollowerPosition): void {
@@ -425,8 +441,8 @@ export class DBManager {
       INSERT INTO positions (
         id, target_wallet, token_mint, qty_raw, cost_basis_raw,
         avg_entry_price, realized_pnl_raw, unrealized_pnl_raw,
-        state, opened_at, updated_at, closed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        state, opened_at, updated_at, closed_at, tp1_triggered, peak_pnl_pct
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(target_wallet, token_mint) DO UPDATE SET
         qty_raw = excluded.qty_raw,
         cost_basis_raw = excluded.cost_basis_raw,
@@ -435,7 +451,9 @@ export class DBManager {
         unrealized_pnl_raw = excluded.unrealized_pnl_raw,
         state = excluded.state,
         updated_at = excluded.updated_at,
-        closed_at = excluded.closed_at
+        closed_at = excluded.closed_at,
+        tp1_triggered = excluded.tp1_triggered,
+        peak_pnl_pct = excluded.peak_pnl_pct
     `);
     stmt.run(
       pos.id,
@@ -449,8 +467,19 @@ export class DBManager {
       pos.state,
       pos.openedAt,
       pos.updatedAt,
-      pos.closedAt ?? null
+      pos.closedAt ?? null,
+      pos.tp1Triggered ? 1 : 0,
+      pos.peakPnlPct || 0
     );
+  }
+
+  public markPositionTpTriggered(positionId: string, peakPnlPct: number): void {
+    const stmt = this.db.prepare(`
+      UPDATE positions
+      SET tp1_triggered = 1, peak_pnl_pct = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    stmt.run(peakPnlPct, Date.now(), positionId);
   }
 
   // Position Lots

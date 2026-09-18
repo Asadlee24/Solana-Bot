@@ -180,6 +180,8 @@ export interface FollowerPosition {
   openedAt: number;
   updatedAt: number;
   closedAt?: number;
+  tp1Triggered?: boolean;
+  peakPnlPct?: number;
 }
 
 /**

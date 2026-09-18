@@ -70,6 +70,14 @@ const ConfigSchema = z.object({
 
   // SQLite Database path
   DB_PATH: z.string().default('./data/copy_bot.db'),
+
+  // Automated Take-Profit & Stop-Loss Engine (Moonbag 2x & Anti-Rug)
+  AUTO_TP_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
+  AUTO_TP_GAIN_PCT: z.coerce.number().default(100), // +100% (2x) gain trigger
+  AUTO_TP_SELL_FRACTION: z.coerce.number().default(0.5), // Sell 50% on 2x
+  AUTO_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
+  AUTO_SL_LOSS_PCT: z.coerce.number().default(25), // -25% loss trigger (anti-rug exit)
+  AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(3000), // 3-second monitoring loop
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

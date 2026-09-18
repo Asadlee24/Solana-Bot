@@ -16,6 +16,7 @@ export class TelegramNotifier {
   private isPolling: boolean = false;
   private signalManagerRef: any = null;
   private lastConnectionErrorTime: number = 0;
+  private hasNotifiedStartup: boolean = false;
 
   constructor() {
     this.botToken = config.TELEGRAM_BOT_TOKEN;
@@ -50,6 +51,7 @@ export class TelegramNotifier {
             { command: 'close', description: 'Close Position: /close <mint>' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
             { command: 'targets', description: 'View & Manage Watched Target Traders' },
+            { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
             { command: 'add_target', description: 'Add Target: /add_target <address>' },
             { command: 'remove_target', description: 'Remove Target: /remove_target <address>' },
             { command: 'status', description: 'Engine Health, Telemetry & Feed' },
@@ -207,6 +209,8 @@ export class TelegramNotifier {
       await this.handleRemoveTargetWallet(chatId, address);
     } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawText)) {
       await this.handleDirectAddressInput(chatId, rawText);
+    } else if (clean === 'tpsl' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag')) {
+      await this.sendTpSlReport(chatId);
     } else if (clean === 'risk' || clean.includes('risk controls') || clean === 'breaker' || clean.includes('risk limits')) {
       await this.sendRiskReport(chatId);
     } else if (clean === 'sim' || clean === 'simulate' || clean.includes('simulate buy') || clean === 'test') {
@@ -268,6 +272,8 @@ export class TelegramNotifier {
       await this.sendStatusReport(chatId);
     } else if (data === 'menu_wallets') {
       await this.sendWalletsReport(chatId);
+    } else if (data === 'menu_tpsl') {
+      await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
       await this.sendRiskReport(chatId);
     } else if (data === 'menu_sim') {
@@ -530,7 +536,10 @@ ${balanceBlock}
           { text: 'CLOSE ALL POSITIONS', callback_data: 'action_close_all' },
           { text: 'TARGET WALLETS', callback_data: 'menu_wallets' },
         ],
-        [{ text: 'REFRESH', callback_data: 'menu_main' }],
+        [
+          { text: '🎯 AUTO TP / SL', callback_data: 'menu_tpsl' },
+          { text: 'REFRESH', callback_data: 'menu_main' },
+        ],
       ],
     };
 
@@ -1318,7 +1327,104 @@ Trading automatically paused for portfolio protection.
     this.sendAlert(text, inlineKeyboard);
   }
 
+  public notifyAutoTakeProfit(
+    order: MirrorOrder,
+    position: FollowerPosition,
+    pnlPct: number,
+    meta?: TokenMetadata
+  ): void {
+    const solPriceUsd = 100.0;
+    const solReceived = Number(order.outAmountRaw || 0) / 1e9;
+    const usdReceived = solReceived * solPriceUsd;
+
+    const realizedSol = Number(position.realizedPnlLamports) / 1e9;
+    const realizedUsd = realizedSol * solPriceUsd;
+
+    const sym = meta?.symbol || position.tokenMint.substring(0, 6).toUpperCase();
+    const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
+    const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
+
+    const text = `
+🎯 <b>[AUTO TAKE-PROFIT FILLED] (+${pnlPct.toFixed(1)}%)</b>
+
+<b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
+<b>Strategy:</b> Moonbag 2x (Sold ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)
+<b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
+<b>Realized Profit:</b> <b>+$${realizedUsd.toFixed(2)} USD</b> (+${realizedSol.toFixed(4)} SOL)
+<b>Remaining:</b> ${(Number(position.qtyRaw) / 1e6).toFixed(2)} tokens (100% Free Moonbag!)${sigLink}
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  public notifyAutoStopLoss(
+    order: MirrorOrder,
+    position: FollowerPosition,
+    pnlPct: number,
+    meta?: TokenMetadata
+  ): void {
+    const solPriceUsd = 100.0;
+    const solReceived = Number(order.outAmountRaw || 0) / 1e9;
+    const usdReceived = solReceived * solPriceUsd;
+
+    const realizedSol = Number(position.realizedPnlLamports) / 1e9;
+    const realizedUsd = realizedSol * solPriceUsd;
+
+    const sym = meta?.symbol || position.tokenMint.substring(0, 6).toUpperCase();
+    const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
+    const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
+
+    const text = `
+🛡️ <b>[AUTO STOP-LOSS FILLED] (${pnlPct.toFixed(1)}%)</b>
+
+<b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
+<b>Strategy:</b> Anti-Rug Emergency Cut (100% Exited)
+<b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
+<b>Loss Capped At:</b> $${realizedUsd.toFixed(2)} USD (${realizedSol.toFixed(4)} SOL)
+<b>Status:</b> Position Closed to protect remaining capital${sigLink}
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  public async sendTpSlReport(chatId: string | number): Promise<void> {
+    const tpText = config.AUTO_TP_ENABLED
+      ? `🟢 <b>Enabled:</b> Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}% when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   <i>(Principal returned to wallet, remaining 50% rides as free moonbag)</i>`
+      : '🔴 <b>Disabled</b>';
+
+    const slText = config.AUTO_SL_ENABLED
+      ? `🟢 <b>Enabled:</b> Emergency exit 100% when token drops to <b>-${config.AUTO_SL_LOSS_PCT}%</b>\n   <i>(Protects capital against sudden rugpulls & dumps)</i>`
+      : '🔴 <b>Disabled</b>';
+
+    const text = `
+🎯 <b>[AUTOMATED TAKE-PROFIT & STOP-LOSS]</b>
+
+<b>Moonbag Auto-TP:</b>
+${tpText}
+
+<b>Anti-Rug Auto-SL:</b>
+${slText}
+
+<b>Price Monitoring Frequency:</b> Every ${(config.AUTO_EXIT_POLL_INTERVAL_MS / 1000).toFixed(1)}s
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
+        ],
+        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
+  }
+
   public notifyStartup(): void {
+    if (this.hasNotifiedStartup) return;
+    this.hasNotifiedStartup = true;
+
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
     const bal = isLive ? executionWalletManager.getCachedBalanceSol() : 10.0;
