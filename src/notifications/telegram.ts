@@ -48,18 +48,12 @@ export class TelegramNotifier {
             { command: 'balance', description: 'Real On-Chain Wallet Balance' },
             { command: 'activate', description: 'Activate Bot (Start Live Trading)' },
             { command: 'deactivate', description: 'Deactivate Bot (Pause Live Trading)' },
-            { command: 'arm', description: 'Activate Bot (Alias)' },
-            { command: 'disarm', description: 'Deactivate Bot (Alias)' },
             { command: 'positions', description: 'Open Positions & Close Controls' },
-            { command: 'close', description: 'Close Position: /close <mint>' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
             { command: 'targets', description: 'View & Manage Watched Target Traders' },
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
-            { command: 'cooldown', description: 'Target Spam Guard & Active Token Cooldowns' },
             { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
-            { command: 'add_target', description: 'Add Target: /add_target <address>' },
-            { command: 'remove_target', description: 'Remove Target: /remove_target <address>' },
             { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
             { command: 'status', description: 'Engine Health, Telemetry & Feed' },
             { command: 'pnl', description: 'Portfolio Profit/Loss Performance' },
@@ -688,8 +682,7 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
 🛡️ <b>SAFETY & AUTOMATION STATUS:</b>
 • <b>Auto Take-Profit:</b> ${tpStatus}
 • <b>Anti-Rug Stop-Loss:</b> ${slStatus}
-• <b>Cooldown Guard:</b> ${cooldownStatus}
-• <b>Never Re-Buy:</b> ${neverRebuyStatus}
+• <b>Never Re-Buy Guard:</b> ${neverRebuyStatus}
 ━━━━━━━━━━━━━━━━━━━
 
 🔗 <a href="https://solscan.io/account/${pub}">View Wallet on Solscan</a>
@@ -746,7 +739,6 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
     const telemetry = db.getSystemTelemetry();
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
-    const modeBadge = isLive ? (isArmed ? '🟢 [BOT ACTIVATED]' : '🔴 [BOT DEACTIVATED]') : '[PAPER SIMULATION]';
     const targetWallet = config.WATCHED_WALLETS[0] || 'CwUHN4...';
     const targetShort = `${targetWallet.substring(0, 4)}...${targetWallet.substring(targetWallet.length - 4)}`;
 
@@ -762,62 +754,66 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
 
       balanceBlock = `
-<b>Wallet:</b> <code>${shortPub}</code>
-<b>Real Balance:</b> <b>${liveBal.toFixed(4)} SOL ($${liveBalUsd.toFixed(2)} USD)</b>
-<b>Spendable:</b> ${liveSpendable.toFixed(4)} SOL ($${liveSpendableUsd.toFixed(2)} USD)
-<b>Trade Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
+┌ 💼 <b>HOT WALLET & CAPITAL</b>
+├ <b>Address:</b> <code>${shortPub}</code>
+├ <b>Total Balance:</b> <b>${liveBal.toFixed(4)} SOL</b> (≈ $${liveBalUsd.toFixed(2)} USD)
+├ <b>Available Spend:</b> <b>${liveSpendable.toFixed(4)} SOL</b> (≈ $${liveSpendableUsd.toFixed(2)} USD)
+└ <b>Trade Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (≈ $${sizingUsd.toFixed(2)} USD / buy)
       `.trim();
     } else {
-      balanceBlock = `<b>Portfolio Balance:</b> ${telemetry.currentPaperBalanceSol.toFixed(4)} SOL ($${telemetry.totalPaperBalanceUsd.toFixed(2)} USD)`;
+      balanceBlock = `
+┌ 💼 <b>PORTFOLIO (PAPER)</b>
+└ <b>Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b> ($${telemetry.totalPaperBalanceUsd.toFixed(2)} USD)
+      `.trim();
     }
 
-    const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
-    const slStatus = config.AUTO_SL_ENABLED ? '🟢 ON (-25% Anti-Rug)' : '🔴 OFF';
-    const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
-      ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Single-Entry Guard)`
-      : '🔴 OFF';
+    const tpStatus = config.AUTO_TP_ENABLED ? '🟢 <b>+100%</b> (Sell 50% Moonbag)' : '🔴 OFF';
+    const slStatus = config.AUTO_SL_ENABLED ? '🟢 <b>-25%</b> (Sell 100% Anti-Rug)' : '🔴 OFF';
     const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
-      ? '🔒 ON (Strict 1-Entry per Coin)'
+      ? '🔒 <b>Strict 1-Trade / Coin (Never Re-Buy)</b>'
       : '🔴 OFF';
 
     const text = `
-<b>[SOLANA COPY ENGINE] TERMINAL CONTROL</b>
+╔══════════════════════════════════╗
+  ⚡ <b>SOLANA COPY TRADING ENGINE</b> ⚡
+╚══════════════════════════════════╝
 
-<b>Mode:</b> ${modeBadge}
-<b>Target Trader:</b> <code>${targetShort}</code>
+<b>Status:</b> ${isLive ? (isArmed ? '🟢 <b>LIVE & ACTIVATED</b>' : '🔴 <b>LIVE (PAUSED)</b>') : '🟡 <b>PAPER SIMULATION</b>'}
+
 ${balanceBlock}
-<b>Auto Take-Profit:</b> ${tpStatus}
-<b>Anti-Rug Stop-Loss:</b> ${slStatus}
-<b>Cooldown Guard:</b> ${cooldownStatus}
-<b>Never Re-Buy:</b> ${neverRebuyStatus}
-<b>Stream Status:</b> Helius LaserStream (Active)
-<b>Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'}
+
+┌ 🎯 <b>COPY TARGET</b>
+├ <b>Trader:</b> <code>${targetShort}</code>
+└ <b>Stream:</b> ⚡ Helius LaserStream (p50: ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'})
+
+┌ 🛡️ <b>SAFETY & RISK GUARDS</b>
+├ <b>Auto Take-Profit:</b> ${tpStatus}
+├ <b>Anti-Rug Stop-Loss:</b> ${slStatus}
+├ <b>Re-Buy Protection:</b> ${neverRebuyStatus}
+└ <b>Preflight Simulation:</b> 🛡️ <b>Enforced (Zero Gas Loss)</b>
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: 'POSITIONS', callback_data: 'menu_positions' },
-          { text: isLive ? 'WALLET BALANCE' : 'PNL SUMMARY', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
+          { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: isLive ? '💼 WALLET BALANCE' : '📈 PNL SUMMARY', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
         ],
         [
           { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-          { text: 'ENGINE STATUS', callback_data: 'menu_status' },
-        ],
-        [
-          { text: 'TARGET WALLETS', callback_data: 'menu_wallets' },
-          { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
-        ],
-        [
-          { text: 'CLOSE ALL POSITIONS', callback_data: 'action_close_all' },
-          { text: 'REFRESH', callback_data: 'menu_main' },
+          { text: '⚙️ ENGINE STATUS', callback_data: 'menu_status' },
         ],
         [
           { text: '🎯 AUTO TP / SL', callback_data: 'menu_tpsl' },
-          { text: '⏱️ COOLDOWN GUARD', callback_data: 'menu_cooldown' },
+          { text: '🛡️ RISK LIMITS', callback_data: 'menu_risk' },
         ],
         [
-          { text: '🛡️ RISK CONTROLS', callback_data: 'menu_risk' },
+          { text: '👥 TARGET TRADERS', callback_data: 'menu_wallets' },
+          { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
+        ],
+        [
+          { text: '🚨 CLOSE ALL POSITIONS', callback_data: 'action_close_all' },
+          { text: '🔄 REFRESH', callback_data: 'menu_main' },
         ],
       ],
     };
@@ -904,8 +900,9 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       const isProfit = pnlSol >= 0;
 
       const text = `
-<b>[POSITION] $${symbol} (${name})</b>
+<b>[OPEN POSITION] 🪙 $${symbol} (${name})</b>
 
+<b>Coin:</b> <b>$${symbol}</b> (${name})
 <b>Mint:</b> <code>${pos.tokenMint}</code>
 <b>Price:</b> $${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(6) : currentPriceUsd.toFixed(4)} USD (${currentPriceSol.toFixed(8)} SOL)
 <b>Market Cap:</b> ${mcapStr}
@@ -918,12 +915,12 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       const inlineKeyboard = {
         inline_keyboard: [
           [
-            { text: '🚨 CLOSE 100%', callback_data: `sell_100_${pos.tokenMint}` },
-            { text: 'TP 50%', callback_data: `sell_50_${pos.tokenMint}` },
+            { text: `🚨 CLOSE 100% ($${symbol})`, callback_data: `sell_100_${pos.tokenMint}` },
+            { text: `TP 50% ($${symbol})`, callback_data: `sell_50_${pos.tokenMint}` },
           ],
           [
-            { text: 'TP 25%', callback_data: `sell_25_${pos.tokenMint}` },
-            { text: 'TP 75%', callback_data: `sell_75_${pos.tokenMint}` },
+            { text: `TP 25% ($${symbol})`, callback_data: `sell_25_${pos.tokenMint}` },
+            { text: `TP 75% ($${symbol})`, callback_data: `sell_75_${pos.tokenMint}` },
           ],
         ],
       };
@@ -950,13 +947,15 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       return;
     }
 
-    const rows: any[] = openPositions.map((p) => {
-      const short = `${p.tokenMint.substring(0, 4)}...${p.tokenMint.substring(p.tokenMint.length - 4)}`;
-      return [
-        { text: `CLOSE ${short} (100%)`, callback_data: `sell_100_${p.tokenMint}` },
-        { text: `SELL 50%`, callback_data: `sell_50_${p.tokenMint}` },
-      ];
-    });
+    const rows: any[] = [];
+    for (const p of openPositions) {
+      const meta = await tokenMetadataService.getTokenMetadata(p.tokenMint);
+      const sym = meta?.symbol ? meta.symbol.toUpperCase() : p.tokenMint.substring(0, 4).toUpperCase();
+      rows.push([
+        { text: `🚨 CLOSE $${sym} (100%)`, callback_data: `sell_100_${p.tokenMint}` },
+        { text: `SELL 50% ($${sym})`, callback_data: `sell_50_${p.tokenMint}` },
+      ]);
+    }
 
     rows.push([{ text: '🚨 CLOSE ALL POSITIONS', callback_data: 'action_close_all' }]);
     rows.push([{ text: 'MAIN MENU', callback_data: 'menu_main' }]);
@@ -1596,10 +1595,15 @@ ${lockedSummary}
       const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Simulated';
       const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
 
+      const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
+      const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
+      const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
       const confirmMsg = `
 ✅ <b>[EXIT EXECUTED] (${exitPct}%)</b>
 
-<b>Token:</b> <code>${order.tokenMint}</code>
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Mint:</b> <code>${order.tokenMint}</code>
 <b>Proceeds:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
 <b>Realized PnL:</b> <b>${isProfit ? '+' : ''}$${realizedUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${realizedSol.toFixed(4)} SOL)
 <b>Position State:</b> ${position?.state || 'CLOSED'}${sigLink}
@@ -1679,6 +1683,10 @@ ${lockedSummary}
       statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}`;
     }
 
+    const meta = await tokenMetadataService.getTokenMetadata(intent.tokenMint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${intent.tokenMint.slice(0, 6).toUpperCase()}`;
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const estPriceUsd = intent.estimatedPrice * solPriceUsd;
     const priceDisplay = estPriceUsd < 0.0001
@@ -1691,7 +1699,8 @@ ${sideEmoji} <b>[TARGET TRADER ACTIVITY]</b>
 
 <b>Trader:</b> <code>${shortTrader}</code>
 <b>Action:</b> ${intent.side} on ${intent.venue}
-<b>Token:</b> <code>${intent.tokenMint}</code>
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Mint:</b> <code>${intent.tokenMint}</code>
 <b>Est. Price:</b> ${priceDisplay}
 <b>Target Tx:</b> <a href="https://solscan.io/tx/${intent.targetSignature}">View on Solscan</a>
 
@@ -1708,6 +1717,10 @@ ${statusText}
     const isBuy = order.side === 'BUY';
     const sideTag = isBuy ? '🟢 [BUY FILLED]' : '🔴 [SELL FILLED]';
     const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+
+    const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
 
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const fillPriceSol = order.effectivePrice;
@@ -1752,7 +1765,8 @@ ${statusText}
     const text = `
 ⚡ <b>[EXECUTION] ${modeBadge} ${sideTag}</b>
 
-<b>Token:</b> <code>${order.tokenMint}</code>
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Mint:</b> <code>${order.tokenMint}</code>
 <b>Trigger:</b> ${triggerText}
 <b>Fill Price:</b> $${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD (${fillPriceSol.toFixed(8)} SOL)
 <b>Market Cap:</b> ${mcapStr} MCap
@@ -1765,12 +1779,12 @@ ${statusText}
       ? {
           inline_keyboard: [
             [
-              { text: '🚨 CLOSE 100%', callback_data: `sell_100_${mint}` },
-              { text: 'TP 50%', callback_data: `sell_50_${mint}` },
+              { text: `🚨 CLOSE 100% (${ticker})`, callback_data: `sell_100_${mint}` },
+              { text: `TP 50% (${ticker})`, callback_data: `sell_50_${mint}` },
             ],
             [
-              { text: 'POSITIONS', callback_data: 'menu_positions' },
-              { text: 'WALLET BALANCE', callback_data: 'menu_balance' },
+              { text: '📊 POSITIONS', callback_data: 'menu_positions' },
+              { text: 'MAIN MENU', callback_data: 'menu_main' },
             ],
           ],
         }
@@ -1793,7 +1807,8 @@ ${statusText}
     const realizedUsd = realizedSol * solPriceUsd;
     const isProfit = realizedSol >= 0;
 
-    const sym = meta?.symbol || position.tokenMint.substring(0, 6).toUpperCase();
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
 
     const sigText = order.orderSignature
       ? `<a href="https://solscan.io/tx/${order.orderSignature}">${order.orderSignature.slice(0, 8)}...</a>`
@@ -1802,7 +1817,8 @@ ${statusText}
     const text = `
 ✅ <b>[POSITION EXIT FILLED] (${Math.round(fraction * 100)}%)</b>
 
-<b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
 <b>Realized PnL:</b> <b>${isProfit ? '+' : ''}$${realizedUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${realizedSol.toFixed(4)} SOL)
 <b>State:</b> ${position.state === 'OPEN' ? `${(Number(position.qtyRaw) / 1e6).toFixed(2)} tokens remaining` : 'CLOSED'}
@@ -1840,14 +1856,16 @@ Trading automatically paused for portfolio protection.
     const realizedSol = Number(position.realizedPnlLamports) / 1e9;
     const realizedUsd = realizedSol * solPriceUsd;
 
-    const sym = meta?.symbol || position.tokenMint.substring(0, 6).toUpperCase();
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
     const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
     const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
 
     const text = `
 🎯 <b>[AUTO TAKE-PROFIT FILLED] (+${pnlPct.toFixed(1)}%)</b>
 
-<b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
 <b>Strategy:</b> Moonbag 2x (Sold ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
 <b>Realized Profit:</b> <b>+$${realizedUsd.toFixed(2)} USD</b> (+${realizedSol.toFixed(4)} SOL)
@@ -1870,14 +1888,16 @@ Trading automatically paused for portfolio protection.
     const realizedSol = Number(position.realizedPnlLamports) / 1e9;
     const realizedUsd = realizedSol * solPriceUsd;
 
-    const sym = meta?.symbol || position.tokenMint.substring(0, 6).toUpperCase();
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
     const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
     const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
 
     const text = `
 🛡️ <b>[AUTO STOP-LOSS FILLED] (${pnlPct.toFixed(1)}%)</b>
 
-<b>Token:</b> $${sym} (<code>${position.tokenMint}</code>)
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
 <b>Strategy:</b> Anti-Rug Emergency Cut (100% Exited)
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
 <b>Loss Capped At:</b> $${realizedUsd.toFixed(2)} USD (${realizedSol.toFixed(4)} SOL)
