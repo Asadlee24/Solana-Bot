@@ -276,12 +276,37 @@ export class TelegramNotifier {
       clean.includes('trader score')
     ) {
       const parts = rawText.split(/\s+/);
-      const address = parts[1];
-      if (!address) {
-        await this.promptTraderScoreInput(chatId);
+      // Check if a Solana base58 address was passed anywhere in the message
+      const solanaAddress = parts.find((p: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(p.trim()));
+      if (solanaAddress) {
+        await this.handleTraderScore(chatId, solanaAddress);
         return;
       }
-      await this.handleTraderScore(chatId, address);
+
+      // Check if user passed an address token (excluding command keywords and emojis)
+      const nonCommandTokens = parts.filter(
+        (p: string) => !/^(trader|score|traderscore|trader_score|analyze|\/trader_score|\/traderscore|\/score|\/analyze|🧠)$/i.test(p.replace(/^[^\w/]+|[^\w]+$/g, ''))
+      );
+
+      if (nonCommandTokens.length > 0) {
+        const candidate = nonCommandTokens[0].replace(/^[^\w]+|[^\w]+$/g, '');
+        if (candidate.length >= 32 && candidate.length <= 44) {
+          await this.handleTraderScore(chatId, candidate);
+          return;
+        }
+      }
+
+      // If no address given (e.g. user pressed '🧠 TRADER SCORE' or typed '/trader_score'):
+      // If there is only 1 watched target wallet, auto-analyze it directly for instant convenience!
+      const dbWallets = db.getWatchedWallets();
+      const configWallets = config.WATCHED_WALLETS;
+      const allWallets = Array.from(new Set([...configWallets, ...dbWallets.map((w) => w.wallet)]));
+
+      if (allWallets.length === 1) {
+        await this.handleTraderScore(chatId, allWallets[0]);
+      } else {
+        await this.promptTraderScoreInput(chatId);
+      }
     } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawText)) {
       await this.handleDirectAddressInput(chatId, rawText);
     } else if (clean === 'tpsl' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag')) {
@@ -1262,15 +1287,18 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
     for (const w of allWallets) {
       const match = dbWallets.find((dbw) => dbw.wallet === w);
       const short = `${w.substring(0, 4)}...${w.substring(w.length - 4)}`;
-      const label = match?.label || short;
+      const label = match?.label ? `${match.label} (${short})` : short;
       inlineKeyboardRows.push([
-        { text: `📊 Score ${label}`, callback_data: `score_${w}` },
+        { text: `🧠 Score ${label}`, callback_data: `score_${w}` },
       ]);
     }
 
     inlineKeyboardRows.push([
-      { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
-      { text: 'MAIN MENU', callback_data: 'menu_main' },
+      { text: '➕ Add Target Trader', callback_data: 'prompt_add_wallet' },
+    ]);
+    inlineKeyboardRows.push([
+      { text: '👥 TARGET TRADERS', callback_data: 'menu_wallets' },
+      { text: '🔙 MAIN MENU', callback_data: 'menu_main' },
     ]);
 
     const text = `
@@ -1312,7 +1340,7 @@ Check any trader's live win rate, hold time, and profit before copying!
 
     try {
       const result = await traderAnalyzerService.analyzeWallet(address, 40);
-      const isWatched = Boolean(db.getWatchedWallet(address));
+      const isWatched = config.WATCHED_WALLETS.includes(address) || Boolean(db.getWatchedWallet(address));
 
       const solscanLink = `<a href="https://solscan.io/account/${address}">Solscan</a>`;
       const gmgnLink = `<a href="https://gmgn.ai/sol/address/${address}">GMGN</a>`;
@@ -1349,6 +1377,7 @@ Check any trader's live win rate, hold time, and profit before copying!
         ]);
       } else if (isWatched) {
         inlineKeyboardRows.push([
+          { text: '🔄 Re-Analyze This Trader', callback_data: `score_${address}` },
           { text: '🗑️ Remove From Targets', callback_data: `del_wallet_${address}` },
         ]);
       }
