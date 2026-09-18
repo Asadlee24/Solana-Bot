@@ -5,6 +5,7 @@ import {
   PublicKey,
   VersionedTransaction,
 } from '@solana/web3.js';
+import { TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import bs58Module from 'bs58';
 import { randomUUID } from 'crypto';
 import {
@@ -276,10 +277,14 @@ export class LiveExecutionEngine {
       let isDirectPumpBondingCurve = false;
 
       if (!forceJupiter && targetIntent.venue === 'PUMPFUN') {
-        const curveState = await pumpFunSwapAdapter.getBondingCurveState(mirrorIntent.tokenMint);
-        // Active bonding curve only if initialized, incomplete, and paired with SOL
-        if (curveState.isInitialized && !curveState.complete && curveState.pairAsset === 'SOL') {
-          isDirectPumpBondingCurve = true;
+        const tokenProgramId = await pumpFunSwapAdapter.resolveTokenProgram(new PublicKey(mirrorIntent.tokenMint));
+        const isToken2022 = tokenProgramId.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
+        if (!isToken2022) {
+          const curveState = await pumpFunSwapAdapter.getBondingCurveState(mirrorIntent.tokenMint);
+          // Active bonding curve only if initialized, incomplete, and paired with SOL
+          if (curveState.isInitialized && !curveState.complete && curveState.pairAsset === 'SOL') {
+            isDirectPumpBondingCurve = true;
+          }
         }
       }
 

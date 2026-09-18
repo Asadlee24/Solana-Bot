@@ -32,7 +32,9 @@ export const PUMP_EVENT_AUTHORITY = new PublicKey('Ce6TQqeHC9p8KetsN6JsjHK7UTZk7
 export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 // Pump.fun instruction discriminators (8-byte Anchor discriminators)
-const BUY_DISCRIMINATOR = Buffer.from([0x69, 0x07, 0x9a, 0xe6, 0xb5, 0xe0, 0x24, 0xeb]);
+// global:buy = sha256("global:buy")[0..8] = [0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea]
+// global:sell = sha256("global:sell")[0..8] = [0x33, 0xe6, 0x85, 0xa4, 0x01, 0x7f, 0x83, 0xad]
+const BUY_DISCRIMINATOR = Buffer.from([0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea]);
 const SELL_DISCRIMINATOR = Buffer.from([0x33, 0xe6, 0x85, 0xa4, 0x01, 0x7f, 0x83, 0xad]);
 
 export interface OnChainBondingCurveState {
@@ -248,15 +250,18 @@ export class PumpFunSwapAdapter {
     slippageBps: number = config.MAX_SLIPPAGE_BPS
   ): Promise<PumpFunBuildResult> {
     const curveState = await this.getBondingCurveState(mintAddress);
+    const tokenProgramId = await this.resolveTokenProgram(new PublicKey(mintAddress));
+    const isToken2022 = tokenProgramId.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
 
-    // If smoke test forces Jupiter, or token graduated, or paired with USDC, route via Jupiter Swap API V2
+    // If smoke test forces Jupiter, or token graduated, or paired with USDC, or Token-2022, route via Jupiter Swap API V2
     if (
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
       curveState.complete ||
       !curveState.isInitialized ||
-      curveState.pairAsset === 'USDC'
+      curveState.pairAsset === 'USDC' ||
+      isToken2022
     ) {
-      console.info(`[PumpFun Routing] Token ${mintAddress} routed buy via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed buy via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}, isToken2022=${isToken2022}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         WSOL_MINT,
         mintAddress,
@@ -280,7 +285,6 @@ export class PumpFunSwapAdapter {
     const quote = this.calculateQuote(curveState, 'BUY', solAmountLamports, slippageBps);
 
     const mint = new PublicKey(mintAddress);
-    const tokenProgramId = await this.resolveTokenProgram(mint);
     const user = keypair.publicKey;
     const [bondingCurve] = this.getBondingCurvePDA(mint);
     const associatedBondingCurve = getAssociatedTokenAddressSync(mint, bondingCurve, true, tokenProgramId);
@@ -361,14 +365,17 @@ export class PumpFunSwapAdapter {
     slippageBps: number = config.MAX_SLIPPAGE_BPS
   ): Promise<PumpFunBuildResult> {
     const curveState = await this.getBondingCurveState(mintAddress);
+    const tokenProgramId = await this.resolveTokenProgram(new PublicKey(mintAddress));
+    const isToken2022 = tokenProgramId.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
 
     if (
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
       curveState.complete ||
       !curveState.isInitialized ||
-      curveState.pairAsset === 'USDC'
+      curveState.pairAsset === 'USDC' ||
+      isToken2022
     ) {
-      console.info(`[PumpFun Routing] Token ${mintAddress} routed sell via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed sell via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}, isToken2022=${isToken2022}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         mintAddress,
         WSOL_MINT,
@@ -392,7 +399,6 @@ export class PumpFunSwapAdapter {
     const quote = this.calculateQuote(curveState, 'SELL', tokenAmountRaw, slippageBps);
 
     const mint = new PublicKey(mintAddress);
-    const tokenProgramId = await this.resolveTokenProgram(mint);
     const user = keypair.publicKey;
     const [bondingCurve] = this.getBondingCurvePDA(mint);
     const associatedBondingCurve = getAssociatedTokenAddressSync(mint, bondingCurve, true, tokenProgramId);

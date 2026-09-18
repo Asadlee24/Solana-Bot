@@ -1,4 +1,4 @@
-import { SwapIntent } from '../types/index.js';
+import { SwapIntent, DexVenue } from '../types/index.js';
 import { JupiterAdapter } from './adapters/jupiter.js';
 import { OrcaAdapter } from './adapters/orca.js';
 import { PumpFunAdapter, WSOL_MINT } from './adapters/pumpfun.js';
@@ -198,11 +198,26 @@ export class FastTransactionDecoder {
         const absSol = reconciled.netSolDeltaLamports < 0n ? -reconciled.netSolDeltaLamports : reconciled.netSolDeltaLamports;
         const absTok = reconciled.netTokenDeltaRaw < 0n ? -reconciled.netTokenDeltaRaw : reconciled.netTokenDeltaRaw;
 
+        const hasPump = tx.accountKeys.some((k) => k === '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
+        const hasRayAmm = tx.accountKeys.some((k) => k === '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+        const hasRayCpmm = tx.accountKeys.some((k) => k === 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
+        const hasJup = tx.accountKeys.some((k) => k.startsWith('JUP') || k === 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4');
+        let detectedVenue: DexVenue = 'JUPITER';
+        if (hasPump) {
+          detectedVenue = 'PUMPFUN';
+        } else if (hasRayCpmm) {
+          detectedVenue = 'RAYDIUM_CPMM';
+        } else if (hasRayAmm) {
+          detectedVenue = 'RAYDIUM_AMM';
+        } else if (hasJup) {
+          detectedVenue = 'JUPITER';
+        }
+
         return {
           targetSignature: tx.signature,
           slot: tx.slot,
           targetWallet,
-          venue: 'PUMPFUN',
+          venue: detectedVenue,
           side: reconciled.side,
           inputMint,
           outputMint,
