@@ -81,8 +81,7 @@ export class TelegramNotifier {
         if (id.trim()) ids.add(id.trim());
       });
     }
-    // Whitelist operator's authorized accounts: @Asadlee84 (6180068450) & @Asadaly2 (7080909965)
-    ids.add('6180068450');
+    // Whitelist operator's sole authorized account: @Asadaly2 (7080909965)
     ids.add('7080909965');
     return Array.from(ids);
   }
