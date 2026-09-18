@@ -832,7 +832,7 @@ ${divider}
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
     const allowedWallets = new Set([...config.WATCHED_WALLETS, ...dbWallets]);
-    const openPositions = db.getOpenPositions().filter((p) => {
+    const rawPositions = db.getOpenPositions().filter((p) => {
       const mint = p.tokenMint || '';
       const isAllowed = allowedWallets.has(p.targetWallet) || !p.targetWallet;
       const isNotDummy =
@@ -841,6 +841,24 @@ ${divider}
         !mint.toLowerCase().includes('test');
       return p.state === 'OPEN' && isAllowed && isNotDummy;
     });
+
+    const openPositions: FollowerPosition[] = [];
+    for (const pos of rawPositions) {
+      if (config.EXECUTION_MODE === 'LIVE') {
+        try {
+          const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
+          if (onChainBal <= 0n) {
+            pos.state = 'CLOSED';
+            pos.qtyRaw = '0';
+            pos.closedAt = Date.now();
+            pos.updatedAt = Date.now();
+            db.savePosition(pos);
+            continue;
+          }
+        } catch {}
+      }
+      openPositions.push(pos);
+    }
 
     if (openPositions.length === 0) {
       const isLive = config.EXECUTION_MODE === 'LIVE';

@@ -223,19 +223,29 @@ export class LiveExecutionEngine {
     } else {
       // Precise on-chain token balance reconciliation for SELL
       const onChainTokenBalance = await executionWalletManager.getTokenBalanceRaw(mirrorIntent.tokenMint);
-      if (onChainTokenBalance > 0n) {
-        if (mirrorIntent.sellFraction && mirrorIntent.sellFraction >= 0.95) {
-          // Full exit: sell 100% of actual on-chain tokens
-          rawInAmount = onChainTokenBalance.toString();
-        } else if (mirrorIntent.sellFraction && mirrorIntent.sellFraction < 0.95) {
-          // Proportional exit: sell exact fraction of actual on-chain tokens
-          const propAmt = BigInt(Math.floor(Number(onChainTokenBalance) * mirrorIntent.sellFraction));
-          if (propAmt > 0n) {
-            rawInAmount = propAmt.toString();
-          }
-        } else if (BigInt(rawInAmount) > onChainTokenBalance) {
-          rawInAmount = onChainTokenBalance.toString();
+      if (onChainTokenBalance <= 0n) {
+        const pos =
+          db.getPosition(mirrorIntent.targetWallet, mirrorIntent.tokenMint) ||
+          db.getOpenPositionByMint(mirrorIntent.tokenMint);
+        if (pos && pos.state === 'OPEN') {
+          pos.state = 'CLOSED';
+          pos.qtyRaw = '0';
+          pos.closedAt = Date.now();
+          pos.updatedAt = Date.now();
+          db.savePosition(pos);
         }
+        throw new Error('Follower holds 0 balance of this token on-chain (already closed or sold externally).');
+      }
+
+      if (mirrorIntent.sellFraction && mirrorIntent.sellFraction >= 0.95) {
+        // Full exit: sell 100% of actual on-chain tokens
+        rawInAmount = onChainTokenBalance.toString();
+      } else if (mirrorIntent.sellFraction && mirrorIntent.sellFraction < 0.95) {
+        // Proportional exit: sell exact fraction of actual on-chain tokens
+        const propAmt = BigInt(Math.floor(Number(onChainTokenBalance) * mirrorIntent.sellFraction));
+        rawInAmount = propAmt > 0n ? propAmt.toString() : onChainTokenBalance.toString();
+      } else if (BigInt(rawInAmount) > onChainTokenBalance) {
+        rawInAmount = onChainTokenBalance.toString();
       }
 
       if (BigInt(rawInAmount) <= 0n) {

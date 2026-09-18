@@ -3,6 +3,7 @@ import { autoExitManager } from '../src/engine/auto-exit-manager.js';
 import { db } from '../src/db/database.js';
 import { tokenMetadataService } from '../src/services/token-metadata.js';
 import { telegramNotifier } from '../src/notifications/telegram.js';
+import { executionWalletManager } from '../src/execution/wallet-manager.js';
 
 describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => {
   const mockSignalManager = {
@@ -34,6 +35,7 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
     vi.spyOn(db, 'getOpenPositions').mockReturnValue([testPos]);
     vi.spyOn(db, 'markPositionTpTriggered').mockImplementation(() => {});
     vi.spyOn(telegramNotifier, 'notifyAutoTakeProfit').mockImplementation(() => {});
+    vi.spyOn(executionWalletManager, 'getTokenBalanceRaw').mockResolvedValue(BigInt(testPos.qtyRaw));
 
     // Token price is 0.00010 SOL (+100% gain vs entry 0.00005)
     vi.spyOn(tokenMetadataService, 'getTokenMetadata').mockResolvedValue({
@@ -100,6 +102,7 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
 
     vi.spyOn(db, 'getOpenPositions').mockReturnValue([testPos]);
     vi.spyOn(telegramNotifier, 'notifyAutoStopLoss').mockImplementation(() => {});
+    vi.spyOn(executionWalletManager, 'getTokenBalanceRaw').mockResolvedValue(BigInt(testPos.qtyRaw));
 
     // Token price is 0.000020 SOL (-60% drop vs entry 0.00005)
     vi.spyOn(tokenMetadataService, 'getTokenMetadata').mockResolvedValue({

@@ -63,12 +63,30 @@ export function createApiServer() {
 
   const getEnrichedPositions = async () => {
     const allowedWallets = new Set(config.WATCHED_WALLETS);
-    const open = db.getOpenPositions().filter((pos) => {
+    const rawOpen = db.getOpenPositions().filter((pos) => {
       const mint = pos.tokenMint || '';
       const isAllowed = allowedWallets.has(pos.targetWallet);
       const isNotDummy = !mint.toLowerCase().includes('tokenmint') && !mint.toLowerCase().includes('paper1111') && !mint.toLowerCase().includes('test');
       return isAllowed && isNotDummy;
     });
+
+    const open: any[] = [];
+    for (const pos of rawOpen) {
+      if (config.EXECUTION_MODE === 'LIVE') {
+        try {
+          const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
+          if (onChainBal <= 0n) {
+            pos.state = 'CLOSED';
+            pos.qtyRaw = '0';
+            pos.closedAt = Date.now();
+            pos.updatedAt = Date.now();
+            db.savePosition(pos);
+            continue;
+          }
+        } catch {}
+      }
+      open.push(pos);
+    }
 
     const solPriceUsd = 100.0;
     return Promise.all(

@@ -204,6 +204,19 @@ export class SignalManager extends EventEmitter {
       throw new Error(`Open position not found for "${positionIdOrMint}"`);
     }
 
+    if (config.EXECUTION_MODE === 'LIVE') {
+      const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
+      if (onChainBal <= 0n) {
+        pos.state = 'CLOSED';
+        pos.qtyRaw = '0';
+        pos.closedAt = Date.now();
+        pos.updatedAt = Date.now();
+        db.savePosition(pos);
+        this.emit('positionUpdate', pos);
+        throw new Error(`Position already closed: Wallet holds 0 tokens of ${pos.tokenMint.substring(0, 6)}... on-chain.`);
+      }
+    }
+
     const currentQty = BigInt(pos.qtyRaw);
     if (currentQty <= 0n) {
       throw new Error(`Position has 0 balance`);

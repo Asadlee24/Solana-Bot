@@ -90,8 +90,12 @@ export class JupiterSwapV2Adapter {
     }
 
     const data = (await res.json()) as any;
+    if (data?.errorMessage || data?.error) {
+      throw new Error(`Jupiter Swap API error: ${data.errorMessage || data.error}`);
+    }
     if (!data || (!data.transaction && !data.swapTransaction)) {
-      throw new Error(`Jupiter V2 returned invalid order response: ${JSON.stringify(data)}`);
+      const codeMsg = data?.errorCode ? ` (code: ${data.errorCode})` : '';
+      throw new Error(`Jupiter Swap API: no executable transaction returned${codeMsg}`);
     }
 
     return {

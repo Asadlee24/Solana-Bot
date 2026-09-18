@@ -2,6 +2,7 @@ import { config } from '../config/index.js';
 import { db } from '../db/database.js';
 import { tokenMetadataService, TokenMetadata } from '../services/token-metadata.js';
 import { telegramNotifier } from '../notifications/telegram.js';
+import { executionWalletManager } from '../execution/wallet-manager.js';
 
 export class AutoExitManager {
   private timer: NodeJS.Timeout | null = null;
@@ -64,6 +65,20 @@ export class AutoExitManager {
     for (const pos of openPositions) {
       if (this.inFlightExits.has(pos.tokenMint)) {
         continue;
+      }
+
+      if (config.EXECUTION_MODE === 'LIVE') {
+        try {
+          const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
+          if (onChainBal <= 0n) {
+            pos.state = 'CLOSED';
+            pos.qtyRaw = '0';
+            pos.closedAt = Date.now();
+            pos.updatedAt = Date.now();
+            db.savePosition(pos);
+            continue;
+          }
+        } catch {}
       }
 
       try {
