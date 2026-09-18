@@ -167,7 +167,7 @@ export class SignalManager extends EventEmitter {
       decisionAt,
       quoteDoneAt,
       submittedAt,
-      targetProcessedAt: observedAt + 180_000_000n, // ~180ms Solana execution
+      targetProcessedAt: undefined, // Ground truth latency (no synthetic +180ms injection)
       mirrorProcessedAt,
       targetPrice: swapIntent.estimatedPrice,
       mirrorPrice: order.effectivePrice,

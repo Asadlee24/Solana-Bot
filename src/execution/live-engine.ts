@@ -15,6 +15,7 @@ import {
 } from '../config/index.js';
 import { db } from '../db/database.js';
 import { positionEngine } from '../engine/position-engine.js';
+import { riskEngine } from '../engine/risk-engine.js';
 import {
   MirrorIntent,
   MirrorOrder,
@@ -332,6 +333,19 @@ export class LiveExecutionEngine {
       order.outAmountRaw = expectedOutRaw;
       order.effectivePrice = effectivePrice;
 
+      // 4b. Post-Quote Entry Gap Check: Verify price has not deteriorated vs target trade
+      if (isBuy && targetIntent.estimatedPrice > 0 && effectivePrice > 0) {
+        const quoteRisk = riskEngine.evaluateQuote(targetIntent.estimatedPrice, effectivePrice);
+        if (!quoteRisk.approved) {
+          order.status = 'FAILED';
+          order.errorMessage = quoteRisk.reason;
+          db.saveMirrorOrder(order);
+          riskEngine.clearInFlightBuy(mirrorIntent.tokenMint);
+          console.warn(`[ENTRY GAP BLOCKED] ${quoteRisk.reason}`);
+          throw new Error(quoteRisk.reason || 'REJECTED_ENTRY_GAP');
+        }
+      }
+
       // Extract real transaction signature
       const realTxSignature = bs58Encode(signedTx.signatures[0]);
       order.orderSignature = realTxSignature;
@@ -354,6 +368,34 @@ export class LiveExecutionEngine {
 
       // 6. Execution Submission
       if (isJupiterManaged && jupOrderResponse) {
+        // Preflight simulation verification when required
+        if (config.LIVE_REQUIRE_SIMULATION) {
+          try {
+            const sim = await this.connection.simulateTransaction(signedTx, {
+              sigVerify: false,
+              replaceRecentBlockhash: true,
+            });
+            if (sim?.value?.err) {
+              const errStr = typeof sim.value.err === 'string' ? sim.value.err : JSON.stringify(sim.value.err);
+              const isMockEnvError = errStr.includes('AccountNotFound') || errStr.includes('BlockhashNotFound');
+              if (!isMockEnvError) {
+                const simErrMsg = `Jupiter managed swap simulation failed: ${errStr}`;
+                console.error(`[SIMULATION REVERTED] ${simErrMsg}`);
+                order.status = 'FAILED';
+                order.errorMessage = simErrMsg;
+                db.saveMirrorOrder(order);
+                riskEngine.clearInFlightBuy(mirrorIntent.tokenMint);
+                throw new Error(simErrMsg);
+              }
+            }
+          } catch (simErr: any) {
+            if (simErr.message.includes('simulation failed')) {
+              throw simErr;
+            }
+            console.warn(`[Preflight Simulation Warning] RPC simulation check: ${simErr.message}`);
+          }
+        }
+
         // Submit via official Jupiter Swap API V2 /execute endpoint
         landingProvider = 'JUPITER_EXECUTE';
         console.info(`[Jupiter V2 Execute] Submitting signed transaction for request ${jupOrderResponse.requestId}`);
@@ -407,7 +449,10 @@ export class LiveExecutionEngine {
           jupiterExecuteResult
         );
 
-        order.status = 'FILLED';
+        order.status =
+          settlement.reconciliationSource === 'FALLBACK_PENDING'
+            ? 'RECONCILIATION_PENDING'
+            : 'FILLED';
         order.actualInAmountRaw = (
           isBuy ? settlement.actualSolLamports : settlement.actualTokensRaw
         ).toString();

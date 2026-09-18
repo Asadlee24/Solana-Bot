@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { config } from '../config/index.js';
 import { ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
 
 export interface WebhookHandlerCallbacks {
@@ -13,6 +14,16 @@ export class WebhookReceiver {
   }
 
   public handleHeliusWebhook = (req: Request, res: Response): void => {
+    // Verify Helius webhook authentication secret if configured
+    if (config.HELIUS_WEBHOOK_SECRET && config.HELIUS_WEBHOOK_SECRET.trim() !== '') {
+      const authHeader = req.headers.authorization;
+      if (authHeader !== config.HELIUS_WEBHOOK_SECRET) {
+        console.warn('[Webhook Security] Blocked unauthenticated webhook payload.');
+        res.status(401).send('Unauthorized');
+        return;
+      }
+    }
+
     const observedAt = process.hrtime.bigint();
     res.status(200).send('OK'); // Acknowledge promptly to prevent Helius delivery timeouts
 

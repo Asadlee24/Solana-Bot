@@ -62,6 +62,9 @@ const ConfigSchema = z.object({
   // Web Server & Dashboard
   API_PORT: z.coerce.number().default(process.env.PORT ? Number(process.env.PORT) : 3001),
   DASHBOARD_PORT: z.coerce.number().default(3000),
+  CONTROL_API_TOKEN: z.string().default(''), // Secret token required for mutating API actions (arm, kill, add wallet)
+  HELIUS_WEBHOOK_SECRET: z.string().default(''), // Secret token to verify Helius webhook requests
+  CORS_ALLOWED_ORIGINS: z.string().default(''), // Comma-separated allowed CORS origins (empty allows localhost/same-origin)
 
   // Telegram Notifications (Async off hot path)
   TELEGRAM_BOT_TOKEN: z.string().default(''),

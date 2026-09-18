@@ -11,7 +11,7 @@ export interface ActualSettlement {
   actualPriorityFeeLamports: bigint;
   actualTipLamports: bigint;
   actualExecutionPriceSol: number;
-  reconciliationSource: 'ON_CHAIN_TRANSACTION' | 'JUPITER_RESULT' | 'WALLET_BALANCE_DELTA' | 'FALLBACK_EXPECTED';
+  reconciliationSource: 'ON_CHAIN_TRANSACTION' | 'JUPITER_RESULT' | 'WALLET_BALANCE_DELTA' | 'FALLBACK_EXPECTED' | 'FALLBACK_PENDING';
 }
 
 export class SettlementReconciler {
@@ -42,12 +42,20 @@ export class SettlementReconciler {
     const decimals = await mintDecimalsService.getDecimals(tokenMint);
     const walletBase58 = walletPublicKey.toBase58();
 
-    // 1. Attempt deep on-chain transaction metadata parsing
+    // 1. Attempt deep on-chain transaction metadata parsing (with retry for RPC catch-up)
     try {
-      const tx = await this.connection.getParsedTransaction(signature, {
+      let tx = await this.connection.getParsedTransaction(signature, {
         maxSupportedTransactionVersion: 0,
         commitment: 'confirmed',
       });
+
+      if (!tx) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        tx = await this.connection.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 0,
+          commitment: 'confirmed',
+        });
+      }
 
       if (tx && tx.meta) {
         const meta = tx.meta;
@@ -151,8 +159,8 @@ export class SettlementReconciler {
       }
     }
 
-    // 3. Fallback to expected parameters with explicit labeling
-    console.warn(`[Settlement Reconciler] Using expected quote as fallback settlement values for ${signature}`);
+    // 3. Fallback when neither on-chain parsing nor Jupiter execution details are available
+    console.warn(`[Settlement Reconciler] Transaction ${signature} reconciliation pending. Marking as FALLBACK_PENDING.`);
     return {
       side,
       actualSolLamports: side === 'BUY' ? expectedInRaw : expectedOutRaw,
@@ -161,7 +169,7 @@ export class SettlementReconciler {
       actualPriorityFeeLamports: 0n,
       actualTipLamports: BigInt(config.HELIUS_SENDER_TIP_LAMPORTS),
       actualExecutionPriceSol: expectedPriceSol,
-      reconciliationSource: 'FALLBACK_EXPECTED',
+      reconciliationSource: 'FALLBACK_PENDING',
     };
   }
 }

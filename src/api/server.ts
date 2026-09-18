@@ -12,9 +12,39 @@ import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
 import { SystemTelemetry } from '../types/index.js';
 
+// Authentication middleware for state-modifying actions
+export const requireControlAuth = (req: Request, res: Response, next: express.NextFunction) => {
+  if (!config.CONTROL_API_TOKEN || config.CONTROL_API_TOKEN.trim() === '') {
+    return next();
+  }
+  const tokenHeader = req.headers['x-api-token'] as string;
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  if (tokenHeader === config.CONTROL_API_TOKEN || bearerToken === config.CONTROL_API_TOKEN) {
+    return next();
+  }
+  return res.status(401).json({ error: 'Unauthorized: Invalid or missing CONTROL_API_TOKEN' });
+};
+
 export function createApiServer() {
   const app = express();
-  app.use(cors());
+
+  const allowedOrigins = config.CORS_ALLOWED_ORIGINS
+    ? config.CORS_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : [];
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error('Blocked by CORS policy'));
+        }
+      },
+    })
+  );
   app.use(express.json());
 
   // Serve static web dashboard build if available
@@ -224,7 +254,7 @@ export function createApiServer() {
     res.json(wallets);
   });
 
-  app.post('/api/wallets', (req: Request, res: Response) => {
+  app.post('/api/wallets', requireControlAuth, (req: Request, res: Response) => {
     const wallet = req.body;
     if (!wallet || !wallet.wallet) {
       return res.status(400).json({ error: 'Missing wallet public key' });
@@ -284,12 +314,12 @@ export function createApiServer() {
     });
   });
 
-  app.post('/api/live/kill', (_req: Request, res: Response) => {
+  app.post('/api/live/kill', requireControlAuth, (_req: Request, res: Response) => {
     liveEngine.kill('Operator triggered Emergency Kill Switch via Dashboard/API');
     res.json({ success: true, isArmed: false, message: 'Live execution DISARMED immediately.' });
   });
 
-  app.post('/api/live/arm', async (_req: Request, res: Response) => {
+  app.post('/api/live/arm', requireControlAuth, async (_req: Request, res: Response) => {
     const result = await liveEngine.arm();
     res.json({
       success: result.armed,

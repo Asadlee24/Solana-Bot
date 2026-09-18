@@ -56,15 +56,32 @@ export class TokenMetadataService {
       if (!res.ok) return this.createFallback(mint);
 
       const data = (await res.json()) as any;
-      const pair = data.pairs?.[0];
+      const pairs = Array.isArray(data?.pairs) ? data.pairs : [];
+      // Prefer native SOL quote pair if available
+      const pair = pairs.find((p: any) =>
+        p.quoteToken?.address === 'So11111111111111111111111111111111111111112' ||
+        p.quoteToken?.symbol?.toUpperCase() === 'SOL'
+      ) || pairs[0];
 
       if (pair) {
+        const quoteSymbol = pair.quoteToken?.symbol?.toUpperCase();
+        const priceUsd = parseFloat(pair.priceUsd || '0');
+        let priceSol = 0;
+
+        if (quoteSymbol === 'SOL' || pair.quoteToken?.address === 'So11111111111111111111111111111111111111112') {
+          priceSol = parseFloat(pair.priceNative || '0');
+        } else {
+          // If paired with USDC/USD, compute priceSol from priceUsd / currentSolPriceUsd
+          const solPriceUsd = await this.getSolPriceUsd();
+          priceSol = priceUsd > 0 && solPriceUsd > 0 ? priceUsd / solPriceUsd : 0;
+        }
+
         return {
           mint,
           name: pair.baseToken?.name || 'Unknown Token',
           symbol: pair.baseToken?.symbol || 'TOKEN',
-          priceUsd: parseFloat(pair.priceUsd || '0'),
-          priceSol: parseFloat(pair.priceNative || '0'),
+          priceUsd,
+          priceSol,
           fdvUsd: pair.fdv || 0,
           liquidityUsd: pair.liquidity?.usd || 0,
           dexScreenerUrl: pair.url || `https://dexscreener.com/solana/${mint}`,

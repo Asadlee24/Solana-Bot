@@ -147,15 +147,40 @@ export class TelegramNotifier {
   }
 
   /**
+   * Verify whether the incoming message is from the authorized operator
+   */
+  public isAuthorizedChat(incomingChatId: string | number): boolean {
+    const incomingStr = String(incomingChatId);
+    if (config.TELEGRAM_CHAT_ID && config.TELEGRAM_CHAT_ID.trim() !== '') {
+      return incomingStr === config.TELEGRAM_CHAT_ID.trim();
+    }
+    if (this.chatId && this.chatId.trim() !== '') {
+      return incomingStr === this.chatId.trim();
+    }
+    this.chatId = incomingStr;
+    console.info(`[Telegram Security] Bound authorized operator chat ID: ${this.chatId}`);
+    return true;
+  }
+
+  /**
    * Main text message dispatcher
    */
   private async handleTextMessage(msg: any): Promise<void> {
-    const rawText = (msg.text || '').trim();
-    const chatId = msg.chat?.id || this.chatId;
-
-    if (chatId) {
-      this.chatId = String(chatId);
+    const rawChatId = msg.chat?.id;
+    if (!rawChatId || !this.isAuthorizedChat(rawChatId)) {
+      console.warn(`[Telegram Security] Blocked unauthorized message from chat ID: ${rawChatId}`);
+      try {
+        await this.sendCustomMessage(
+          rawChatId,
+          '⛔ <b>[ACCESS DENIED]</b> Unauthorized chat ID. You do not have permission to control this bot.'
+        );
+      } catch {}
+      return;
     }
+    const chatId = String(rawChatId);
+    this.chatId = chatId;
+
+    const rawText = (msg.text || '').trim();
 
     // Strip @botname suffix (e.g. /menu@mybot -> /menu)
     const withoutBotSuffix = rawText.replace(/@\w+/g, '');
@@ -266,8 +291,20 @@ export class TelegramNotifier {
    * Handle interactive inline button clicks
    */
   private async handleCallbackQuery(cq: any): Promise<void> {
+    const rawChatId = cq.message?.chat?.id || cq.from?.id;
+    if (!rawChatId || !this.isAuthorizedChat(rawChatId)) {
+      console.warn(`[Telegram Security] Blocked unauthorized callback query from chat ID: ${rawChatId}`);
+      try {
+        await fetch(`${this.apiRoot}/bot${this.botToken}/answerCallbackQuery`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_query_id: cq.id, text: 'Unauthorized: Access Denied', show_alert: true }),
+        });
+      } catch {}
+      return;
+    }
+    const chatId = String(rawChatId);
     const data = cq.data || '';
-    const chatId = cq.message?.chat?.id || this.chatId;
 
     try {
       await fetch(`${this.apiRoot}/bot${this.botToken}/answerCallbackQuery`, {

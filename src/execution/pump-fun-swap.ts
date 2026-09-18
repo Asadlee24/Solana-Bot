@@ -22,6 +22,7 @@ import {
   JupiterV2OrderResponse,
   WSOL_MINT,
 } from './jupiter-swap.js';
+import { transactionSubmitter } from './transaction-submitter.js';
 
 export const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 export const PUMP_FEE_RECIPIENT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
@@ -188,7 +189,7 @@ export class PumpFunSwapAdapter {
     }
 
     if (side === 'BUY') {
-      const netSolIn = (inAmountRaw * 99n) / 100n;
+      const netSolIn = (inAmountRaw * 9875n) / 10000n; // 1.25% bonding curve trading fee
       const expectedOutTokens = (vTokens * netSolIn) / (vSol + netSolIn);
       const minOutTokens = (expectedOutTokens * BigInt(10000 - slippageBps)) / 10000n;
 
@@ -207,7 +208,7 @@ export class PumpFunSwapAdapter {
     } else {
       const tokensIn = inAmountRaw;
       const expectedSol = (vSol * tokensIn) / (vTokens + tokensIn);
-      const netSolOut = (expectedSol * 99n) / 100n;
+      const netSolOut = (expectedSol * 9875n) / 10000n; // 1.25% bonding curve trading fee
       const minSolOut = (netSolOut * BigInt(10000 - slippageBps)) / 10000n;
 
       const tokensSoldFloat = Number(tokensIn) / 1e6;
@@ -322,6 +323,12 @@ export class PumpFunSwapAdapter {
       buyIx,
     ];
 
+    if (config.HELIUS_SENDER_TIP_LAMPORTS > 0) {
+      instructions.push(
+        transactionSubmitter.createTipInstruction(user, BigInt(config.HELIUS_SENDER_TIP_LAMPORTS))
+      );
+    }
+
     const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
 
     const message = new TransactionMessage({
@@ -421,6 +428,12 @@ export class PumpFunSwapAdapter {
       ComputeBudgetProgram.setComputeUnitPrice({ microLamports: config.PRIORITY_FEE_MICRO_LAMPORTS }),
       sellIx,
     ];
+
+    if (config.HELIUS_SENDER_TIP_LAMPORTS > 0) {
+      instructions.push(
+        transactionSubmitter.createTipInstruction(user, BigInt(config.HELIUS_SENDER_TIP_LAMPORTS))
+      );
+    }
 
     const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
 

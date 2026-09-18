@@ -127,6 +127,7 @@ export type OrderStatus =
   | 'CONFIRMED'
   | 'RECONCILED'
   | 'FILLED'
+  | 'RECONCILIATION_PENDING'
   | 'FAILED'
   | 'DROPPED'
   | 'EXPIRED';
