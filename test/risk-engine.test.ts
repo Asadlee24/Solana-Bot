@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { config, solToLamportsBigInt } from '../src/config/index.js';
+import { db } from '../src/db/database.js';
 import { RiskEngine } from '../src/engine/risk-engine.js';
 import { SwapIntent } from '../src/types/index.js';
 
@@ -79,5 +80,98 @@ describe('Risk Engine & Circuit Breakers', () => {
     // Reset breaker
     engine.resetCircuitBreaker();
     expect(engine.isTripped()).toBe(false);
+  });
+
+  it('rejects duplicate buy when order is already in-flight (Fast-Finger Guard)', () => {
+    const uniqueMint = 'InFlightToken11111111111111111111111111111';
+    const testIntent: SwapIntent = {
+      ...validIntent,
+      tokenMint: uniqueMint,
+      outputMint: uniqueMint,
+      timestampMs: Date.now(),
+    };
+
+    const bal = solToLamportsBigInt(1.0);
+    // Before in-flight: approved
+    expect(engine.evaluateIntent(testIntent, bal, 0n).approved).toBe(true);
+
+    // Mark as in-flight
+    engine.markInFlight(uniqueMint);
+    const inFlightRes = engine.evaluateIntent(testIntent, bal, 0n);
+    expect(inFlightRes.approved).toBe(false);
+    expect(inFlightRes.decision).toBe('REJECTED_IN_FLIGHT');
+
+    // Clear in-flight
+    engine.clearInFlightBuy(uniqueMint);
+    expect(engine.evaluateIntent(testIntent, bal, 0n).approved).toBe(true);
+  });
+
+  it('rejects duplicate buy when open position already exists (Single Entry Guard)', () => {
+    const existingMint = 'OpenPosToken111111111111111111111111111111';
+    const testIntent: SwapIntent = {
+      ...validIntent,
+      tokenMint: existingMint,
+      outputMint: existingMint,
+      timestampMs: Date.now(),
+    };
+
+    // Simulate open position in DB
+    db.savePosition({
+      id: 'test_pos_guard_1',
+      targetWallet: validIntent.targetWallet,
+      tokenMint: existingMint,
+      qtyRaw: '1000000',
+      costBasisLamports: '10000000',
+      avgEntryPriceSol: 0.0001,
+      realizedPnlLamports: '0',
+      unrealizedPnlLamports: '0',
+      state: 'OPEN',
+      openedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const bal = solToLamportsBigInt(1.0);
+    const res = engine.evaluateIntent(testIntent, bal, 0n);
+    expect(res.approved).toBe(false);
+    expect(res.decision).toBe('REJECTED_DUPLICATE_POSITION');
+    expect(res.reason).toContain('Single Entry Guard');
+
+    // Sells for this token must ALWAYS be approved even when position is open
+    const sellIntent: SwapIntent = {
+      ...testIntent,
+      side: 'SELL',
+      inputMint: existingMint,
+      outputMint: 'So11111111111111111111111111111111111111112',
+    };
+    const sellRes = engine.evaluateIntent(sellIntent, bal, 0n);
+    expect(sellRes.approved).toBe(true);
+    expect(sellRes.decision).toBe('APPROVED');
+  });
+
+  it('rejects buy when token is in cooldown window and allows re-entry after clearing', () => {
+    const cooldownMint = 'CooldownToken11111111111111111111111111111';
+    const testIntent: SwapIntent = {
+      ...validIntent,
+      tokenMint: cooldownMint,
+      outputMint: cooldownMint,
+      timestampMs: Date.now(),
+    };
+
+    const bal = solToLamportsBigInt(1.0);
+
+    // Record buy -> triggers cooldown
+    engine.recordBuy(cooldownMint);
+
+    const res = engine.evaluateIntent(testIntent, bal, 0n);
+    expect(res.approved).toBe(false);
+    expect(res.decision).toBe('REJECTED_COOLDOWN');
+    expect(engine.getTokenCooldownRemainingSec(cooldownMint)).toBeGreaterThan(0);
+
+    // Clear cooldown -> allows buy
+    engine.clearCooldown(cooldownMint);
+    expect(engine.getTokenCooldownRemainingSec(cooldownMint)).toBe(0);
+    const retestRes = engine.evaluateIntent(testIntent, bal, 0n);
+    expect(retestRes.approved).toBe(true);
+    expect(retestRes.decision).toBe('APPROVED');
   });
 });

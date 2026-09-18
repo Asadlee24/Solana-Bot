@@ -124,12 +124,17 @@ export class SignalManager extends EventEmitter {
     // Mark as acted to prevent duplicate execution across feeds
     dedupeEngine.markActed(tx.signature);
 
+    if (swapIntent.side === 'BUY') {
+      riskEngine.markInFlight(swapIntent.tokenMint);
+    }
+
     // 6. Execution Gateway (Paper or Live)
     let order: MirrorOrder;
     try {
       if (config.EXECUTION_MODE === 'LIVE') {
         const liveStatus = liveEngine.getStatus();
         if (!liveStatus.isArmed) {
+          riskEngine.clearInFlightBuy(swapIntent.tokenMint);
           console.warn(`[LIVE EXECUTION DISARMED] Order skipped: ${liveStatus.disarmReason}`);
           telegramNotifier.notifyTargetDetected(swapIntent, 'DISARMED_SKIP', liveStatus.disarmReason);
           return { intent: swapIntent, order: null };
@@ -139,11 +144,15 @@ export class SignalManager extends EventEmitter {
         order = await paperEngine.executePaperTrade(swapIntent, mirrorIntent);
       }
     } catch (err: any) {
+      riskEngine.clearInFlightBuy(swapIntent.tokenMint);
       riskEngine.recordError(err.message || 'Execution error');
       console.error('[Execution Error]:', err);
       return { intent: swapIntent, order: null };
     }
 
+    if (swapIntent.side === 'BUY') {
+      riskEngine.recordBuy(swapIntent.tokenMint);
+    }
     riskEngine.recordSuccess();
 
     // 7. Latency Telemetry Recording

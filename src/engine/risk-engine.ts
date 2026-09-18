@@ -13,9 +13,27 @@ export class RiskEngine {
   private dailyLossLamports: bigint = 0n;
   private circuitBreakerTripped: boolean = false;
   private mintBlacklist: Set<string> = new Set();
+  private inFlightBuys: Set<string> = new Set();
+  private lastBuyTimestampByMint: Map<string, number> = new Map();
 
   constructor() {
     this.initDefaultBlacklist();
+    this.initRecentCooldownsFromDb();
+  }
+
+  private initRecentCooldownsFromDb() {
+    try {
+      const openOrRecent = db.getOpenPositions();
+      const now = Date.now();
+      const cooldownMs = config.TOKEN_BUY_COOLDOWN_SEC * 1000;
+      for (const pos of openOrRecent) {
+        if (now - pos.openedAt < cooldownMs) {
+          this.lastBuyTimestampByMint.set(pos.tokenMint, pos.openedAt);
+        }
+      }
+    } catch {
+      // db may not be initialized yet in isolated tests
+    }
   }
 
   private initDefaultBlacklist() {
@@ -81,6 +99,36 @@ export class RiskEngine {
         decision: 'REJECTED_STALE',
         approved: false,
         reason: `Signal age ${ageMs}ms exceeds max permitted ${config.MAX_SIGNAL_AGE_MS}ms`,
+      };
+    }
+
+    // 5. Fast-Finger In-Flight Guard: Reject simultaneous duplicate buys arriving before first completes
+    if (this.inFlightBuys.has(intent.tokenMint)) {
+      return {
+        decision: 'REJECTED_IN_FLIGHT',
+        approved: false,
+        reason: `Buy order for ${intent.tokenMint.slice(0, 8)}... is already in-flight (Fast-Finger Guard)`,
+      };
+    }
+
+    // 6. Target Spam Single Entry Guard: Only 1 active trade per coin, reject averaging/spam
+    if (config.SINGLE_ENTRY_PER_TOKEN_ENABLED && db.hasOpenPosition(intent.tokenMint)) {
+      return {
+        decision: 'REJECTED_DUPLICATE_POSITION',
+        approved: false,
+        reason: `Already holding open position in ${intent.tokenMint.slice(0, 8)}... (Single Entry Guard: 1 trade max)`,
+      };
+    }
+
+    // 7. Cooldown Timer Guard: 1 trade per token per cooldown window (default 5 minutes)
+    const lastBuy = this.lastBuyTimestampByMint.get(intent.tokenMint);
+    const cooldownMs = config.TOKEN_BUY_COOLDOWN_SEC * 1000;
+    if (lastBuy && (Date.now() - lastBuy) < cooldownMs) {
+      const remainingSec = Math.ceil((cooldownMs - (Date.now() - lastBuy)) / 1000);
+      return {
+        decision: 'REJECTED_COOLDOWN',
+        approved: false,
+        reason: `Token in cooldown (${remainingSec}s remaining of ${config.TOKEN_BUY_COOLDOWN_SEC}s cooldown)`,
       };
     }
 
@@ -202,6 +250,59 @@ export class RiskEngine {
 
   public getMintBlacklist(): string[] {
     return Array.from(this.mintBlacklist);
+  }
+
+  // Fast-Finger & Cooldown Guard Management Methods
+  public markInFlight(tokenMint: string): void {
+    this.inFlightBuys.add(tokenMint);
+  }
+
+  public clearInFlightBuy(tokenMint: string): void {
+    this.inFlightBuys.delete(tokenMint);
+  }
+
+  public isInFlight(tokenMint: string): boolean {
+    return this.inFlightBuys.has(tokenMint);
+  }
+
+  public recordBuy(tokenMint: string): void {
+    this.inFlightBuys.delete(tokenMint);
+    this.lastBuyTimestampByMint.set(tokenMint, Date.now());
+  }
+
+  public getTokenCooldownRemainingSec(tokenMint: string): number {
+    const lastBuy = this.lastBuyTimestampByMint.get(tokenMint);
+    if (!lastBuy) return 0;
+    const cooldownMs = config.TOKEN_BUY_COOLDOWN_SEC * 1000;
+    const elapsed = Date.now() - lastBuy;
+    if (elapsed >= cooldownMs) return 0;
+    return Math.ceil((cooldownMs - elapsed) / 1000);
+  }
+
+  public getAllActiveCooldowns(): Array<{ tokenMint: string; remainingSec: number }> {
+    const result: Array<{ tokenMint: string; remainingSec: number }> = [];
+    const now = Date.now();
+    const cooldownMs = config.TOKEN_BUY_COOLDOWN_SEC * 1000;
+    for (const [mint, lastBuy] of this.lastBuyTimestampByMint.entries()) {
+      const elapsed = now - lastBuy;
+      if (elapsed < cooldownMs) {
+        result.push({
+          tokenMint: mint,
+          remainingSec: Math.ceil((cooldownMs - elapsed) / 1000),
+        });
+      }
+    }
+    return result;
+  }
+
+  public clearCooldown(tokenMint?: string): void {
+    if (tokenMint) {
+      this.lastBuyTimestampByMint.delete(tokenMint);
+      this.inFlightBuys.delete(tokenMint);
+    } else {
+      this.lastBuyTimestampByMint.clear();
+      this.inFlightBuys.clear();
+    }
   }
 }
 

@@ -52,8 +52,10 @@ export class TelegramNotifier {
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
             { command: 'targets', description: 'View & Manage Watched Target Traders' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
+            { command: 'cooldown', description: 'Target Spam Guard & Active Token Cooldowns' },
             { command: 'add_target', description: 'Add Target: /add_target <address>' },
             { command: 'remove_target', description: 'Remove Target: /remove_target <address>' },
+            { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
             { command: 'status', description: 'Engine Health, Telemetry & Feed' },
             { command: 'pnl', description: 'Portfolio Profit/Loss Performance' },
             { command: 'help', description: 'Terminal Usage Guide & Commands' },
@@ -226,7 +228,12 @@ export class TelegramNotifier {
     } else if (clean === 'sl_on' || clean === 'slon' || clean === 'enable_sl') {
       (config as any).AUTO_SL_ENABLED = true;
       await this.sendCustomMessage(chatId, '🟢 <b>Anti-Rug Stop-Loss (-25%) has been TURNED ON.</b>\nBot will automatically emergency cut if token drops by -25%.');
-      await this.sendTpSlReport(chatId);
+    } else if (clean === 'cooldown' || clean.includes('cooldown') || clean === 'guard' || clean.includes('fast finger') || clean.includes('spam')) {
+      await this.sendCooldownReport(chatId);
+    } else if (clean === 'clear_cooldown' || clean === 'clearcooldown' || clean.includes('clear cooldown')) {
+      riskEngine.clearCooldown();
+      await this.sendCustomMessage(chatId, '✅ <b>All active token cooldowns have been cleared.</b>\nThe bot can now accept first-time entries for previously cooled-down tokens.');
+      await this.sendCooldownReport(chatId);
     } else if (clean === 'risk' || clean.includes('risk controls') || clean === 'breaker' || clean.includes('risk limits')) {
       await this.sendRiskReport(chatId);
     } else if (clean === 'sim' || clean === 'simulate' || clean.includes('simulate buy') || clean === 'test') {
@@ -302,6 +309,12 @@ export class TelegramNotifier {
       await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
       await this.sendRiskReport(chatId);
+    } else if (data === 'menu_cooldown') {
+      await this.sendCooldownReport(chatId);
+    } else if (data === 'clear_cooldown') {
+      riskEngine.clearCooldown();
+      await this.sendCustomMessage(chatId, '✅ <b>All active token cooldowns have been cleared.</b>');
+      await this.sendCooldownReport(chatId);
     } else if (data === 'menu_sim') {
       await this.executeSimulationFromChat(chatId);
     } else if (data === 'menu_refresh') {
@@ -588,6 +601,10 @@ ${balanceBlock}
         ],
         [
           { text: '🎯 AUTO TP / SL', callback_data: 'menu_tpsl' },
+          { text: '⏱️ COOLDOWN GUARD', callback_data: 'menu_cooldown' },
+        ],
+        [
+          { text: '🛡️ RISK CONTROLS', callback_data: 'menu_risk' },
           { text: 'REFRESH', callback_data: 'menu_main' },
         ],
       ],
@@ -1083,11 +1100,15 @@ Would you like to add this address to your <b>Target Traders</b> list? The bot w
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const maxExpUsd = config.MAX_TOTAL_EXPOSURE_SOL * solPriceUsd;
     const dailyLossUsd = config.DAILY_LOSS_LIMIT_SOL * solPriceUsd;
+    const activeCooldowns = riskEngine.getAllActiveCooldowns();
 
     const text = `
 <b>[PRE-TRADE RISK CONTROLS]</b>
 
 <b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED' : 'ARMED (Normal)'}
+<b>Single Entry Guard:</b> ${config.SINGLE_ENTRY_PER_TOKEN_ENABLED ? '🟢 ACTIVE (1 trade max per coin)' : '🔴 DISABLED'}
+<b>Token Cooldown:</b> ⏱️ ${config.TOKEN_BUY_COOLDOWN_SEC}s (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m per coin)
+<b>Active Cooldowns:</b> ${activeCooldowns.length} token(s)
 <b>Max Slippage:</b> ${config.MAX_SLIPPAGE_BPS} bps (${(config.MAX_SLIPPAGE_BPS / 100).toFixed(2)}%)
 <b>Max Entry Gap:</b> ${config.MAX_ENTRY_GAP_BPS} bps (${(config.MAX_ENTRY_GAP_BPS / 100).toFixed(2)}%)
 <b>Signal Max Age:</b> ${config.MAX_SIGNAL_AGE_MS} ms
@@ -1101,11 +1122,63 @@ Would you like to add this address to your <b>Target Traders</b> list? The bot w
       inlineRows.push([{ text: 'RESET CIRCUIT BREAKER', callback_data: 'reset_breaker' }]);
     }
     inlineRows.push([
+      { text: '⏱️ COOLDOWN GUARD', callback_data: 'menu_cooldown' },
       { text: 'BOT STATUS', callback_data: 'menu_status' },
-      { text: 'MAIN MENU', callback_data: 'menu_main' },
     ]);
+    inlineRows.push([{ text: 'MAIN MENU', callback_data: 'menu_main' }]);
 
     await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineRows });
+  }
+
+  /**
+   * Target Spam & Fast-Finger Guard report
+   */
+  public async sendCooldownReport(chatId: string | number): Promise<void> {
+    const activeCooldowns = riskEngine.getAllActiveCooldowns();
+    let cooldownText = '';
+
+    if (activeCooldowns.length === 0) {
+      cooldownText = '<i>No tokens currently in cooldown. Any new signal from target trader will be copied immediately.</i>';
+    } else {
+      cooldownText = activeCooldowns
+        .map((c, idx) => {
+          const short = `${c.tokenMint.slice(0, 6)}...${c.tokenMint.slice(-4)}`;
+          return `${idx + 1}. <code>${short}</code>: <b>${c.remainingSec}s remaining</b>`;
+        })
+        .join('\n');
+    }
+
+    const text = `
+⏱️ <b>[TARGET SPAM & FAST-FINGER GUARD]</b>
+
+<b>Single Entry Guard:</b> ${config.SINGLE_ENTRY_PER_TOKEN_ENABLED ? '🟢 ACTIVE (1 trade max per coin)' : '🔴 DISABLED'}
+<b>Cooldown Duration:</b> ${config.TOKEN_BUY_COOLDOWN_SEC}s (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)} minutes)
+
+<b>Active Token Cooldowns:</b>
+${cooldownText}
+
+🛡️ <b>Protection active:</b>
+• If target trader buys the same coin 2 or 3 times in a row, only the <b>first entry</b> is copied.
+• Repeat buys while holding a position are automatically skipped.
+• After buying, a ${config.TOKEN_BUY_COOLDOWN_SEC}s cooldown prevents rapid spam/churn.
+• Sells are <b>NEVER blocked</b> and always exit safely.
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '🗑️ Clear All Cooldowns', callback_data: 'clear_cooldown' },
+          { text: 'REFRESH', callback_data: 'menu_cooldown' },
+        ],
+        [
+          { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: 'RISK CONTROLS', callback_data: 'menu_risk' },
+        ],
+        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
   }
 
   /**

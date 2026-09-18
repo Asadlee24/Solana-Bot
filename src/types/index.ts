@@ -52,7 +52,10 @@ export type RiskDecision =
   | 'REJECTED_CONSECUTIVE_ERRORS'
   | 'REJECTED_CIRCUIT_BREAKER'
   | 'REJECTED_TOKEN_SAFETY'
-  | 'REJECTED_UNKNOWN_LAYOUT';
+  | 'REJECTED_UNKNOWN_LAYOUT'
+  | 'REJECTED_DUPLICATE_POSITION'
+  | 'REJECTED_COOLDOWN'
+  | 'REJECTED_IN_FLIGHT';
 
 /**
  * Normalized representation of a swap intent extracted on the fast path

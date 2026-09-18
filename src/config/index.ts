@@ -78,6 +78,10 @@ const ConfigSchema = z.object({
   AUTO_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
   AUTO_SL_LOSS_PCT: z.coerce.number().default(25), // -25% loss trigger (anti-rug exit)
   AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(3000), // 3-second monitoring loop
+
+  // Target Spam & Fast-Finger Guard (Single Entry & Cooldown Guard)
+  SINGLE_ENTRY_PER_TOKEN_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
+  TOKEN_BUY_COOLDOWN_SEC: z.coerce.number().default(300), // 5 minutes default cooldown
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

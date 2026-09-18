@@ -180,6 +180,7 @@ export class DBManager {
           entry_gap_bps REAL
         );
         CREATE INDEX IF NOT EXISTS idx_latency_sig ON latency_samples (target_signature);
+        CREATE INDEX IF NOT EXISTS idx_positions_mint_state ON positions (token_mint, state);
       `);
     }
 
@@ -434,6 +435,15 @@ export class DBManager {
       tp1Triggered: Boolean(r.tp1Triggered),
       peakPnlPct: Number(r.peakPnlPct || 0),
     }));
+  }
+
+  public hasOpenPosition(tokenMint: string): boolean {
+    const stmt = this.db.prepare(`
+      SELECT 1 FROM positions
+      WHERE token_mint = ? AND state = 'OPEN' AND qty_raw != '0'
+      LIMIT 1
+    `);
+    return Boolean(stmt.get(tokenMint));
   }
 
   public savePosition(pos: FollowerPosition): void {
