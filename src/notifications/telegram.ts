@@ -354,18 +354,23 @@ export class TelegramNotifier {
       const pub = executionWalletManager.getPublicKeyBase58();
       const bal = executionWalletManager.getCachedBalanceSol();
       const spendable = executionWalletManager.getSpendableBalanceSol();
+      const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+      const balUsd = bal * solPriceUsd;
+      const spendableUsd = spendable * solPriceUsd;
+      const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+      const reserveUsd = config.MIN_SOL_RESERVE_SOL * solPriceUsd;
 
       const text = `
 🟢 <b>[LIVE ENGINE ARMED]</b>
 
 <b>Active Signer:</b> <code>${pub}</code>
-<b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL</b>
-<b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL
-<b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL
-<b>Smoke Test Sizing:</b> ${config.FIXED_BUY_SOL} SOL (BUY only)
+<b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
+<b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL ($${spendableUsd.toFixed(2)} USD)
+<b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD)
+<b>Trade Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
 <b>Provider:</b> Force Jupiter Swap API V2
 
-<i>⚡ Bot is actively watching target trader. Next valid BUY signal will execute and automatically disarm for review.</i>
+<i>⚡ Bot is actively watching target trader. Follower orders will execute automatically.</i>
       `.trim();
 
       const inlineKeyboard = {
@@ -423,6 +428,7 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
    */
   public async sendBalanceReport(chatId: string | number): Promise<void> {
     const isLive = config.EXECUTION_MODE === 'LIVE';
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
 
     if (isLive) {
       try {
@@ -434,17 +440,22 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
       const spendable = executionWalletManager.getSpendableBalanceSol();
       const isArmed = liveEngine.getStatus().isArmed;
       const minToArm = config.MIN_SOL_RESERVE_SOL + config.FIXED_BUY_SOL;
+      const balUsd = bal * solPriceUsd;
+      const spendableUsd = spendable * solPriceUsd;
+      const reserveUsd = config.MIN_SOL_RESERVE_SOL * solPriceUsd;
+      const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+      const minToArmUsd = minToArm * solPriceUsd;
 
       const text = `
 💰 <b>[LIVE EXECUTION HOT WALLET]</b>
 
 <b>Status:</b> ${isArmed ? '🟢 <b>LIVE ARMED</b>' : '🔴 <b>LIVE DISARMED</b>'}
 <b>Public Address:</b> <code>${pub || 'Not Configured'}</code>
-<b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL</b>
-<b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL
-<b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL (Protected)
-<b>Fixed Trade Size:</b> ${config.FIXED_BUY_SOL} SOL
-<b>Minimum Balance to Arm:</b> ${minToArm.toFixed(2)} SOL (Passed)
+<b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
+<b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL ($${spendableUsd.toFixed(2)} USD)
+<b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD) (Protected)
+<b>Fixed Trade Size:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
+<b>Minimum Balance to Arm:</b> ${minToArm.toFixed(2)} SOL ($${minToArmUsd.toFixed(2)} USD) (Passed)
 
 🔗 <a href="https://solscan.io/account/${pub}">View Wallet on Solscan</a>
       `.trim();
@@ -468,13 +479,20 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
 
     // PAPER Mode Balance
     const telemetry = db.getSystemTelemetry();
+    const paperBal = telemetry.currentPaperBalanceSol;
+    const paperBalUsd = paperBal * solPriceUsd;
+    const realizedSol = telemetry.totalRealizedPnlSol || 0;
+    const realizedUsd = realizedSol * solPriceUsd;
+    const unrealizedSol = telemetry.totalUnrealizedPnlSol || 0;
+    const unrealizedUsd = unrealizedSol * solPriceUsd;
+
     const text = `
 📄 <b>[PAPER SIMULATION WALLET]</b>
 
 <b>Mode:</b> PAPER (Zero Capital Risk)
-<b>Paper Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b>
-<b>Realized PnL:</b> ${(telemetry.totalRealizedPnlSol || 0).toFixed(4)} SOL
-<b>Unrealized PnL:</b> ${(telemetry.totalUnrealizedPnlSol || 0).toFixed(4)} SOL
+<b>Paper Balance:</b> <b>${paperBal.toFixed(4)} SOL ($${paperBalUsd.toFixed(2)} USD)</b>
+<b>Realized PnL:</b> ${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)
+<b>Unrealized PnL:</b> ${unrealizedSol >= 0 ? '+' : ''}${unrealizedSol.toFixed(4)} SOL (${unrealizedSol >= 0 ? '+' : ''}$${unrealizedUsd.toFixed(2)} USD)
     `.trim();
 
     const inlineKeyboard = {
@@ -503,10 +521,16 @@ Tap <b>ARM ENGINE</b> when you are ready to resume.
       const liveSpendable = executionWalletManager.getSpendableBalanceSol();
       const pub = executionWalletManager.getPublicKeyBase58();
       const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'None';
+      const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+      const liveBalUsd = liveBal * solPriceUsd;
+      const liveSpendableUsd = liveSpendable * solPriceUsd;
+      const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+
       balanceBlock = `
 <b>Wallet:</b> <code>${shortPub}</code>
-<b>Real Balance:</b> <b>${liveBal.toFixed(4)} SOL</b> (Spendable: ${liveSpendable.toFixed(4)} SOL)
-<b>Smoke-Test:</b> 1 BUY (0.01 SOL) → Auto-Disarm
+<b>Real Balance:</b> <b>${liveBal.toFixed(4)} SOL ($${liveBalUsd.toFixed(2)} USD)</b>
+<b>Spendable:</b> ${liveSpendable.toFixed(4)} SOL ($${liveSpendableUsd.toFixed(2)} USD)
+<b>Trade Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
       `.trim();
     } else {
       balanceBlock = `<b>Portfolio Balance:</b> ${telemetry.currentPaperBalanceSol.toFixed(4)} SOL ($${telemetry.totalPaperBalanceUsd.toFixed(2)} USD)`;
@@ -550,6 +574,7 @@ ${balanceBlock}
    * Open Positions Report with Individual & Bulk Close Controls
    */
   public async sendOpenPositionsReport(chatId: string | number): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
     const allowedWallets = new Set([...config.WATCHED_WALLETS, ...dbWallets]);
     const openPositions = db.getOpenPositions().filter((p) => {
@@ -565,13 +590,15 @@ ${balanceBlock}
     if (openPositions.length === 0) {
       const isLive = config.EXECUTION_MODE === 'LIVE';
       const isArmed = isLive && liveEngine.getStatus().isArmed;
+      const bal = executionWalletManager.getCachedBalanceSol();
+      const balUsd = bal * solPriceUsd;
 
       const emptyMsg = `
 <b>[ACTIVE POSITIONS] 0 OPEN</b>
 
 No active token positions currently held.
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 LIVE ARMED' : '🔴 LIVE DISARMED') : 'PAPER'}
-${isLive ? `<b>Balance:</b> ${executionWalletManager.getCachedBalanceSol().toFixed(4)} SOL` : ''}
+${isLive ? `<b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)` : ''}
 
 When target trader executes a swap on pump.fun or Raydium, the follower order will land immediately and appear here with instant Close buttons.
       `.trim();
@@ -589,8 +616,6 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       await this.sendCustomMessage(chatId, emptyMsg, inlineKeyboard);
       return;
     }
-
-    const solPriceUsd = 100.0;
 
     await this.sendCustomMessage(
       chatId,
@@ -733,7 +758,7 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
   public async sendPnlSummaryReport(chatId: string | number): Promise<void> {
     const telemetry = db.getSystemTelemetry();
     const isLive = config.EXECUTION_MODE === 'LIVE';
-    const solPrice = telemetry.solPriceUsd || 100.0;
+    const solPrice = await tokenMetadataService.getSolPriceUsd();
 
     let balanceSol = telemetry.currentPaperBalanceSol || 10.0;
     if (isLive) {
@@ -795,7 +820,8 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       const pub = executionWalletManager.getPublicKeyBase58();
       const bal = executionWalletManager.getCachedBalanceSol();
       const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'None';
-      walletLine = `\n<b>Hot Wallet:</b> <code>${shortPub}</code> (${bal.toFixed(4)} SOL)`;
+      const solPrice = await tokenMetadataService.getSolPriceUsd();
+      walletLine = `\n<b>Hot Wallet:</b> <code>${shortPub}</code> (${bal.toFixed(4)} SOL | $${(bal * solPrice).toFixed(2)} USD)`;
     }
 
     const text = `
@@ -833,13 +859,16 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
     let walletList = '';
     const inlineKeyboardRows: any[] = [];
 
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+
     if (wallets.length === 0) {
       walletList = 'No target wallets configured.\nPaste any Solana wallet address to start copy-trading!';
     } else {
       walletList = wallets
         .map((w, idx) => {
           const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
-          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   Mode: ${w.buyMode} | Sizing: ${config.FIXED_BUY_SOL} SOL | Active: ${w.enabled ? '✅' : '⏸️'}`;
+          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   Mode: ${w.buyMode} | Sizing: ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD) | Active: ${w.enabled ? '✅' : '⏸️'}`;
         })
         .join('\n\n');
 
@@ -917,12 +946,15 @@ ${walletList}
       this.signalManagerRef.refreshWallets();
     }
 
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
+
     const confirmMsg = `
 ✅ <b>[TARGET TRADER ADDED]</b>
 
 <b>Address:</b> <code>${address}</code>
 <b>Label:</b> ${newTarget.label}
-<b>Copy Sizing:</b> ${config.FIXED_BUY_SOL} SOL per trade
+<b>Copy Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD) per trade
 <b>Stream:</b> Live on Helius LaserStream & Webhook
 
 The bot will now detect and copy all buy & sell transactions from this wallet in real time!
@@ -1022,6 +1054,9 @@ Would you like to add this address to your <b>Target Traders</b> list? The bot w
    */
   public async sendRiskReport(chatId: string | number): Promise<void> {
     const isTripped = riskEngine.isTripped();
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const maxExpUsd = config.MAX_TOTAL_EXPOSURE_SOL * solPriceUsd;
+    const dailyLossUsd = config.DAILY_LOSS_LIMIT_SOL * solPriceUsd;
 
     const text = `
 <b>[PRE-TRADE RISK CONTROLS]</b>
@@ -1030,8 +1065,8 @@ Would you like to add this address to your <b>Target Traders</b> list? The bot w
 <b>Max Slippage:</b> ${config.MAX_SLIPPAGE_BPS} bps (${(config.MAX_SLIPPAGE_BPS / 100).toFixed(2)}%)
 <b>Max Entry Gap:</b> ${config.MAX_ENTRY_GAP_BPS} bps (${(config.MAX_ENTRY_GAP_BPS / 100).toFixed(2)}%)
 <b>Signal Max Age:</b> ${config.MAX_SIGNAL_AGE_MS} ms
-<b>Max Total Exposure:</b> ${config.MAX_TOTAL_EXPOSURE_SOL} SOL
-<b>Daily Loss Limit:</b> ${config.DAILY_LOSS_LIMIT_SOL} SOL
+<b>Max Total Exposure:</b> ${config.MAX_TOTAL_EXPOSURE_SOL} SOL ($${maxExpUsd.toFixed(2)} USD)
+<b>Daily Loss Limit:</b> ${config.DAILY_LOSS_LIMIT_SOL} SOL ($${dailyLossUsd.toFixed(2)} USD)
 <b>Consecutive Error Limit:</b> ${config.CONSECUTIVE_ERROR_LIMIT}
     `.trim();
 
@@ -1175,11 +1210,11 @@ Would you like to add this address to your <b>Target Traders</b> list? The bot w
   /**
    * Real-time notification whenever target trader trades
    */
-  public notifyTargetDetected(
+  public async notifyTargetDetected(
     intent: SwapIntent,
     actionTaken: 'COPIED' | 'DISARMED_SKIP' | 'RISK_REJECTED',
     reason?: string
-  ): void {
+  ): Promise<void> {
     if (!this.enabled || !this.chatId) return;
     const sideEmoji = intent.side === 'BUY' ? '🟢' : '🔴';
     let statusText = '';
@@ -1199,6 +1234,12 @@ Would you like to add this address to your <b>Target Traders</b> list? The bot w
       statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}`;
     }
 
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const estPriceUsd = intent.estimatedPrice * solPriceUsd;
+    const priceDisplay = estPriceUsd < 0.0001
+      ? `$${estPriceUsd.toFixed(6)} USD (${intent.estimatedPrice.toFixed(8)} SOL)`
+      : `$${estPriceUsd.toFixed(4)} USD (${intent.estimatedPrice.toFixed(6)} SOL)`;
+
     const shortTrader = `${intent.targetWallet.slice(0, 4)}...${intent.targetWallet.slice(-4)}`;
     const msg = `
 ${sideEmoji} <b>[TARGET TRADER ACTIVITY]</b>
@@ -1206,7 +1247,7 @@ ${sideEmoji} <b>[TARGET TRADER ACTIVITY]</b>
 <b>Trader:</b> <code>${shortTrader}</code>
 <b>Action:</b> ${intent.side} on ${intent.venue}
 <b>Token:</b> <code>${intent.tokenMint}</code>
-<b>Est. Price:</b> ${intent.estimatedPrice.toFixed(8)} SOL
+<b>Est. Price:</b> ${priceDisplay}
 <b>Target Tx:</b> <a href="https://solscan.io/tx/${intent.targetSignature}">View on Solscan</a>
 
 ${statusText}
@@ -1218,12 +1259,12 @@ ${statusText}
   /**
    * Real-time notification upon trade fill with interactive Close buttons
    */
-  public notifyTradeFilled(order: MirrorOrder, position?: FollowerPosition): void {
+  public async notifyTradeFilled(order: MirrorOrder, position?: FollowerPosition): Promise<void> {
     const isBuy = order.side === 'BUY';
     const sideTag = isBuy ? '🟢 [BUY FILLED]' : '🔴 [SELL FILLED]';
     const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
 
-    const solPriceUsd = 100.0;
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const fillPriceSol = order.effectivePrice;
     const fillPriceUsd = fillPriceSol * solPriceUsd;
 
@@ -1279,13 +1320,13 @@ ${statusText}
     this.sendAlert(text, inlineKeyboard);
   }
 
-  public notifyManualExit(
+  public async notifyManualExit(
     order: MirrorOrder,
     position: FollowerPosition,
     fraction: number,
     meta?: TokenMetadata
-  ): void {
-    const solPriceUsd = 100.0;
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const solReceived = Number(order.outAmountRaw || 0) / 1e9;
     const usdReceived = solReceived * solPriceUsd;
 
@@ -1327,13 +1368,13 @@ Trading automatically paused for portfolio protection.
     this.sendAlert(text, inlineKeyboard);
   }
 
-  public notifyAutoTakeProfit(
+  public async notifyAutoTakeProfit(
     order: MirrorOrder,
     position: FollowerPosition,
     pnlPct: number,
     meta?: TokenMetadata
-  ): void {
-    const solPriceUsd = 100.0;
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const solReceived = Number(order.outAmountRaw || 0) / 1e9;
     const usdReceived = solReceived * solPriceUsd;
 
@@ -1357,13 +1398,13 @@ Trading automatically paused for portfolio protection.
     this.sendAlert(text);
   }
 
-  public notifyAutoStopLoss(
+  public async notifyAutoStopLoss(
     order: MirrorOrder,
     position: FollowerPosition,
     pnlPct: number,
     meta?: TokenMetadata
-  ): void {
-    const solPriceUsd = 100.0;
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const solReceived = Number(order.outAmountRaw || 0) / 1e9;
     const usdReceived = solReceived * solPriceUsd;
 
@@ -1421,21 +1462,24 @@ ${slText}
     await this.sendCustomMessage(chatId, text, inlineKeyboard);
   }
 
-  public notifyStartup(): void {
+  public async notifyStartup(): Promise<void> {
     if (this.hasNotifiedStartup) return;
     this.hasNotifiedStartup = true;
 
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
     const bal = isLive ? executionWalletManager.getCachedBalanceSol() : 10.0;
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const balUsd = bal * solPriceUsd;
+    const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
 
     const text = `
 ⚡ <b>[SOLANA COPY ENGINE] ONLINE</b>
 
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 LIVE ARMED' : '🔴 LIVE DISARMED') : 'PAPER'}
 <b>Target Trader:</b> <code>${config.WATCHED_WALLETS[0]}</code>
-<b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
-<b>Balance:</b> ${bal.toFixed(4)} SOL
+<b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL | $${sizingUsd.toFixed(2)} USD)
+<b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)
 <b>Ingestion:</b> Helius LaserStream (Sub-10ms)
 
 Tap <b>ARM ENGINE</b> or use the interactive keypad below to manage trades and close positions.

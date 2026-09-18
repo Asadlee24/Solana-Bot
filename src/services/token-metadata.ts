@@ -95,6 +95,36 @@ export class TokenMetadataService {
       updatedAt: Date.now(),
     };
   }
+
+  private cachedSolPriceUsd: number = 105.0;
+  private lastSolPriceFetchTime: number = 0;
+
+  /**
+   * Fetch current real-time SOL/USD price from DexScreener
+   */
+  public async getSolPriceUsd(): Promise<number> {
+    const now = Date.now();
+    if (now - this.lastSolPriceFetchTime < 30000 && this.cachedSolPriceUsd > 0) {
+      return this.cachedSolPriceUsd;
+    }
+
+    try {
+      const res = await fetch('https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112', {
+        headers: { 'User-Agent': 'SolanaCopyBot/1.0' },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const price = parseFloat(data.pairs?.[0]?.priceUsd || '0');
+        if (price > 0) {
+          this.cachedSolPriceUsd = price;
+          this.lastSolPriceFetchTime = now;
+        }
+      }
+    } catch {}
+
+    return this.cachedSolPriceUsd;
+  }
 }
 
 export const tokenMetadataService = new TokenMetadataService();
