@@ -640,6 +640,12 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
       const minToArmUsd = minToArm * solPriceUsd;
 
+      const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
+      const slStatus = config.AUTO_SL_ENABLED ? '🟢 ON (-25% Anti-Rug)' : '🔴 OFF';
+      const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
+        ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Fast-Finger Shield)`
+        : '🔴 OFF';
+
       const text = `
 💰 <b>[LIVE EXECUTION HOT WALLET]</b>
 
@@ -650,6 +656,13 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
 <b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD) (Protected)
 <b>Fixed Trade Size:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
 <b>Minimum Balance to Activate:</b> ${minToArm.toFixed(2)} SOL ($${minToArmUsd.toFixed(2)} USD) (Passed)
+
+━━━━━━━━━━━━━━━━━━━
+🛡️ <b>SAFETY & AUTOMATION STATUS:</b>
+• <b>Auto Take-Profit:</b> ${tpStatus}
+• <b>Anti-Rug Stop-Loss:</b> ${slStatus}
+• <b>Cooldown Guard:</b> ${cooldownStatus}
+━━━━━━━━━━━━━━━━━━━
 
 🔗 <a href="https://solscan.io/account/${pub}">View Wallet on Solscan</a>
       `.trim();
@@ -730,12 +743,21 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       balanceBlock = `<b>Portfolio Balance:</b> ${telemetry.currentPaperBalanceSol.toFixed(4)} SOL ($${telemetry.totalPaperBalanceUsd.toFixed(2)} USD)`;
     }
 
+    const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
+    const slStatus = config.AUTO_SL_ENABLED ? '🟢 ON (-25% Anti-Rug)' : '🔴 OFF';
+    const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
+      ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Single-Entry Guard)`
+      : '🔴 OFF';
+
     const text = `
 <b>[SOLANA COPY ENGINE] TERMINAL CONTROL</b>
 
 <b>Mode:</b> ${modeBadge}
 <b>Target Trader:</b> <code>${targetShort}</code>
 ${balanceBlock}
+<b>Auto Take-Profit:</b> ${tpStatus}
+<b>Anti-Rug Stop-Loss:</b> ${slStatus}
+<b>Cooldown Guard:</b> ${cooldownStatus}
 <b>Stream Status:</b> Helius LaserStream (Active)
 <b>Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'}
     `.trim();
