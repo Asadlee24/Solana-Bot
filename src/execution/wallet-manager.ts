@@ -123,6 +123,30 @@ export class ExecutionWalletManager {
     }
   }
 
+  /**
+   * Queries the follower's on-chain SPL token balance for a specific mint.
+   */
+  public async getTokenBalanceRaw(mint: string): Promise<bigint> {
+    if (!this.keypair) return 0n;
+    try {
+      const parsed = await this.connection.getParsedTokenAccountsByOwner(
+        this.keypair.publicKey,
+        { mint: new PublicKey(mint) },
+        'confirmed'
+      );
+      if (!parsed.value || parsed.value.length === 0) return 0n;
+
+      let total = 0n;
+      for (const item of parsed.value) {
+        const rawAmt = item.account.data.parsed?.info?.tokenAmount?.amount || '0';
+        total += BigInt(rawAmt);
+      }
+      return total;
+    } catch {
+      return 0n;
+    }
+  }
+
   public getCachedBalanceLamports(): bigint {
     return this.cachedBalanceLamports;
   }

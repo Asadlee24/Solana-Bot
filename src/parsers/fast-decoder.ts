@@ -96,7 +96,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
 
       // PumpSwap
@@ -108,7 +108,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
 
       // Raydium
@@ -120,7 +120,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
 
       // Jupiter
@@ -133,7 +133,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
 
       // Orca Whirlpool
@@ -145,7 +145,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
     }
 
@@ -159,7 +159,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
       if (RaydiumAdapter.isRaydiumProgram(innerIx.programId)) {
         const intent = RaydiumAdapter.parseSwap(
@@ -169,7 +169,7 @@ export class FastTransactionDecoder {
           tx.slot,
           tx.observedAt
         );
-        if (intent) return intent;
+        if (intent) return this.enrichIntent(intent, tx, targetWallet);
       }
     }
 
@@ -220,6 +220,46 @@ export class FastTransactionDecoder {
     }
 
     return null;
+  }
+
+  /**
+   * Enriches decoded swap intents with ground-truth pre/post token balance deltas for proportional exit
+   */
+  private static enrichIntent(
+    intent: SwapIntent,
+    tx: ParsedTransactionEnvelope,
+    targetWallet: string
+  ): SwapIntent {
+    if (intent.side === 'SELL' && tx.meta && !tx.meta.err) {
+      try {
+        const reconciled = BalanceDeltaReconciler.reconcile(
+          tx.signature,
+          tx.slot,
+          targetWallet,
+          {
+            err: tx.meta.err,
+            fee: tx.meta.fee,
+            preBalances: tx.meta.preBalances,
+            postBalances: tx.meta.postBalances,
+            preTokenBalances: tx.meta.preTokenBalances,
+            postTokenBalances: tx.meta.postTokenBalances,
+            accountKeys: tx.accountKeys,
+          }
+        );
+        if (
+          reconciled &&
+          reconciled.targetSoldFraction !== undefined &&
+          !isNaN(reconciled.targetSoldFraction) &&
+          reconciled.targetSoldFraction > 0
+        ) {
+          intent.sellFraction = reconciled.targetSoldFraction;
+          intent.targetPreBalanceToken = reconciled.targetPreTokenBalanceRaw.toString();
+        }
+      } catch {
+        // Fallback safely if balance delta extraction fails
+      }
+    }
+    return intent;
   }
 
   /**

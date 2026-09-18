@@ -198,7 +198,7 @@ export class LiveExecutionEngine {
     }
 
     const isBuy = mirrorIntent.side === 'BUY';
-    const rawInAmount = mirrorIntent.requestedInAmountRaw;
+    let rawInAmount = mirrorIntent.requestedInAmountRaw;
 
     // 3. Fee Unit Correctness & Spendable Balance Check
     const feeCalculation = calculateEstimatedFeesLamports(
@@ -219,10 +219,27 @@ export class LiveExecutionEngine {
       if (!spendCheck.allowed) {
         throw new Error(spendCheck.reason || 'INSUFFICIENT_BALANCE');
       }
-    }
+    } else {
+      // Precise on-chain token balance reconciliation for SELL
+      const onChainTokenBalance = await executionWalletManager.getTokenBalanceRaw(mirrorIntent.tokenMint);
+      if (onChainTokenBalance > 0n) {
+        if (mirrorIntent.sellFraction && mirrorIntent.sellFraction >= 0.95) {
+          // Full exit: sell 100% of actual on-chain tokens
+          rawInAmount = onChainTokenBalance.toString();
+        } else if (mirrorIntent.sellFraction && mirrorIntent.sellFraction < 0.95) {
+          // Proportional exit: sell exact fraction of actual on-chain tokens
+          const propAmt = BigInt(Math.floor(Number(onChainTokenBalance) * mirrorIntent.sellFraction));
+          if (propAmt > 0n) {
+            rawInAmount = propAmt.toString();
+          }
+        } else if (BigInt(rawInAmount) > onChainTokenBalance) {
+          rawInAmount = onChainTokenBalance.toString();
+        }
+      }
 
-    if (!isBuy && BigInt(rawInAmount) <= 0n) {
-      throw new Error('Follower holds 0 balance to sell');
+      if (BigInt(rawInAmount) <= 0n) {
+        throw new Error('Follower holds 0 balance to sell');
+      }
     }
 
     // Initial order record (Pending)

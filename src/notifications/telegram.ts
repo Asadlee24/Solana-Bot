@@ -5,6 +5,7 @@ import { riskEngine } from '../engine/risk-engine.js';
 import { tokenMetadataService, TokenMetadata } from '../services/token-metadata.js';
 import { executionWalletManager } from '../execution/wallet-manager.js';
 import { liveEngine } from '../execution/live-engine.js';
+import { traderAnalyzerService } from '../services/trader-analyzer.js';
 import { FollowerPosition, MirrorOrder, SwapIntent, WatchedWallet } from '../types/index.js';
 
 export class TelegramNotifier {
@@ -53,6 +54,7 @@ export class TelegramNotifier {
             { command: 'close', description: 'Close Position: /close <mint>' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
             { command: 'targets', description: 'View & Manage Watched Target Traders' },
+            { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
             { command: 'cooldown', description: 'Target Spam Guard & Active Token Cooldowns' },
             { command: 'add_target', description: 'Add Target: /add_target <address>' },
@@ -252,6 +254,22 @@ export class TelegramNotifier {
         return;
       }
       await this.handleRemoveTargetWallet(chatId, address);
+    } else if (
+      clean.startsWith('trader_score') ||
+      clean.startsWith('traderscore') ||
+      clean.startsWith('score') ||
+      clean.startsWith('analyze')
+    ) {
+      const parts = rawText.split(/\s+/);
+      const address = parts[1];
+      if (!address) {
+        await this.sendCustomMessage(
+          chatId,
+          'ℹ️ <b>Usage:</b> <code>/trader_score &lt;wallet_address&gt;</code>\nExample: <code>/trader_score CwUHN4...hJqS</code>\n\nScans past trades on-chain to analyze Win Rate %, PnL, Hold Time & safety score.'
+        );
+        return;
+      }
+      await this.handleTraderScore(chatId, address);
     } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawText)) {
       await this.handleDirectAddressInput(chatId, rawText);
     } else if (clean === 'tpsl' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag')) {
@@ -395,6 +413,9 @@ export class TelegramNotifier {
     } else if (data.startsWith('add_wallet_')) {
       const address = data.replace('add_wallet_', '').trim();
       await this.handleAddTargetWallet(chatId, address);
+    } else if (data.startsWith('score_')) {
+      const address = data.replace('score_', '').trim();
+      await this.handleTraderScore(chatId, address);
     } else if (data === 'prompt_add_wallet') {
       await this.sendCustomMessage(
         chatId,
@@ -1052,7 +1073,8 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       for (const w of wallets) {
         const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
         inlineKeyboardRows.push([
-          { text: `🗑️ Remove ${w.label || short}`, callback_data: `del_wallet_${w.wallet}` },
+          { text: `🧠 Score ${w.label || short}`, callback_data: `score_${w.wallet}` },
+          { text: `🗑️ Remove`, callback_data: `del_wallet_${w.wallet}` },
         ]);
       }
     }
@@ -1177,6 +1199,83 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
   }
 
   /**
+   * Scan and evaluate target trader win rate, PnL & hold time on-chain
+   */
+  public async handleTraderScore(chatId: string | number, rawAddress: string): Promise<void> {
+    const address = rawAddress.trim();
+    try {
+      new PublicKey(address);
+    } catch {
+      await this.sendCustomMessage(
+        chatId,
+        `❌ <b>[INVALID ADDRESS]</b> <code>${address}</code> is not a valid Solana public key.`
+      );
+      return;
+    }
+
+    await this.sendCustomMessage(
+      chatId,
+      `⏳ <b>[ANALYZING TRADER ON-CHAIN]</b>\nScanning recent transactions, swaps & PnL for:\n<code>${address}</code>\n<i>Please wait 1-2 seconds...</i>`
+    );
+
+    try {
+      const result = await traderAnalyzerService.analyzeWallet(address, 40);
+      const isWatched = Boolean(db.getWatchedWallet(address));
+
+      const solscanLink = `<a href="https://solscan.io/account/${address}">Solscan</a>`;
+      const gmgnLink = `<a href="https://gmgn.ai/sol/address/${address}">GMGN</a>`;
+
+      const pnlSign = result.netPnlSol >= 0 ? '+' : '';
+      const pnlColor = result.netPnlSol >= 0 ? '🟢' : '🔴';
+
+      const text = `
+🧠 <b>[TRADER WIN-RATE & SCORE REPORT]</b>
+
+<b>Wallet:</b> <code>${address}</code>
+<b>Links:</b> ${solscanLink} | ${gmgnLink}
+
+<b>${result.verdictBadge}</b>
+
+━━━━━━━━━━━━━━━━━━━
+<b>📊 PERFORMANCE METRICS:</b>
+• <b>Win Rate:</b> <b>${result.completedRounds > 0 ? `${result.winRatePct.toFixed(1)}%` : 'N/A'}</b> (${result.profitableRounds} Wins / ${result.losingRounds} Losses)
+• <b>Total DEX Swaps:</b> <b>${result.totalSwaps}</b> / ${result.totalTransactionsScanned} txs
+• <b>Completed Rounds:</b> <b>${result.completedRounds}</b> tokens
+• <b>Net PnL:</b> ${pnlColor} <b>${pnlSign}${result.netPnlSol.toFixed(3)} SOL</b> (${pnlSign}$${result.netPnlUsd.toFixed(2)} USD)
+• <b>Avg Hold Time:</b> <b>${result.avgHoldTimeFormatted}</b>
+• <b>Trading Style:</b> <code>${result.tradingStyle}</code>
+
+━━━━━━━━━━━━━━━━━━━
+<b>💡 RECOMMENDATION:</b>
+<i>${result.recommendation}</i>
+      `.trim();
+
+      const inlineKeyboardRows: any[] = [];
+      if (!isWatched && result.verdict !== 'SPAM_BOT') {
+        inlineKeyboardRows.push([
+          { text: '➕ Copy-Trade This Wallet', callback_data: `add_wallet_${address}` },
+        ]);
+      } else if (isWatched) {
+        inlineKeyboardRows.push([
+          { text: '🗑️ Remove From Targets', callback_data: `del_wallet_${address}` },
+        ]);
+      }
+
+      inlineKeyboardRows.push([
+        { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
+        { text: 'MAIN MENU', callback_data: 'menu_main' },
+      ]);
+
+      await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineKeyboardRows });
+    } catch (err: any) {
+      await this.sendCustomMessage(
+        chatId,
+        `❌ <b>[ANALYSIS ERROR]</b> Failed to complete on-chain scan: ${err.message}`
+      );
+    }
+  }
+
+  /**
    * Detect raw pasted Solana address and offer instant actions
    */
   public async handleDirectAddressInput(chatId: string | number, address: string): Promise<void> {
@@ -1199,7 +1298,10 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
 
       const inlineKeyboard = {
         inline_keyboard: [
-          [{ text: '🗑️ Remove Target', callback_data: `del_wallet_${address}` }],
+          [
+            { text: '🧠 Trader Score', callback_data: `score_${address}` },
+            { text: '🗑️ Remove Target', callback_data: `del_wallet_${address}` },
+          ],
           [{ text: 'TARGET TRADERS', callback_data: 'menu_wallets' }],
         ],
       };
@@ -1213,12 +1315,15 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
 
 <code>${address}</code>
 
-Would you like to add this address to your <b>Target Traders</b> list? The bot will automatically copy its buy and sell swaps on pump.fun and Raydium!
+Would you like to analyze this trader or add them to your <b>Target Traders</b> list?
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
-        [{ text: '➕ Start Copy-Trading This Wallet', callback_data: `add_wallet_${address}` }],
+        [
+          { text: '🧠 Trader Score', callback_data: `score_${address}` },
+          { text: '➕ Copy-Trade Wallet', callback_data: `add_wallet_${address}` },
+        ],
         [{ text: 'CANCEL', callback_data: 'menu_main' }],
       ],
     };
@@ -1513,11 +1618,20 @@ ${statusText}
     const usdAmount = solAmount * solPriceUsd;
 
     let pnlText = '';
+    let exitRatioText = '';
     if (position && !isBuy) {
       const pnlSol = Number(position.realizedPnlLamports) / 1e9;
       const pnlUsd = pnlSol * solPriceUsd;
       const isProfit = pnlSol >= 0;
       pnlText = `\n<b>Realized PnL:</b> <b>${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL)`;
+
+      const isFull = position.state === 'CLOSED' || BigInt(position.qtyRaw) <= 100n;
+      if (isFull) {
+        exitRatioText = '\n<b>Exit Ratio:</b> 100% (Full Exit)';
+      } else {
+        const remainingTokens = (Number(position.qtyRaw) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 });
+        exitRatioText = `\n<b>Exit Ratio:</b> Partial Exit (% Ratio Mirror)\n<b>Remaining Moonbag:</b> ${remainingTokens} tokens held`;
+      }
     }
 
     const sigText = order.orderSignature
@@ -1526,7 +1640,7 @@ ${statusText}
 
     const triggerText = isBuy
       ? 'Copied Target Trader BUY'
-      : (order.targetSignature ? 'Copied Target Trader SELL (Exit with Trader)' : 'Auto TP/SL or Manual Exit');
+      : (order.targetSignature ? 'Copied Target Trader SELL (%-Based Exit)' : 'Auto TP/SL or Manual Exit');
 
     const text = `
 ⚡ <b>[EXECUTION] ${modeBadge} ${sideTag}</b>
@@ -1535,7 +1649,7 @@ ${statusText}
 <b>Trigger:</b> ${triggerText}
 <b>Fill Price:</b> $${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD (${fillPriceSol.toFixed(8)} SOL)
 <b>Market Cap:</b> ${mcapStr} MCap
-<b>Amount:</b> ${solAmount.toFixed(4)} SOL ($${usdAmount.toFixed(2)} USD)${pnlText}
+<b>Amount:</b> ${solAmount.toFixed(4)} SOL ($${usdAmount.toFixed(2)} USD)${exitRatioText}${pnlText}
 <b>Signature:</b> ${sigText}
     `.trim();
 

@@ -30,22 +30,41 @@ export class PositionEngine {
       requestedInAmountRaw = this.calculateBuySizeLamports(targetIntent, walletConfig).toString();
     } else {
       // Sizing calculation for SELL: Proportional exit
-      const position = db.getPosition(targetIntent.targetWallet, targetIntent.tokenMint);
+      let position = db.getPosition(targetIntent.targetWallet, targetIntent.tokenMint);
+      if (!position || position.state !== 'OPEN') {
+        position = db.getOpenPositionByMint(targetIntent.tokenMint);
+      }
+
       if (position && position.state === 'OPEN' && BigInt(position.qtyRaw) > 0n) {
-        // Compute target sell fraction: f_sell = min(1, S_t / B_t)
-        const targetSoldRaw = BigInt(targetIntent.inputAmountRaw);
-        const targetPreBalRaw = targetIntent.targetPreBalanceToken
-          ? BigInt(targetIntent.targetPreBalanceToken)
-          : targetSoldRaw; // fallback to 100% if pre-balance unknown
+        // Priority 1: targetIntent.sellFraction (already computed by balance delta reconciler)
+        // Priority 2: Compute from targetSoldRaw / targetPreBalRaw
+        let fraction = 1.0;
+        if (
+          typeof targetIntent.sellFraction === 'number' &&
+          !isNaN(targetIntent.sellFraction) &&
+          targetIntent.sellFraction > 0
+        ) {
+          fraction = targetIntent.sellFraction;
+        } else if (targetIntent.targetPreBalanceToken) {
+          const targetSoldRaw = BigInt(targetIntent.inputAmountRaw);
+          const targetPreBalRaw = BigInt(targetIntent.targetPreBalanceToken);
+          if (targetPreBalRaw > 0n) {
+            fraction = Number(targetSoldRaw) / Number(targetPreBalRaw);
+          }
+        }
 
-        const fraction =
-          targetPreBalRaw > 0n ? Number(targetSoldRaw) / Number(targetPreBalRaw) : 1.0;
-        sellFraction = Math.min(1.0, Math.max(0.0, fraction));
-
-        const followerBalRaw = BigInt(position.qtyRaw);
-        // S_m = round(f_sell * B_m)
-        const followerSellRaw = BigInt(Math.floor(Number(followerBalRaw) * sellFraction));
-        requestedInAmountRaw = followerSellRaw > 0n ? followerSellRaw.toString() : position.qtyRaw;
+        // Exact proportional exit rule:
+        // If trader sells >= 95% of their tokens, do 100% full exit (prevents leaving untradeable dust)
+        // If trader sells e.g. 20% or 50%, mirror the exact percentage and keep moonbag
+        if (fraction >= 0.95) {
+          sellFraction = 1.0;
+          requestedInAmountRaw = position.qtyRaw;
+        } else {
+          sellFraction = Math.min(0.99, Math.max(0.01, fraction));
+          const followerBalRaw = BigInt(position.qtyRaw);
+          const followerSellRaw = BigInt(Math.floor(Number(followerBalRaw) * sellFraction));
+          requestedInAmountRaw = followerSellRaw > 0n ? followerSellRaw.toString() : position.qtyRaw;
+        }
       } else {
         // Nothing to sell
         requestedInAmountRaw = '0';
@@ -212,7 +231,8 @@ export class PositionEngine {
         position.realizedPnlLamports = newRealizedPnl.toString();
         position.updatedAt = now;
 
-        if (remainingQty === 0n) {
+        if (remainingQty <= 100n) {
+          position.qtyRaw = '0';
           position.state = 'CLOSED';
           position.closedAt = now;
         }

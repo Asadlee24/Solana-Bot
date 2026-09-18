@@ -446,6 +446,27 @@ export class DBManager {
     return Boolean(stmt.get(tokenMint));
   }
 
+  public getOpenPositionByMint(tokenMint: string): FollowerPosition | null {
+    const stmt = this.db.prepare(`
+      SELECT id, target_wallet as targetWallet, token_mint as tokenMint,
+             qty_raw as qtyRaw, cost_basis_raw as costBasisLamports,
+             avg_entry_price as avgEntryPriceSol, realized_pnl_raw as realizedPnlLamports,
+             unrealized_pnl_raw as unrealizedPnlLamports, state,
+             opened_at as openedAt, updated_at as updatedAt, closed_at as closedAt,
+             tp1_triggered as tp1Triggered, peak_pnl_pct as peakPnlPct
+      FROM positions
+      WHERE token_mint = ? AND state = 'OPEN' AND qty_raw != '0'
+      ORDER BY updated_at DESC LIMIT 1
+    `);
+    const row = stmt.get(tokenMint) as any;
+    if (!row) return null;
+    return {
+      ...row,
+      tp1Triggered: Boolean(row.tp1Triggered),
+      peakPnlPct: Number(row.peakPnlPct || 0),
+    };
+  }
+
   public savePosition(pos: FollowerPosition): void {
     const stmt = this.db.prepare(`
       INSERT INTO positions (
