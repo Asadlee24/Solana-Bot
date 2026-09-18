@@ -446,6 +446,45 @@ export class DBManager {
     return Boolean(stmt.get(tokenMint));
   }
 
+  public hasEverBoughtToken(tokenMint: string): boolean {
+    try {
+      const stmtPos = this.db.prepare(`
+        SELECT 1 FROM positions
+        WHERE token_mint = ?
+        LIMIT 1
+      `);
+      if (stmtPos.get(tokenMint)) return true;
+
+      const stmtOrd = this.db.prepare(`
+        SELECT 1 FROM mirror_orders
+        WHERE token_mint = ? AND side = 'BUY' AND status IN ('LANDED', 'FILLED')
+        LIMIT 1
+      `);
+      return Boolean(stmtOrd.get(tokenMint));
+    } catch {
+      return false;
+    }
+  }
+
+  public getAllEverBoughtTokens(): string[] {
+    const mints = new Set<string>();
+    try {
+      const posStmt = this.db.prepare(`SELECT DISTINCT token_mint as tokenMint FROM positions`);
+      const posRows = posStmt.all() as any[];
+      for (const r of posRows) {
+        if (r.tokenMint) mints.add(r.tokenMint);
+      }
+
+      const ordStmt = this.db.prepare(`SELECT DISTINCT token_mint as tokenMint FROM mirror_orders WHERE side = 'BUY' AND status IN ('LANDED', 'FILLED')`);
+      const ordRows = ordStmt.all() as any[];
+      for (const r of ordRows) {
+        if (r.tokenMint) mints.add(r.tokenMint);
+      }
+    } catch {}
+
+    return Array.from(mints);
+  }
+
   public getOpenPositionByMint(tokenMint: string): FollowerPosition | null {
     const stmt = this.db.prepare(`
       SELECT id, target_wallet as targetWallet, token_mint as tokenMint,

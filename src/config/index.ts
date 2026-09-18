@@ -85,6 +85,7 @@ const ConfigSchema = z.object({
   // Target Spam & Fast-Finger Guard (Single Entry & Cooldown Guard)
   SINGLE_ENTRY_PER_TOKEN_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
   TOKEN_BUY_COOLDOWN_SEC: z.coerce.number().default(300), // 5 minutes default cooldown
+  NEVER_REBUY_SAME_TOKEN: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true), // Lifetime 1-trade max per coin (never rebuy)
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;

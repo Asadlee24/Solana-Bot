@@ -15,10 +15,23 @@ export class RiskEngine {
   private mintBlacklist: Set<string> = new Set();
   private inFlightBuys: Set<string> = new Set();
   private lastBuyTimestampByMint: Map<string, number> = new Map();
+  private lifetimeBoughtMints: Set<string> = new Set();
 
   constructor() {
     this.initDefaultBlacklist();
     this.initRecentCooldownsFromDb();
+    this.initLifetimeBoughtMints();
+  }
+
+  private initLifetimeBoughtMints() {
+    try {
+      const pastMints = db.getAllEverBoughtTokens();
+      for (const m of pastMints) {
+        this.lifetimeBoughtMints.add(m);
+      }
+    } catch {
+      // db may not be initialized yet in isolated tests
+    }
   }
 
   private initRecentCooldownsFromDb() {
@@ -129,6 +142,15 @@ export class RiskEngine {
         decision: 'REJECTED_COOLDOWN',
         approved: false,
         reason: `Token in cooldown (${remainingSec}s remaining of ${config.TOKEN_BUY_COOLDOWN_SEC}s cooldown)`,
+      };
+    }
+
+    // 8. Lifetime Never-Rebuy Guard: Strictly 1 trade lifetime per coin, NEVER buy again once bought
+    if (config.NEVER_REBUY_SAME_TOKEN && this.isTokenPermanentlyLocked(intent.tokenMint)) {
+      return {
+        decision: 'REJECTED_NEVER_REBUY',
+        approved: false,
+        reason: `Token ${intent.tokenMint.slice(0, 8)}... was already bought once before. Lifetime Never-Rebuy rule is ACTIVE (Strict 1 Entry Max).`,
       };
     }
 
@@ -268,6 +290,34 @@ export class RiskEngine {
   public recordBuy(tokenMint: string): void {
     this.inFlightBuys.delete(tokenMint);
     this.lastBuyTimestampByMint.set(tokenMint, Date.now());
+    this.lifetimeBoughtMints.add(tokenMint);
+  }
+
+  public addLifetimeLockedToken(tokenMint: string): void {
+    this.lifetimeBoughtMints.add(tokenMint);
+  }
+
+  public isTokenPermanentlyLocked(tokenMint: string): boolean {
+    if (this.lifetimeBoughtMints.has(tokenMint)) {
+      return true;
+    }
+    if (db.hasEverBoughtToken(tokenMint)) {
+      this.lifetimeBoughtMints.add(tokenMint);
+      return true;
+    }
+    return false;
+  }
+
+  public getLifetimeLockedTokens(): string[] {
+    return Array.from(this.lifetimeBoughtMints);
+  }
+
+  public clearLifetimeLock(tokenMint?: string): void {
+    if (tokenMint) {
+      this.lifetimeBoughtMints.delete(tokenMint);
+    } else {
+      this.lifetimeBoughtMints.clear();
+    }
   }
 
   public getTokenCooldownRemainingSec(tokenMint: string): number {
@@ -299,9 +349,11 @@ export class RiskEngine {
     if (tokenMint) {
       this.lastBuyTimestampByMint.delete(tokenMint);
       this.inFlightBuys.delete(tokenMint);
+      this.lifetimeBoughtMints.delete(tokenMint);
     } else {
       this.lastBuyTimestampByMint.clear();
       this.inFlightBuys.clear();
+      this.lifetimeBoughtMints.clear();
     }
   }
 }

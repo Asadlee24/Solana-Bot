@@ -147,6 +147,31 @@ export class ExecutionWalletManager {
     }
   }
 
+  /**
+   * Queries all SPL token mints currently held with positive balance in the follower wallet.
+   */
+  public async getHeldTokenMints(): Promise<string[]> {
+    if (!this.keypair) return [];
+    try {
+      const parsed = await this.connection.getParsedTokenAccountsByOwner(
+        this.keypair.publicKey,
+        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') },
+        'confirmed'
+      );
+      const held: string[] = [];
+      for (const item of parsed.value || []) {
+        const rawAmt = item.account.data.parsed?.info?.tokenAmount?.amount || '0';
+        if (BigInt(rawAmt) > 0n) {
+          const mint = item.account.data.parsed?.info?.mint;
+          if (mint) held.push(mint);
+        }
+      }
+      return held;
+    } catch {
+      return [];
+    }
+  }
+
   public getCachedBalanceLamports(): bigint {
     return this.cachedBalanceLamports;
   }

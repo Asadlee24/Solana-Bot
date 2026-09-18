@@ -57,6 +57,7 @@ export class TelegramNotifier {
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
             { command: 'cooldown', description: 'Target Spam Guard & Active Token Cooldowns' },
+            { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
             { command: 'add_target', description: 'Add Target: /add_target <address>' },
             { command: 'remove_target', description: 'Remove Target: /remove_target <address>' },
             { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
@@ -287,11 +288,11 @@ export class TelegramNotifier {
     } else if (clean === 'sl_on' || clean === 'slon' || clean === 'enable_sl') {
       (config as any).AUTO_SL_ENABLED = true;
       await this.sendCustomMessage(chatId, '🟢 <b>Anti-Rug Stop-Loss (-25%) has been TURNED ON.</b>\nBot will automatically emergency cut if token drops by -25%.');
-    } else if (clean === 'cooldown' || clean.includes('cooldown') || clean === 'guard' || clean.includes('fast finger') || clean.includes('spam')) {
+    } else if (clean === 'cooldown' || clean.includes('cooldown') || clean === 'guard' || clean.includes('fast finger') || clean.includes('spam') || clean === 'never_rebuy' || clean.includes('never rebuy') || clean.includes('locked')) {
       await this.sendCooldownReport(chatId);
     } else if (clean === 'clear_cooldown' || clean === 'clearcooldown' || clean.includes('clear cooldown')) {
       riskEngine.clearCooldown();
-      await this.sendCustomMessage(chatId, '✅ <b>All active token cooldowns have been cleared.</b>\nThe bot can now accept first-time entries for previously cooled-down tokens.');
+      await this.sendCustomMessage(chatId, '✅ <b>5-Minute token cooldowns have been cleared.</b>\n<i>Note: Lifetime Never-Rebuy rule remains active for previously closed tokens.</i>');
       await this.sendCooldownReport(chatId);
     } else if (clean === 'risk' || clean.includes('risk controls') || clean === 'breaker' || clean.includes('risk limits')) {
       await this.sendRiskReport(chatId);
@@ -645,6 +646,9 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
         ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Fast-Finger Shield)`
         : '🔴 OFF';
+      const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
+        ? '🔒 ON (Strict 1-Entry per Coin)'
+        : '🔴 OFF';
 
       const text = `
 💰 <b>[LIVE EXECUTION HOT WALLET]</b>
@@ -662,6 +666,7 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
 • <b>Auto Take-Profit:</b> ${tpStatus}
 • <b>Anti-Rug Stop-Loss:</b> ${slStatus}
 • <b>Cooldown Guard:</b> ${cooldownStatus}
+• <b>Never Re-Buy:</b> ${neverRebuyStatus}
 ━━━━━━━━━━━━━━━━━━━
 
 🔗 <a href="https://solscan.io/account/${pub}">View Wallet on Solscan</a>
@@ -748,6 +753,9 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
     const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
       ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Single-Entry Guard)`
       : '🔴 OFF';
+    const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
+      ? '🔒 ON (Strict 1-Entry per Coin)'
+      : '🔴 OFF';
 
     const text = `
 <b>[SOLANA COPY ENGINE] TERMINAL CONTROL</b>
@@ -758,6 +766,7 @@ ${balanceBlock}
 <b>Auto Take-Profit:</b> ${tpStatus}
 <b>Anti-Rug Stop-Loss:</b> ${slStatus}
 <b>Cooldown Guard:</b> ${cooldownStatus}
+<b>Never Re-Buy:</b> ${neverRebuyStatus}
 <b>Stream Status:</b> Helius LaserStream (Active)
 <b>Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'}
     `.trim();
@@ -1439,10 +1448,11 @@ Would you like to analyze this trader or add them to your <b>Target Traders</b> 
    */
   public async sendCooldownReport(chatId: string | number): Promise<void> {
     const activeCooldowns = riskEngine.getAllActiveCooldowns();
+    const lockedTokens = riskEngine.getLifetimeLockedTokens();
     let cooldownText = '';
 
     if (activeCooldowns.length === 0) {
-      cooldownText = '<i>No tokens currently in cooldown. Any new signal from target trader will be copied immediately.</i>';
+      cooldownText = '<i>No tokens currently in 5m cooldown window.</i>';
     } else {
       cooldownText = activeCooldowns
         .map((c, idx) => {
@@ -1452,26 +1462,35 @@ Would you like to analyze this trader or add them to your <b>Target Traders</b> 
         .join('\n');
     }
 
+    const lockedSummary = lockedTokens.length === 0
+      ? '<i>No tokens permanently locked yet.</i>'
+      : lockedTokens
+          .slice(0, 6)
+          .map((m, idx) => `${idx + 1}. <code>${m.slice(0, 6)}...${m.slice(-4)}</code> (Locked 🔒)`)
+          .join('\n') + (lockedTokens.length > 6 ? `\n<i>...and ${lockedTokens.length - 6} more tokens</i>` : '');
+
     const text = `
-⏱️ <b>[TARGET SPAM & FAST-FINGER GUARD]</b>
+⏱️ <b>[TARGET SPAM & NEVER-REBUY GUARD]</b>
 
-<b>Single Entry Guard:</b> ${config.SINGLE_ENTRY_PER_TOKEN_ENABLED ? '🟢 ACTIVE (1 trade max per coin)' : '🔴 DISABLED'}
-<b>Cooldown Duration:</b> ${config.TOKEN_BUY_COOLDOWN_SEC}s (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)} minutes)
+<b>Never Re-Buy Guard:</b> ${config.NEVER_REBUY_SAME_TOKEN ? '🔒 <b>ACTIVE (Strict 1-Entry Lifetime)</b>' : '🔴 DISABLED'}
+<b>Cooldown Timer:</b> ${config.TOKEN_BUY_COOLDOWN_SEC}s (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m window)
 
-<b>Active Token Cooldowns:</b>
+<b>Active Cooldowns (5m window):</b>
 ${cooldownText}
 
+<b>Permanently Locked Tokens (Never Re-Buy):</b>
+${lockedSummary}
+
 🛡️ <b>Protection active:</b>
-• If target trader buys the same coin 2 or 3 times in a row, only the <b>first entry</b> is copied.
-• Repeat buys while holding a position are automatically skipped.
-• After buying, a ${config.TOKEN_BUY_COOLDOWN_SEC}s cooldown prevents rapid spam/churn.
-• Sells are <b>NEVER blocked</b> and always exit safely.
+• <b>Never Re-Buy Rule:</b> Agar target trader ek coin ek baar le, bot usko <b>kabhi dobara nahi lega</b> (chahe trader dobara khareede ya na khareede).
+• <b>Spam Guard:</b> Fast consecutive duplicate buys ko 0ms par reject karta hai.
+• <b>Sells are NEVER blocked:</b> Profit booking aur exit orders hamesha execute hote hain.
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '🗑️ Clear All Cooldowns', callback_data: 'clear_cooldown' },
+          { text: '🗑️ Clear 5m Cooldowns', callback_data: 'clear_cooldown' },
           { text: 'REFRESH', callback_data: 'menu_cooldown' },
         ],
         [

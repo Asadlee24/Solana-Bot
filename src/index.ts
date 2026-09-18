@@ -2,6 +2,7 @@ import { createApiServer } from './api/server.js';
 import { config } from './config/index.js';
 import { db } from './db/database.js';
 import { autoExitManager } from './engine/auto-exit-manager.js';
+import { riskEngine } from './engine/risk-engine.js';
 import { liveEngine } from './execution/live-engine.js';
 import { executionWalletManager } from './execution/wallet-manager.js';
 import { telegramNotifier } from './notifications/telegram.js';
@@ -51,6 +52,17 @@ async function bootstrap() {
   // Attach SignalManager to Telegram bot and start interactive command listener
   telegramNotifier.setSignalManager(signalManager);
   telegramNotifier.startInteractivePolling();
+
+  // Register any held SPL tokens into RiskEngine's Lifetime Never-Rebuy Lock
+  try {
+    const heldMints = await executionWalletManager.getHeldTokenMints();
+    for (const m of heldMints) {
+      riskEngine.addLifetimeLockedToken(m);
+    }
+    if (heldMints.length > 0) {
+      console.info(`[Risk Engine] Registered ${heldMints.length} held token(s) into Lifetime Never-Rebuy Lock.`);
+    }
+  } catch {}
 
   // Start Live Ingestion Feeds
   const heliusWs = new HeliusWebSocketStream({

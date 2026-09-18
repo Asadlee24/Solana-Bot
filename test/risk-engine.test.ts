@@ -174,4 +174,34 @@ describe('Risk Engine & Circuit Breakers', () => {
     expect(retestRes.approved).toBe(true);
     expect(retestRes.decision).toBe('APPROVED');
   });
+
+  it('strictly rejects second buy for a token that was previously bought (Never-Rebuy Lifetime Guard)', () => {
+    const uniqueToken = 'NeverRebuyMint1111111111111111111111111111';
+    const buyIntent: SwapIntent = {
+      ...validIntent,
+      tokenMint: uniqueToken,
+      outputMint: uniqueToken,
+      timestampMs: Date.now(),
+    };
+
+    const bal = solToLamportsBigInt(1.0);
+
+    // Initial check: First time buy is approved
+    const firstCheck = engine.evaluateIntent(buyIntent, bal, 0n);
+    expect(firstCheck.approved).toBe(true);
+    expect(firstCheck.decision).toBe('APPROVED');
+
+    // Simulate trade landing: recordBuy is called
+    engine.recordBuy(uniqueToken);
+
+    // Expire the cooldown timer by advancing simulated time / manual delete from cooldown map
+    (engine as any).lastBuyTimestampByMint.delete(uniqueToken);
+    expect(engine.getTokenCooldownRemainingSec(uniqueToken)).toBe(0);
+
+    // Second buy attempt must be rejected by NEVER_REBUY rule even though 5m cooldown has expired!
+    const secondCheck = engine.evaluateIntent(buyIntent, bal, 0n);
+    expect(secondCheck.approved).toBe(false);
+    expect(secondCheck.decision).toBe('REJECTED_NEVER_REBUY');
+    expect(secondCheck.reason).toContain('Never-Rebuy');
+  });
 });
