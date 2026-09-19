@@ -204,6 +204,9 @@ export class DBManager {
 
     // Seed default watched wallets if empty
     this.seedDefaultWallets();
+
+    // Seed historical trades (idempotent INSERT OR IGNORE)
+    this.seedHistoricalTrades();
   }
 
   private seedDefaultWallets() {
@@ -853,6 +856,42 @@ export class DBManager {
         sellSig: '44tLPEUDydYqoxR4F5F1o6yNWbvMGve6BhtrpMecs4hjWgayuQtnMdkgbv81XQHQRE37e8KkNJBfJcmMtWgvsP3z',
         inTokens: '712569935054',
         outLamports: '71770000',
+      },
+      {
+        id: 'hist_pos_pickachinu_919',
+        targetWallet: 'ardinRsN1mNYVeoJWTBsWeYeXvuR9UUDGMsCDKpb6AT',
+        tokenMint: 'EMKvahsKUnQtWLRB63RWW6KBZUErAoDtEypgQutXfnrL',
+        qtyRaw: '0',
+        costBasisLamports: '51570000',
+        avgEntryPriceSol: 2.1009e-7,
+        realizedPnlLamports: '-14540000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789803642000,
+        updatedAt: 1789803969000,
+        closedAt: 1789803969000,
+        buySig: '4B8tY1FowabS5XMnR8x4bVGi5KmS2eBkrZCQnopgNPNj2X4WkCXNJeiYbA2wHEJ5tQghjbVQEevVjvgFq9PmEHdY',
+        sellSig: '3qXSh37vP1TsLssHAVR6S4wEZYKbki3wk9ZHycjEEUyJDx5YmmZGV37cGbfJSnUqgkaj7WGTHjsoyx64vq8S6E9f',
+        inTokens: '245455260000',
+        outLamports: '37030000',
+      },
+      {
+        id: 'hist_pos_satoshi_919',
+        targetWallet: 'ardinRsN1mNYVeoJWTBsWeYeXvuR9UUDGMsCDKpb6AT',
+        tokenMint: 'Br91wUNb4jcUUmA7c2GCSbwW1a5ymJK1VjRaFd75SC69',
+        qtyRaw: '0',
+        costBasisLamports: '51570000',
+        avgEntryPriceSol: 5.617e-7,
+        realizedPnlLamports: '65260000',
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED',
+        openedAt: 1789804115000,
+        updatedAt: 1789804555000,
+        closedAt: 1789804555000,
+        buySig: '3Xb3He7JfnmVefjtUrTccoit6RWAH7J7uLB2eec97QcaurrG1BWm55aQWWx5ZQJhohjeJeyDMEXzLVXqw3EZAeX4',
+        sellSig: '57f5zF8okHiZNarW27nkdHpaa4ysJZAvJ2yTc1TKUAt5WpcsVUo8AvcNBHeRmATW3CvVkJCgXNnM5XEKEbvBGsq2',
+        inTokens: '91807350000',
+        outLamports: '116830000',
       },
     ];
 

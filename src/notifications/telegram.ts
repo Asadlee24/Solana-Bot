@@ -18,6 +18,8 @@ export class TelegramNotifier {
   private signalManagerRef: any = null;
   private lastConnectionErrorTime: number = 0;
   private hasNotifiedStartup: boolean = false;
+  private lastRejectionAlertByMint: Map<string, number> = new Map();
+  private readonly REJECTION_COOLDOWN_MS: number = 15 * 60 * 1000; // 15 minutes cooldown per coin
 
   constructor() {
     this.botToken = config.TELEGRAM_BOT_TOKEN;
@@ -1768,6 +1770,18 @@ ${lockedSummary}
     reason?: string
   ): Promise<void> {
     if (!this.enabled || !this.chatId) return;
+
+    // 15-Minute Rejection Cooldown: Prevent Telegram spam when trader repeatedly DCAs an already-held or rejected coin
+    if (actionTaken === 'RISK_REJECTED') {
+      const now = Date.now();
+      const lastAlert = this.lastRejectionAlertByMint.get(intent.tokenMint);
+      if (lastAlert && now - lastAlert < this.REJECTION_COOLDOWN_MS) {
+        // Suppress repeated rejection notification for 15 minutes
+        return;
+      }
+      this.lastRejectionAlertByMint.set(intent.tokenMint, now);
+    }
+
     const sideEmoji = intent.side === 'BUY' ? '🟢' : '🔴';
     let statusText = '';
     let buttons: any = undefined;
@@ -1783,9 +1797,9 @@ ${lockedSummary}
         ],
       };
     } else if (reason && reason.includes('already held pre-existing tokens')) {
-      statusText = `🚫 <b>Target Re-Buy Rejected:</b> Trader already held this coin before this swap. Only fresh initial entries are copied!`;
+      statusText = `🚫 <b>Target Re-Buy Rejected:</b> Trader already held this coin before this swap. Only fresh initial entries are copied!\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
     } else {
-      statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}`;
+      statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
     }
 
     const meta = await tokenMetadataService.getTokenMetadata(intent.tokenMint);
