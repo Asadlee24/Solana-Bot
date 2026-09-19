@@ -1992,6 +1992,106 @@ Trading automatically paused for portfolio protection.
     this.sendAlert(text);
   }
 
+  /**
+   * Real-Time Pump or Dip Milestone Alert (+25%, +50%, +75%, +100% or -15%, -25%, -35%, -50%)
+   */
+  public async notifyPositionMilestone(
+    position: FollowerPosition,
+    pnlPct: number,
+    milestone: number,
+    peakPct: number,
+    currentPriceSol: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const costBasisSol = Number(position.costBasisLamports) / 1e9;
+    const currentValSol = costBasisSol * (1 + pnlPct / 100);
+    const floatingPnlSol = currentValSol - costBasisSol;
+    const floatingPnlUsd = floatingPnlSol * solPriceUsd;
+
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
+    const isPump = milestone > 0;
+    const header = isPump
+      ? `🚀 <b>[$${sym} PUMP ALERT] +${milestone}% UP!</b> 🚀`
+      : `🔻 <b>[$${sym} DIP ALERT] ${milestone}% DOWN!</b> 🔻`;
+
+    const text = `
+${header}
+
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Current PnL:</b> <b>${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%</b> (${floatingPnlSol >= 0 ? '+' : ''}${floatingPnlSol.toFixed(4)} SOL | ${floatingPnlSol >= 0 ? '+' : ''}$${floatingPnlUsd.toFixed(2)})
+<b>Highest Peak:</b> <b>+${peakPct.toFixed(1)}%</b> 🏔️
+<b>Entry Price:</b> ${position.avgEntryPriceSol.toExponential(4)} SOL
+<b>Current Price:</b> ${currentPriceSol.toExponential(4)} SOL
+<b>Position Value:</b> ${currentValSol.toFixed(4)} SOL ($${(currentValSol * solPriceUsd).toFixed(2)})
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.id}` },
+          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.id}` },
+        ],
+        [
+          { text: '📊 DEXSCREENER', url: `https://dexscreener.com/solana/${position.tokenMint}` },
+          { text: '⚡ PUMP.FUN', url: `https://pump.fun/coin/${position.tokenMint}` },
+        ],
+      ],
+    };
+
+    await this.sendAlert(text, inlineKeyboard);
+  }
+
+  /**
+   * Alert when token has dropped substantially from its highest peak
+   */
+  public async notifyPositionPullback(
+    position: FollowerPosition,
+    pnlPct: number,
+    dropFromPeak: number,
+    peakPct: number,
+    currentPriceSol: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const costBasisSol = Number(position.costBasisLamports) / 1e9;
+    const currentValSol = costBasisSol * (1 + pnlPct / 100);
+    const floatingPnlSol = currentValSol - costBasisSol;
+    const floatingPnlUsd = floatingPnlSol * solPriceUsd;
+
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
+    const text = `
+⚠️ <b>[$${sym} PULLBACK ALERT] Dropping From Peak!</b> ⚠️
+
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Highest Peak Reached:</b> <b>+${peakPct.toFixed(1)}%</b> 🏔️
+<b>Current PnL:</b> <b>${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%</b> (Fell <b>-${dropFromPeak.toFixed(1)}%</b> from peak!)
+<b>Floating PnL:</b> ${floatingPnlSol >= 0 ? '+' : ''}${floatingPnlSol.toFixed(4)} SOL (${floatingPnlSol >= 0 ? '+' : ''}$${floatingPnlUsd.toFixed(2)})
+<b>Current Price:</b> ${currentPriceSol.toExponential(4)} SOL
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.id}` },
+          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.id}` },
+        ],
+        [
+          { text: '📊 DEXSCREENER', url: `https://dexscreener.com/solana/${position.tokenMint}` },
+          { text: '⚡ PUMP.FUN', url: `https://pump.fun/coin/${position.tokenMint}` },
+        ],
+      ],
+    };
+
+    await this.sendAlert(text, inlineKeyboard);
+  }
+
   public async sendTpSlReport(chatId: string | number): Promise<void> {
     const tpText = config.AUTO_TP_ENABLED
       ? `🟢 <b>Enabled:</b> Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}% when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   <i>(Principal returned to wallet, remaining 50% rides as free moonbag)</i>`

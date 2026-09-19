@@ -553,6 +553,15 @@ export class DBManager {
     stmt.run(peakPnlPct, Date.now(), positionId);
   }
 
+  public updatePositionPeak(positionId: string, peakPnlPct: number): void {
+    const stmt = this.db.prepare(`
+      UPDATE positions
+      SET peak_pnl_pct = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    stmt.run(peakPnlPct, Date.now(), positionId);
+  }
+
   // Position Lots
   public addPositionLot(lot: {
     id: string;
