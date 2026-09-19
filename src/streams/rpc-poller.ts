@@ -50,7 +50,7 @@ export class SolanaRpcPoller {
   private async checkWallet(walletPubkeyStr: string): Promise<void> {
     try {
       const pubkey = new PublicKey(walletPubkeyStr);
-      const sigs = await this.connection.getSignaturesForAddress(pubkey, { limit: 3 }, 'confirmed');
+      const sigs = await this.connection.getSignaturesForAddress(pubkey, { limit: 10 }, 'confirmed');
       if (!sigs || sigs.length === 0) return;
 
       const latestSig = sigs[0].signature;
@@ -67,12 +67,31 @@ export class SolanaRpcPoller {
         return;
       }
 
-      // New trade detected!
+      // Collect all new signatures since lastKnown in chronological order (oldest to newest)
+      const newSigs: typeof sigs = [];
+      for (const s of sigs) {
+        if (s.signature === lastKnown) break;
+        newSigs.push(s);
+      }
+
+      // Advance pointer to newest signature
       this.lastSignatureMap.set(walletPubkeyStr, latestSig);
-      console.info(`[RPC Poller ⚡] NEW LIVE ON-CHAIN TRANSACTION DETECTED for ${walletPubkeyStr}: ${latestSig}`);
+
+      // Process each transaction in chronological order so bursts and bundles are never missed
+      for (const s of newSigs.reverse()) {
+        await this.processSignature(walletPubkeyStr, s.signature);
+      }
+    } catch (err: any) {
+      console.warn('[RPC Poller Error]:', err?.message || err);
+    }
+  }
+
+  private async processSignature(walletPubkeyStr: string, signature: string): Promise<void> {
+    try {
+      console.info(`[RPC Poller ⚡] NEW LIVE ON-CHAIN TRANSACTION DETECTED for ${walletPubkeyStr}: ${signature}`);
 
       const observedAt = process.hrtime.bigint();
-      const txRes = await this.connection.getParsedTransaction(latestSig, {
+      const txRes = await this.connection.getParsedTransaction(signature, {
         maxSupportedTransactionVersion: 1,
         commitment: 'confirmed',
       });
@@ -81,7 +100,7 @@ export class SolanaRpcPoller {
 
       // Skip failed on-chain transactions (e.g. slippage error 6042)
       if (txRes.meta && txRes.meta.err) {
-        console.info(`[RPC Poller] Skipped failed on-chain target transaction: ${latestSig}`);
+        console.info(`[RPC Poller] Skipped failed on-chain target transaction: ${signature}`);
         return;
       }
 
@@ -103,7 +122,7 @@ export class SolanaRpcPoller {
       });
 
       const envelope: ParsedTransactionEnvelope = {
-        signature: latestSig,
+        signature,
         slot: txRes.slot,
         signers: signers.length > 0 ? signers : [accountKeys[0]],
         accountKeys,
@@ -124,7 +143,7 @@ export class SolanaRpcPoller {
       // Ingest live into hot path!
       await signalManager.handleIncomingTransaction(envelope, 'RPC_FALLBACK', 'CONFIRMED');
     } catch (err: any) {
-      console.warn('[RPC Poller Error]:', err?.message || err);
+      console.warn(`[RPC Poller] Error processing ${signature}:`, err?.message || err);
     }
   }
 }
