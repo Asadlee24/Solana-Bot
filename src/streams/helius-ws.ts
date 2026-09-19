@@ -174,7 +174,7 @@ export class HeliusWebSocketStream {
   private async fetchAndDispatch(signature: string, observedAt: bigint): Promise<void> {
     try {
       const txRes = await this.connection.getParsedTransaction(signature, {
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: 1,
         commitment: 'confirmed',
       });
       if (!txRes || !txRes.transaction) return;

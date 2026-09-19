@@ -45,14 +45,14 @@ export class SettlementReconciler {
     // 1. Attempt deep on-chain transaction metadata parsing (with retry for RPC catch-up)
     try {
       let tx = await this.connection.getParsedTransaction(signature, {
-        maxSupportedTransactionVersion: 0,
+        maxSupportedTransactionVersion: 1,
         commitment: 'confirmed',
       });
 
       if (!tx) {
         await new Promise((resolve) => setTimeout(resolve, 1200));
         tx = await this.connection.getParsedTransaction(signature, {
-          maxSupportedTransactionVersion: 0,
+          maxSupportedTransactionVersion: 1,
           commitment: 'confirmed',
         });
       }
