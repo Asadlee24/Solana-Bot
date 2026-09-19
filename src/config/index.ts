@@ -21,10 +21,10 @@ const ConfigSchema = z.object({
   // Execution Wallet Key (Base58 or JSON byte array) - Strictly isolated backend hot wallet
   FOLLOWER_PRIVATE_KEY: z.string().default(''),
 
-  // Target Wallets to watch (comma-separated list of base58 public keys)
+  // Target Wallets to watch (comma-separated list of base58 public keys, defaults to empty)
   WATCHED_WALLETS: z
     .string()
-    .default('CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS')
+    .default('')
     .transform((val) => val.split(',').map((w) => w.trim()).filter(Boolean)),
 
   // Initial Sizing Defaults (Conservative Mainnet Smoke-Test Configuration)

@@ -62,10 +62,11 @@ export function createApiServer() {
   app.post('/webhook/helius', webhookReceiver.handleHeliusWebhook);
 
   const getEnrichedPositions = async () => {
-    const allowedWallets = new Set(config.WATCHED_WALLETS);
+    const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
+    const allowedWallets = new Set([...config.WATCHED_WALLETS, ...dbWallets]);
     const rawOpen = db.getOpenPositions().filter((pos) => {
       const mint = pos.tokenMint || '';
-      const isAllowed = allowedWallets.has(pos.targetWallet);
+      const isAllowed = allowedWallets.size === 0 || allowedWallets.has(pos.targetWallet) || !pos.targetWallet;
       const isNotDummy = !mint.toLowerCase().includes('tokenmint') && !mint.toLowerCase().includes('paper1111') && !mint.toLowerCase().includes('test');
       return isAllowed && isNotDummy;
     });
@@ -253,7 +254,7 @@ export function createApiServer() {
             entryGapPct: Number(entryGapPct.toFixed(2)),
             entryGapBps: Math.round(entryGapPct * 100),
             reactionLatencyMs: hasMeasuredLatency ? Number(order.l_decision_ms.toFixed(2)) : null,
-            targetWallet: order.target_wallet || config.WATCHED_WALLETS[0],
+            targetWallet: order.target_wallet || config.WATCHED_WALLETS[0] || 'Target Trader',
             isTargetPriceEstimated: !hasMeasuredTargetPrice,
             isTargetSpentEstimated: !hasMeasuredTargetSpend,
             isLatencyEstimated: !hasMeasuredLatency,

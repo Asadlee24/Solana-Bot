@@ -213,6 +213,7 @@ export class FastTransactionDecoder {
           detectedVenue = 'JUPITER';
         }
 
+        const isRebuy = isBuy && reconciled.targetPreTokenBalanceRaw > 0n;
         return {
           targetSignature: tx.signature,
           slot: tx.slot,
@@ -225,6 +226,8 @@ export class FastTransactionDecoder {
           inputAmountRaw: isBuy ? absSol.toString() : absTok.toString(),
           outputAmountRaw: isBuy ? absTok.toString() : absSol.toString(),
           estimatedPrice: reconciled.effectiveTargetPrice,
+          targetPreBalanceToken: reconciled.targetPreTokenBalanceRaw.toString(),
+          isTargetRebuy: isRebuy,
           observedAt: tx.observedAt,
           timestampMs: Date.now(),
           rawProgramId: 'BALANCE_DELTA_FALLBACK',
@@ -238,13 +241,37 @@ export class FastTransactionDecoder {
   }
 
   /**
-   * Enriches decoded swap intents with ground-truth pre/post token balance deltas for proportional exit
+   * Enriches decoded swap intents with ground-truth pre/post token balance deltas for proportional exit & rebuy detection
    */
   private static enrichIntent(
     intent: SwapIntent,
     tx: ParsedTransactionEnvelope,
     targetWallet: string
   ): SwapIntent {
+    if (intent.side === 'BUY' && tx.meta && tx.meta.preTokenBalances) {
+      try {
+        let isRebuy = false;
+        let preBalRaw = '0';
+        for (const b of tx.meta.preTokenBalances) {
+          const isTargetOwner =
+            b.owner === targetWallet ||
+            (tx.accountKeys && tx.accountKeys[b.accountIndex] === targetWallet);
+          if (isTargetOwner && b.mint === intent.tokenMint) {
+            const amt = BigInt(b.uiTokenAmount?.amount || '0');
+            if (amt > 0n) {
+              isRebuy = true;
+              preBalRaw = amt.toString();
+              break;
+            }
+          }
+        }
+        intent.isTargetRebuy = isRebuy;
+        intent.targetPreBalanceToken = preBalRaw;
+      } catch {
+        // Fallback safely if pre-balance inspection fails
+      }
+    }
+
     if (intent.side === 'SELL' && tx.meta && !tx.meta.err) {
       try {
         const reconciled = BalanceDeltaReconciler.reconcile(

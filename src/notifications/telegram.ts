@@ -493,8 +493,15 @@ export class TelegramNotifier {
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const balUsd = bal * solPriceUsd;
     const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
-    const targetWallet = config.WATCHED_WALLETS[0] || '1 target trader';
-    const targetShort = `${targetWallet.substring(0, 4)}...${targetWallet.substring(targetWallet.length - 4)}`;
+    const activeWallets = db.getWatchedWallets().filter((w) => w.enabled);
+    let targetShort = 'None (Add target first)';
+    if (activeWallets.length > 0) {
+      const w = activeWallets[0].wallet;
+      targetShort = `${w.substring(0, 4)}...${w.substring(w.length - 4)}`;
+    } else if (config.WATCHED_WALLETS.length > 0) {
+      const w = config.WATCHED_WALLETS[0];
+      targetShort = `${w.substring(0, 4)}...${w.substring(w.length - 4)}`;
+    }
 
     const text = `
 ⚠️ <b>[CONFIRM BOT ACTIVATION]</b>
@@ -750,8 +757,18 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
     const telemetry = db.getSystemTelemetry();
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
-    const targetWallet = config.WATCHED_WALLETS[0] || 'CwUHN4...';
-    const targetShort = `${targetWallet.substring(0, 4)}...${targetWallet.substring(targetWallet.length - 4)}`;
+    const activeWallets = db.getWatchedWallets().filter((w) => w.enabled);
+    let targetDisplay = 'None (Paste address to add)';
+    if (activeWallets.length === 1) {
+      const w = activeWallets[0];
+      const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
+      targetDisplay = w.label ? `${w.label} (<code>${short}</code>)` : `<code>${short}</code>`;
+    } else if (activeWallets.length > 1) {
+      targetDisplay = `${activeWallets.length} active traders`;
+    } else if (config.WATCHED_WALLETS.length > 0) {
+      const w = config.WATCHED_WALLETS[0];
+      targetDisplay = `<code>${w.substring(0, 4)}...${w.substring(w.length - 4)}</code>`;
+    }
 
     let balanceBlock = '';
     if (isLive) {
@@ -797,7 +814,7 @@ ${divider}
 ${balanceBlock}
 
 🎯 <b>TARGET TRADER</b>
-• <b>Trader:</b> <code>${targetShort}</code>
+• <b>Trader:</b> ${targetDisplay}
 • <b>Speed:</b> ⚡ ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'} (LaserStream)
 
 🛡️ <b>SAFETY & RISK GUARDS</b>
@@ -1126,7 +1143,7 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
 
 <b>Status:</b> RUNNING (Operational)
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}${walletLine}
-<b>Target Traders:</b> ${config.WATCHED_WALLETS.length} registered
+<b>Target Traders:</b> ${db.getWatchedWallets().length} registered
 <b>Orders Copied:</b> ${telemetry.totalTradesProcessed}
 <b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
 <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
@@ -1510,6 +1527,7 @@ Would you like to analyze this trader or add them to your <b>Target Traders</b> 
 <b>[PRE-TRADE RISK CONTROLS]</b>
 
 <b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED' : 'ARMED (Normal)'}
+<b>Target Pre-Hold Guard:</b> 🟢 ACTIVE (Rejects DCA / re-buys of already held coins)
 <b>Single Entry Guard:</b> ${config.SINGLE_ENTRY_PER_TOKEN_ENABLED ? '🟢 ACTIVE (1 trade max per coin)' : '🔴 DISABLED'}
 <b>Token Cooldown:</b> ⏱️ ${config.TOKEN_BUY_COOLDOWN_SEC}s (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m per coin)
 <b>Active Cooldowns:</b> ${activeCooldowns.length} token(s)
@@ -1764,6 +1782,8 @@ ${lockedSummary}
           [{ text: 'WALLET BALANCE', callback_data: 'menu_balance' }],
         ],
       };
+    } else if (reason && reason.includes('already held pre-existing tokens')) {
+      statusText = `🚫 <b>Target Re-Buy Rejected:</b> Trader already held this coin before this swap. Only fresh initial entries are copied!`;
     } else {
       statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}`;
     }
@@ -2143,11 +2163,16 @@ Tap below to turn Auto-TP or Auto-SL ON or OFF anytime:
     const balUsd = bal * solPriceUsd;
     const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
 
+    const activeWallets = db.getWatchedWallets().filter((w) => w.enabled);
+    const targetDisplay = activeWallets.length > 0
+      ? activeWallets.map((w) => `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`).join(', ')
+      : (config.WATCHED_WALLETS[0] ? `${config.WATCHED_WALLETS[0].substring(0, 4)}...${config.WATCHED_WALLETS[0].substring(config.WATCHED_WALLETS[0].length - 4)}` : 'None (Paste address in chat to add)');
+
     const text = `
 ⚡ <b>[SOLANA COPY ENGINE] ONLINE</b>
 
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}
-<b>Target Trader:</b> <code>${config.WATCHED_WALLETS[0]}</code>
+<b>Target Trader:</b> <code>${targetDisplay}</code>
 <b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL | $${sizingUsd.toFixed(2)} USD)
 <b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)
 <b>Ingestion:</b> Helius LaserStream (Sub-10ms)

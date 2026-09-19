@@ -29,6 +29,11 @@ async function bootstrap() {
   const walletPubkey = executionWalletManager.getPublicKeyBase58();
   const walletBalSol = executionWalletManager.getCachedBalanceSol();
   const spendableSol = Math.max(0, walletBalSol - config.MIN_SOL_RESERVE_SOL);
+  const dbWallets = db.getWatchedWallets();
+  const allWallets = Array.from(new Set([...config.WATCHED_WALLETS, ...dbWallets.map(w => w.wallet)]));
+  const watchedSummary = allWallets.length > 0
+    ? `${allWallets.length} registered (${allWallets[0].slice(0, 4)}...${allWallets[0].slice(-4)})`
+    : '0 registered (Paste address in Telegram to add)';
 
   console.log(`
   =============================================================
@@ -43,7 +48,7 @@ async function bootstrap() {
   - Smoke-Test Mode:    ${config.MAINNET_SMOKE_TEST_MODE ? 'ENABLED (1-trade auto-disarm safety)' : 'DISABLED'}
   - Helius Sender:      Mode: ${config.HELIUS_SENDER_MODE} | Tip: ${config.HELIUS_SENDER_TIP_LAMPORTS} lamports
   - Default Sizing:     ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL)
-  - Watched Wallets:    ${config.WATCHED_WALLETS.length} registered (${config.WATCHED_WALLETS[0]})
+  - Watched Wallets:    ${watchedSummary}
   - Max Entry Gap:      ${config.MAX_ENTRY_GAP_BPS} bps
   - Max Slippage:       ${config.MAX_SLIPPAGE_BPS} bps
   - Signal Max Age:     ${config.MAX_SIGNAL_AGE_MS} ms

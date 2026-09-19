@@ -144,7 +144,7 @@ export class HeliusWebSocketStream {
     } catch {
       // ignore
     }
-    const allWallets = Array.from(new Set([...config.WATCHED_WALLETS, ...dbWallets]));
+    const allWallets = dbWallets.length > 0 ? dbWallets : config.WATCHED_WALLETS;
 
     for (const wallet of allWallets) {
       // logsSubscribe: Universally supported on all plans with sub-50ms push notifications

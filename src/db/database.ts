@@ -207,23 +207,28 @@ export class DBManager {
   }
 
   private seedDefaultWallets() {
-    // Ensure default config wallets exist without deleting user-added wallets
-    if (config.WATCHED_WALLETS.length > 0) {
-      const insertStmt = this.db.prepare(`
-        INSERT OR IGNORE INTO watched_wallets (wallet, label, enabled, buy_mode, fixed_buy_raw, copy_ratio, max_buy_raw, created_at)
-        VALUES (?, ?, 1, ?, ?, ?, ?, ?)
-      `);
-      for (const w of config.WATCHED_WALLETS) {
-        insertStmt.run(
-          w,
-          'Favorite Trader',
-          config.DEFAULT_SIZING_MODE,
-          (config.FIXED_BUY_SOL * 1e9).toString(),
-          config.COPY_RATIO,
-          (config.MAX_BUY_SOL * 1e9).toString(),
-          Date.now()
-        );
+    // Only seed default config wallets if the table is completely empty
+    try {
+      const countRow = this.db.prepare('SELECT COUNT(*) as count FROM watched_wallets').get() as { count: number };
+      if (countRow && countRow.count === 0 && config.WATCHED_WALLETS.length > 0) {
+        const insertStmt = this.db.prepare(`
+          INSERT OR IGNORE INTO watched_wallets (wallet, label, enabled, buy_mode, fixed_buy_raw, copy_ratio, max_buy_raw, created_at)
+          VALUES (?, ?, 1, ?, ?, ?, ?, ?)
+        `);
+        for (const w of config.WATCHED_WALLETS) {
+          insertStmt.run(
+            w,
+            'Target Trader',
+            config.DEFAULT_SIZING_MODE,
+            (config.FIXED_BUY_SOL * 1e9).toString(),
+            config.COPY_RATIO,
+            (config.MAX_BUY_SOL * 1e9).toString(),
+            Date.now()
+          );
+        }
       }
+    } catch {
+      // Table may not exist yet in early migration
     }
   }
 

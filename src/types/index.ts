@@ -56,6 +56,7 @@ export type RiskDecision =
   | 'REJECTED_DUPLICATE_POSITION'
   | 'REJECTED_COOLDOWN'
   | 'REJECTED_NEVER_REBUY'
+  | 'REJECTED_TARGET_ALREADY_HELD'
   | 'REJECTED_IN_FLIGHT';
 
 /**
@@ -73,7 +74,8 @@ export interface SwapIntent {
   inputAmountRaw: string; // u64 raw string
   outputAmountRaw: string; // u64 raw string
   estimatedPrice: number; // SOL per Token
-  targetPreBalanceToken?: string; // Pre-sell target balance if known/queried
+  targetPreBalanceToken?: string; // Pre-sell or pre-buy target balance if known/queried
+  isTargetRebuy?: boolean; // Flagged true if target trader already held a non-zero balance of this token before swap
   observedAt: bigint; // Monotonic nanoseconds (process.hrtime.bigint())
   timestampMs: number;
   rawProgramId: string;

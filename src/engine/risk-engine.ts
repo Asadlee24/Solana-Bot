@@ -105,7 +105,16 @@ export class RiskEngine {
       };
     }
 
-    // 4. Stale Signal Age Check: T_now - T_detected <= T_max
+    // 4. Target Pre-Existing Token Guard: Reject if target trader already held this token prior to this transaction
+    if (intent.isTargetRebuy) {
+      return {
+        decision: 'REJECTED_TARGET_ALREADY_HELD',
+        approved: false,
+        reason: `Target trader already held pre-existing tokens in ${intent.tokenMint.slice(0, 8)}... (${intent.targetPreBalanceToken || '>0'} tokens). Only fresh initial entries are copied!`,
+      };
+    }
+
+    // 5. Stale Signal Age Check: T_now - T_detected <= T_max
     const ageMs = Date.now() - intent.timestampMs;
     if (ageMs > config.MAX_SIGNAL_AGE_MS) {
       return {
