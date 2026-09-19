@@ -475,6 +475,51 @@ export class DBManager {
     }
   }
 
+  public hasEverFailedEntryGap(tokenMint: string): boolean {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT 1 FROM mirror_orders
+        WHERE token_mint = ? AND status = 'FAILED' AND (error_message LIKE '%Entry price gap%' OR error_message LIKE '%REJECTED_ENTRY_GAP%')
+        LIMIT 1
+      `);
+      return Boolean(stmt.get(tokenMint));
+    } catch {
+      return false;
+    }
+  }
+
+  public getEntryGapFailedTokens(): string[] {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT DISTINCT token_mint as tokenMint FROM mirror_orders
+        WHERE status = 'FAILED' AND (error_message LIKE '%Entry price gap%' OR error_message LIKE '%REJECTED_ENTRY_GAP%')
+      `);
+      const rows = stmt.all() as any[];
+      return rows.map((r) => r.tokenMint).filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  public getAllFirstSeenTargetPrices(): Map<string, number> {
+    const map = new Map<string, number>();
+    try {
+      const stmt = this.db.prepare(`
+        SELECT token_mint as tokenMint, estimated_price as estimatedPrice
+        FROM target_events
+        WHERE side = 'BUY' AND estimated_price > 0
+        ORDER BY detected_at ASC
+      `);
+      const rows = stmt.all() as any[];
+      for (const r of rows) {
+        if (r.tokenMint && r.estimatedPrice > 0 && !map.has(r.tokenMint)) {
+          map.set(r.tokenMint, r.estimatedPrice);
+        }
+      }
+    } catch {}
+    return map;
+  }
+
   public getAllEverBoughtTokens(): string[] {
     const mints = new Set<string>();
     try {

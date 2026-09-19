@@ -16,11 +16,13 @@ export class RiskEngine {
   private inFlightBuys: Set<string> = new Set();
   private lastBuyTimestampByMint: Map<string, number> = new Map();
   private lifetimeBoughtMints: Set<string> = new Set();
+  private firstSeenTargetPriceByMint: Map<string, number> = new Map();
 
   constructor() {
     this.initDefaultBlacklist();
     this.initRecentCooldownsFromDb();
     this.initLifetimeBoughtMints();
+    this.initFirstSeenTargetPrices();
   }
 
   private initLifetimeBoughtMints() {
@@ -28,6 +30,21 @@ export class RiskEngine {
       const pastMints = db.getAllEverBoughtTokens();
       for (const m of pastMints) {
         this.lifetimeBoughtMints.add(m);
+      }
+      const gapFailedMints = db.getEntryGapFailedTokens();
+      for (const m of gapFailedMints) {
+        this.lifetimeBoughtMints.add(m);
+      }
+    } catch {
+      // db may not be initialized yet in isolated tests
+    }
+  }
+
+  private initFirstSeenTargetPrices() {
+    try {
+      const prices = db.getAllFirstSeenTargetPrices();
+      for (const [mint, price] of prices.entries()) {
+        this.firstSeenTargetPriceByMint.set(mint, price);
       }
     } catch {
       // db may not be initialized yet in isolated tests
@@ -163,6 +180,24 @@ export class RiskEngine {
       };
     }
 
+    // 9. Anti-FOMO Entry Ceiling Guard: Compare target entry price against first-seen price
+    if (intent.estimatedPrice > 0) {
+      const firstSeenPrice = this.firstSeenTargetPriceByMint.get(intent.tokenMint);
+      if (firstSeenPrice !== undefined && firstSeenPrice > 0) {
+        const gapBps = ((intent.estimatedPrice - firstSeenPrice) / firstSeenPrice) * 10000;
+        if (gapBps > config.MAX_ENTRY_GAP_BPS) {
+          this.addLifetimeLockedToken(intent.tokenMint);
+          return {
+            decision: 'REJECTED_ENTRY_GAP',
+            approved: false,
+            reason: `Target entry price (${intent.estimatedPrice.toExponential(4)} SOL) is +${gapBps.toFixed(1)} bps higher than first seen entry (${firstSeenPrice.toExponential(4)} SOL), exceeding tolerance (${config.MAX_ENTRY_GAP_BPS} bps). Anti-FOMO Guard ACTIVE.`,
+          };
+        }
+      } else {
+        this.firstSeenTargetPriceByMint.set(intent.tokenMint, intent.estimatedPrice);
+      }
+    }
+
     // 5. SOL Fee/Tip Reserve Floor Check
     const minReserveLamports = solToLamportsBigInt(config.MIN_SOL_RESERVE_SOL);
     const fixedBuyLamports = solToLamportsBigInt(config.FIXED_BUY_SOL);
@@ -215,15 +250,23 @@ export class RiskEngine {
   /**
    * Post-quote check: Verify entry gap and slippage before final submission
    */
-  public evaluateQuote(targetPrice: number, quotePrice: number): RiskCheckResult {
+  public evaluateQuote(targetPrice: number, quotePrice: number, tokenMint?: string): RiskCheckResult {
     if (targetPrice > 0 && quotePrice > 0) {
-      // Entry gap bps: 10,000 * (P_quote - P_target) / P_target
-      const entryGapBps = ((quotePrice - targetPrice) / targetPrice) * 10000;
+      let baselinePrice = targetPrice;
+      if (tokenMint && this.firstSeenTargetPriceByMint.has(tokenMint)) {
+        const firstSeen = this.firstSeenTargetPriceByMint.get(tokenMint)!;
+        if (firstSeen > 0 && firstSeen < baselinePrice) {
+          baselinePrice = firstSeen;
+        }
+      }
+
+      // Entry gap bps: 10,000 * (P_quote - P_baseline) / P_baseline
+      const entryGapBps = ((quotePrice - baselinePrice) / baselinePrice) * 10000;
       if (entryGapBps > config.MAX_ENTRY_GAP_BPS) {
         return {
           decision: 'REJECTED_ENTRY_GAP',
           approved: false,
-          reason: `Entry price gap (+${entryGapBps.toFixed(1)} bps) exceeds tolerance (${config.MAX_ENTRY_GAP_BPS} bps)`,
+          reason: `Entry price gap (+${entryGapBps.toFixed(1)} bps vs baseline ${baselinePrice.toExponential(4)} SOL) exceeds tolerance (${config.MAX_ENTRY_GAP_BPS} bps)`,
         };
       }
     }
@@ -310,11 +353,27 @@ export class RiskEngine {
     if (this.lifetimeBoughtMints.has(tokenMint)) {
       return true;
     }
-    if (db.hasEverBoughtToken(tokenMint)) {
+    if (db.hasEverBoughtToken(tokenMint) || db.hasEverFailedEntryGap(tokenMint)) {
       this.lifetimeBoughtMints.add(tokenMint);
       return true;
     }
     return false;
+  }
+
+  public getFirstSeenPrice(tokenMint: string): number | undefined {
+    return this.firstSeenTargetPriceByMint.get(tokenMint);
+  }
+
+  public setFirstSeenPrice(tokenMint: string, price: number): void {
+    this.firstSeenTargetPriceByMint.set(tokenMint, price);
+  }
+
+  public clearFirstSeenPrice(tokenMint?: string): void {
+    if (tokenMint) {
+      this.firstSeenTargetPriceByMint.delete(tokenMint);
+    } else {
+      this.firstSeenTargetPriceByMint.clear();
+    }
   }
 
   public getLifetimeLockedTokens(): string[] {

@@ -367,12 +367,13 @@ export class LiveExecutionEngine {
 
       // 4b. Post-Quote Entry Gap Check: Verify price has not deteriorated vs target trade
       if (isBuy && targetIntent.estimatedPrice > 0 && effectivePrice > 0) {
-        const quoteRisk = riskEngine.evaluateQuote(targetIntent.estimatedPrice, effectivePrice);
+        const quoteRisk = riskEngine.evaluateQuote(targetIntent.estimatedPrice, effectivePrice, mirrorIntent.tokenMint);
         if (!quoteRisk.approved) {
           order.status = 'FAILED';
           order.errorMessage = quoteRisk.reason;
           db.saveMirrorOrder(order);
           riskEngine.clearInFlightBuy(mirrorIntent.tokenMint);
+          riskEngine.addLifetimeLockedToken(mirrorIntent.tokenMint);
           console.warn(`[ENTRY GAP BLOCKED] ${quoteRisk.reason}`);
           throw new Error(quoteRisk.reason || 'REJECTED_ENTRY_GAP');
         }

@@ -204,4 +204,88 @@ describe('Risk Engine & Circuit Breakers', () => {
     expect(secondCheck.decision).toBe('REJECTED_NEVER_REBUY');
     expect(secondCheck.reason).toContain('Never-Rebuy');
   });
+
+  it('Anti-FOMO Entry Ceiling Guard: rejects buy if target entry price is > first-seen price by more than tolerance', () => {
+    const fomoToken = 'FomoToken1111111111111111111111111111111';
+    const bal = solToLamportsBigInt(1.0);
+
+    // 1. Target first enters at 0.00001 SOL
+    const initialIntent: SwapIntent = {
+      ...validIntent,
+      tokenMint: fomoToken,
+      outputMint: fomoToken,
+      estimatedPrice: 0.00001,
+      timestampMs: Date.now(),
+    };
+
+    const firstRes = engine.evaluateIntent(initialIntent, bal, 0n);
+    expect(firstRes.approved).toBe(true);
+    expect(engine.getFirstSeenPrice(fomoToken)).toBe(0.00001);
+
+    // 2. Target buys again at 0.00005 SOL (5x pump / +40000 bps > 200 bps tolerance)
+    const fomoIntent: SwapIntent = {
+      ...validIntent,
+      tokenMint: fomoToken,
+      outputMint: fomoToken,
+      estimatedPrice: 0.00005,
+      timestampMs: Date.now(),
+    };
+
+    const fomoRes = engine.evaluateIntent(fomoIntent, bal, 0n);
+    expect(fomoRes.approved).toBe(false);
+    expect(fomoRes.decision).toBe('REJECTED_ENTRY_GAP');
+    expect(fomoRes.reason).toContain('Anti-FOMO Guard ACTIVE');
+    // Token should also be locked lifetime
+    expect(engine.isTokenPermanentlyLocked(fomoToken)).toBe(true);
+  });
+
+  it('permanently locks token if previous mirror order failed due to entry gap', () => {
+    const gapFailedToken = 'GapFailedMint1111111111111111111111111111';
+    const bal = solToLamportsBigInt(1.0);
+
+    // Save a failed mirror order with entry gap error in DB
+    db.saveMirrorOrder({
+      orderId: 'ord_gap_fail_test',
+      intentId: 'intent_gap_fail_test',
+      targetSignature: 'sig_target_fail_1',
+      mode: 'LIVE',
+      tokenMint: gapFailedToken,
+      side: 'BUY',
+      inAmountRaw: '10000000',
+      outAmountRaw: '500000',
+      minOutAmountRaw: '490000',
+      effectivePrice: 0.00002,
+      quotedAt: process.hrtime.bigint(),
+      priorityFeeLamports: 50000n,
+      tipLamports: 100000n,
+      routeFeeLamports: 0n,
+      status: 'FAILED',
+      errorMessage: 'Entry price gap (+372.6 bps) exceeds tolerance (200 bps)',
+    });
+
+    // Token must be permanently locked
+    expect(engine.isTokenPermanentlyLocked(gapFailedToken)).toBe(true);
+
+    // Any new buy attempt for this token must be rejected by Lifetime Never-Rebuy
+    const buyAttempt: SwapIntent = {
+      ...validIntent,
+      tokenMint: gapFailedToken,
+      outputMint: gapFailedToken,
+      timestampMs: Date.now(),
+    };
+    const res = engine.evaluateIntent(buyAttempt, bal, 0n);
+    expect(res.approved).toBe(false);
+    expect(res.decision).toBe('REJECTED_NEVER_REBUY');
+  });
+
+  it('evaluateQuote compares against first-seen baseline price when tokenMint is provided', () => {
+    const baselineToken = 'BaselineToken111111111111111111111111111';
+    engine.setFirstSeenPrice(baselineToken, 0.00001);
+
+    // Target re-entry at 0.00005, quote at 0.000051 (+2% vs target, but +410% vs first-seen baseline!)
+    const res = engine.evaluateQuote(0.00005, 0.000051, baselineToken);
+    expect(res.approved).toBe(false);
+    expect(res.decision).toBe('REJECTED_ENTRY_GAP');
+    expect(res.reason).toContain('vs baseline');
+  });
 });
