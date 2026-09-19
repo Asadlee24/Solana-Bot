@@ -79,39 +79,61 @@ export class JupiterSwapV2Adapter {
 
     const url = `${this.apiBase}/order?${params.toString()}`;
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: this.getHeaders(),
-    });
+    const maxAttempts = 3;
+    let lastError: any;
 
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Jupiter Swap API V2 order failed (${res.status}): ${errText}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: this.getHeaders(),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          if (res.status === 400 && errText.includes('Failed to get quotes') && attempt < maxAttempts) {
+            console.warn(`[Jupiter Swap API V2] Attempt ${attempt}/${maxAttempts}: "Failed to get quotes". Waiting for route indexing (${attempt * 1500}ms)...`);
+            await new Promise((r) => setTimeout(r, attempt * 1500));
+            continue;
+          }
+          throw new Error(`Jupiter Swap API V2 order failed (${res.status}): ${errText}`);
+        }
+
+        const data = (await res.json()) as any;
+        if (data?.errorMessage || data?.error) {
+          throw new Error(`Jupiter Swap API error: ${data.errorMessage || data.error}`);
+        }
+        if (!data || (!data.transaction && !data.swapTransaction)) {
+          const codeMsg = data?.errorCode ? ` (code: ${data.errorCode})` : '';
+          throw new Error(`Jupiter Swap API: no executable transaction returned${codeMsg}`);
+        }
+
+        return {
+          requestId: data.requestId || '',
+          transaction: data.transaction || data.swapTransaction,
+          inputMint: data.inputMint || inputMint,
+          outputMint: data.outputMint || outputMint,
+          inAmount: data.inAmount || amountRaw,
+          outAmount: data.outAmount || '0',
+          totalInputAmount: data.totalInputAmount,
+          totalOutputAmount: data.totalOutputAmount,
+          otherAmountThreshold: data.otherAmountThreshold,
+          slippageBps: data.slippageBps || slippageBps,
+          priceImpactPct: data.priceImpactPct,
+          lastValidBlockHeight: data.lastValidBlockHeight,
+        };
+      } catch (err: any) {
+        lastError = err;
+        if (attempt < maxAttempts && err.message.includes('Failed to get quotes')) {
+          console.warn(`[Jupiter Swap API V2] Attempt ${attempt}/${maxAttempts} failed: "${err.message}". Retrying...`);
+          await new Promise((r) => setTimeout(r, attempt * 1500));
+          continue;
+        }
+        throw err;
+      }
     }
 
-    const data = (await res.json()) as any;
-    if (data?.errorMessage || data?.error) {
-      throw new Error(`Jupiter Swap API error: ${data.errorMessage || data.error}`);
-    }
-    if (!data || (!data.transaction && !data.swapTransaction)) {
-      const codeMsg = data?.errorCode ? ` (code: ${data.errorCode})` : '';
-      throw new Error(`Jupiter Swap API: no executable transaction returned${codeMsg}`);
-    }
-
-    return {
-      requestId: data.requestId || '',
-      transaction: data.transaction || data.swapTransaction,
-      inputMint: data.inputMint || inputMint,
-      outputMint: data.outputMint || outputMint,
-      inAmount: data.inAmount || amountRaw,
-      outAmount: data.outAmount || '0',
-      totalInputAmount: data.totalInputAmount,
-      totalOutputAmount: data.totalOutputAmount,
-      otherAmountThreshold: data.otherAmountThreshold,
-      slippageBps: data.slippageBps || slippageBps,
-      priceImpactPct: data.priceImpactPct,
-      lastValidBlockHeight: data.lastValidBlockHeight,
-    };
+    throw lastError || new Error('Jupiter Swap API V2 order failed after retries');
   }
 
   /**

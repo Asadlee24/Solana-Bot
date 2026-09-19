@@ -165,6 +165,7 @@ export class SignalManager extends EventEmitter {
       riskEngine.clearInFlightBuy(swapIntent.tokenMint);
       riskEngine.recordError(err.message || 'Execution error');
       console.error('[Execution Error]:', err);
+      telegramNotifier.notifyTargetDetected(swapIntent, 'EXECUTION_FAILED', err.message || 'Execution error');
       return { intent: swapIntent, order: null };
     }
 

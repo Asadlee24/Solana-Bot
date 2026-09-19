@@ -1766,7 +1766,7 @@ ${lockedSummary}
    */
   public async notifyTargetDetected(
     intent: SwapIntent,
-    actionTaken: 'COPIED' | 'DISARMED_SKIP' | 'RISK_REJECTED',
+    actionTaken: 'COPIED' | 'DISARMED_SKIP' | 'RISK_REJECTED' | 'EXECUTION_FAILED',
     reason?: string
   ): Promise<void> {
     if (!this.enabled || !this.chatId) return;
@@ -1796,6 +1796,8 @@ ${lockedSummary}
           [{ text: 'WALLET BALANCE', callback_data: 'menu_balance' }],
         ],
       };
+    } else if (actionTaken === 'EXECUTION_FAILED') {
+      statusText = `⚠️ <b>Execution Failed on Solana:</b> ${reason || 'Routing error'}\n<i>(Follower order could not be executed)</i>`;
     } else if (reason && reason.includes('already held pre-existing tokens')) {
       statusText = `🚫 <b>Target Re-Buy Rejected:</b> Trader already held this coin before this swap. Only fresh initial entries are copied!\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
     } else {

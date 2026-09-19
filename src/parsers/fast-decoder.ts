@@ -176,6 +176,12 @@ export class FastTransactionDecoder {
     // 5. Ultimate Fallback: Balance Delta Ground Truth Reconciliation
     // (Handles all custom bot contracts, Trojan, Photon, Bloom, GMGN, and new Pump.fun buy_exact_quote_in)
     if (tx.meta && !tx.meta.err) {
+      const allAccountKeys = [
+        ...tx.accountKeys,
+        ...((tx.meta as any)?.loadedAddresses?.writable?.map((k: any) => typeof k === 'string' ? k : k?.toBase58 ? k.toBase58() : String(k)) || []),
+        ...((tx.meta as any)?.loadedAddresses?.readonly?.map((k: any) => typeof k === 'string' ? k : k?.toBase58 ? k.toBase58() : String(k)) || []),
+      ];
+
       const reconciled = BalanceDeltaReconciler.reconcile(
         tx.signature,
         tx.slot,
@@ -187,7 +193,7 @@ export class FastTransactionDecoder {
           postBalances: tx.meta.postBalances,
           preTokenBalances: tx.meta.preTokenBalances,
           postTokenBalances: tx.meta.postTokenBalances,
-          accountKeys: tx.accountKeys,
+          accountKeys: allAccountKeys,
         }
       );
 
@@ -198,10 +204,10 @@ export class FastTransactionDecoder {
         const absSol = reconciled.netSolDeltaLamports < 0n ? -reconciled.netSolDeltaLamports : reconciled.netSolDeltaLamports;
         const absTok = reconciled.netTokenDeltaRaw < 0n ? -reconciled.netTokenDeltaRaw : reconciled.netTokenDeltaRaw;
 
-        const hasPump = tx.accountKeys.some((k) => k === '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-        const hasRayAmm = tx.accountKeys.some((k) => k === '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
-        const hasRayCpmm = tx.accountKeys.some((k) => k === 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
-        const hasJup = tx.accountKeys.some((k) => k.startsWith('JUP') || k === 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4');
+        const hasPump = allAccountKeys.some((k) => k === '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P') || reconciled.tokenMint.endsWith('pump');
+        const hasRayAmm = allAccountKeys.some((k) => k === '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8');
+        const hasRayCpmm = allAccountKeys.some((k) => k === 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C');
+        const hasJup = allAccountKeys.some((k) => k.startsWith('JUP') || k === 'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4');
         let detectedVenue: DexVenue = 'JUPITER';
         if (hasPump) {
           detectedVenue = 'PUMPFUN';
@@ -248,6 +254,12 @@ export class FastTransactionDecoder {
     tx: ParsedTransactionEnvelope,
     targetWallet: string
   ): SwapIntent {
+    const allAccountKeys = [
+      ...tx.accountKeys,
+      ...((tx.meta as any)?.loadedAddresses?.writable?.map((k: any) => typeof k === 'string' ? k : k?.toBase58 ? k.toBase58() : String(k)) || []),
+      ...((tx.meta as any)?.loadedAddresses?.readonly?.map((k: any) => typeof k === 'string' ? k : k?.toBase58 ? k.toBase58() : String(k)) || []),
+    ];
+
     if (intent.side === 'BUY' && tx.meta && tx.meta.preTokenBalances) {
       try {
         let isRebuy = false;
@@ -255,7 +267,7 @@ export class FastTransactionDecoder {
         for (const b of tx.meta.preTokenBalances) {
           const isTargetOwner =
             b.owner === targetWallet ||
-            (tx.accountKeys && tx.accountKeys[b.accountIndex] === targetWallet);
+            (allAccountKeys && allAccountKeys[b.accountIndex] === targetWallet);
           if (isTargetOwner && b.mint === intent.tokenMint) {
             const amt = BigInt(b.uiTokenAmount?.amount || '0');
             if (amt > 0n) {
@@ -285,7 +297,7 @@ export class FastTransactionDecoder {
             postBalances: tx.meta.postBalances,
             preTokenBalances: tx.meta.preTokenBalances,
             postTokenBalances: tx.meta.postTokenBalances,
-            accountKeys: tx.accountKeys,
+            accountKeys: allAccountKeys,
           }
         );
         if (
