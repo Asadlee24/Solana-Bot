@@ -86,17 +86,37 @@ export class SolanaRpcPoller {
     }
   }
 
+  private async fetchParsedTxWithRetry(signature: string, maxRetries = 4, initialDelayMs = 250): Promise<any> {
+    let delay = initialDelayMs;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const txRes = await this.connection.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 1,
+          commitment: 'confirmed',
+        });
+        if (txRes && txRes.transaction) {
+          return txRes;
+        }
+      } catch (err: any) {
+        if (attempt === maxRetries) throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, 1200);
+    }
+    return null;
+  }
+
   private async processSignature(walletPubkeyStr: string, signature: string): Promise<void> {
     try {
       console.info(`[RPC Poller ⚡] NEW LIVE ON-CHAIN TRANSACTION DETECTED for ${walletPubkeyStr}: ${signature}`);
 
       const observedAt = process.hrtime.bigint();
-      const txRes = await this.connection.getParsedTransaction(signature, {
-        maxSupportedTransactionVersion: 1,
-        commitment: 'confirmed',
-      });
+      const txRes = await this.fetchParsedTxWithRetry(signature);
 
-      if (!txRes || !txRes.transaction) return;
+      if (!txRes || !txRes.transaction) {
+        console.warn(`[RPC Poller] Could not fetch parsed transaction after retries: ${signature}`);
+        return;
+      }
 
       // Skip failed on-chain transactions (e.g. slippage error 6042)
       if (txRes.meta && txRes.meta.err) {

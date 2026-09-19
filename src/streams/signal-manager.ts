@@ -38,6 +38,21 @@ export class SignalManager extends EventEmitter {
         this.watchedWallets.set(w.wallet, w);
       }
     }
+    // Fallback: Also monitor any wallets configured in config.WATCHED_WALLETS
+    for (const walletStr of config.WATCHED_WALLETS) {
+      if (!this.watchedWallets.has(walletStr)) {
+        this.watchedWallets.set(walletStr, {
+          wallet: walletStr,
+          label: 'Target Trader',
+          enabled: true,
+          buyMode: config.DEFAULT_SIZING_MODE,
+          fixedBuyLamports: (config.FIXED_BUY_SOL * 1e9).toString(),
+          copyRatio: config.COPY_RATIO,
+          maxBuyLamports: (config.MAX_BUY_SOL * 1e9).toString(),
+          createdAt: Date.now(),
+        });
+      }
+    }
     this.emit('walletsUpdated', Array.from(this.watchedWallets.values()));
   }
 
@@ -73,8 +88,11 @@ export class SignalManager extends EventEmitter {
     // 3. Fast Transaction Intent Decoding
     const swapIntent = FastTransactionDecoder.decodeTransaction(tx, matchedWallet.wallet);
     if (!swapIntent) {
+      console.info(`[DECODER SKIP] Transaction ${tx.signature.slice(0, 8)}... had no swap intent for target ${matchedWallet.wallet.slice(0, 8)}...`);
       return { intent: null, order: null };
     }
+
+    console.info(`[SWAP DETECTED] ${swapIntent.side} ${swapIntent.tokenMint.slice(0, 8)}... by ${matchedWallet.wallet.slice(0, 8)}... (venue: ${swapIntent.venue}, estPrice: ${swapIntent.estimatedPrice.toExponential(4)} SOL)`);
 
     // 4. Pre-trade Risk Check & Sizing Decision (ULTRA-FAST IN-MEMORY HOT PATH)
     const currentSolBalance =

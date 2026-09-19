@@ -171,12 +171,29 @@ export class HeliusWebSocketStream {
     this.subscribe();
   }
 
+  private async fetchParsedTxWithRetry(signature: string, maxRetries = 4, initialDelayMs = 250): Promise<any> {
+    let delay = initialDelayMs;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const txRes = await this.connection.getParsedTransaction(signature, {
+          maxSupportedTransactionVersion: 1,
+          commitment: 'confirmed',
+        });
+        if (txRes && txRes.transaction) {
+          return txRes;
+        }
+      } catch (err: any) {
+        if (attempt === maxRetries) throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, 1200);
+    }
+    return null;
+  }
+
   private async fetchAndDispatch(signature: string, observedAt: bigint): Promise<void> {
     try {
-      const txRes = await this.connection.getParsedTransaction(signature, {
-        maxSupportedTransactionVersion: 1,
-        commitment: 'confirmed',
-      });
+      const txRes = await this.fetchParsedTxWithRetry(signature);
       if (!txRes || !txRes.transaction) return;
       if (txRes.meta && txRes.meta.err) return;
 
