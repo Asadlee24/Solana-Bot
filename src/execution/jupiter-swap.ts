@@ -69,21 +69,24 @@ export class JupiterSwapV2Adapter {
     takerAddress: string,
     slippageBps: number = config.MAX_SLIPPAGE_BPS
   ): Promise<JupiterV2OrderResponse> {
-    const params = new URLSearchParams({
-      inputMint,
-      outputMint,
-      amount: amountRaw,
-      taker: takerAddress,
-      slippageBps: slippageBps.toString(),
-    });
-
-    const url = `${this.apiBase}/order?${params.toString()}`;
-
     const maxAttempts = 3;
     let lastError: any;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        const useDirect = attempt === 1; // Attempt 1: ultra-fast direct route (<1000ms)
+        const params = new URLSearchParams({
+          inputMint,
+          outputMint,
+          amount: amountRaw,
+          taker: takerAddress,
+          slippageBps: slippageBps.toString(),
+        });
+        if (useDirect) {
+          params.set('onlyDirectRoutes', 'true');
+        }
+
+        const url = `${this.apiBase}/order?${params.toString()}`;
         const res = await fetch(url, {
           method: 'GET',
           headers: this.getHeaders(),
@@ -91,9 +94,9 @@ export class JupiterSwapV2Adapter {
 
         if (!res.ok) {
           const errText = await res.text();
-          if (res.status === 400 && errText.includes('Failed to get quotes') && attempt < maxAttempts) {
-            console.warn(`[Jupiter Swap API V2] Attempt ${attempt}/${maxAttempts}: "Failed to get quotes". Waiting for route indexing (${attempt * 1500}ms)...`);
-            await new Promise((r) => setTimeout(r, attempt * 1500));
+          if (res.status === 400 && attempt < maxAttempts) {
+            console.warn(`[Jupiter Swap API V2] Attempt ${attempt}/${maxAttempts} (${useDirect ? 'direct' : 'multi-hop'}): "${errText.slice(0, 80)}". Retrying...`);
+            await new Promise((r) => setTimeout(r, attempt * 1000));
             continue;
           }
           throw new Error(`Jupiter Swap API V2 order failed (${res.status}): ${errText}`);
