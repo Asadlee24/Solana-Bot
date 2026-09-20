@@ -282,8 +282,8 @@ export class LiveExecutionEngine {
       let isJupiterManaged = false;
       let jupOrderResponse: JupiterV2OrderResponse | undefined;
 
-      // 4. Routing Decision: Force Jupiter for first smoke test or resolve on-chain curve state
-      const forceJupiter = config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER;
+      // 4. Routing Decision: Force Jupiter if configured, or resolve on-chain curve state
+      const forceJupiter = config.SMOKE_TEST_FORCE_JUPITER || (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER);
       let isDirectPumpBondingCurve = false;
       let precalculatedCurveState: OnChainBondingCurveState | undefined;
 
@@ -321,6 +321,21 @@ export class LiveExecutionEngine {
             if (pumpResult.routedViaJupiter && pumpResult.jupiterOrder) {
               isJupiterManaged = true;
               jupOrderResponse = pumpResult.jupiterOrder;
+            } else {
+              // Preflight simulation check on direct pump tx to gracefully handle on-chain contract upgrades
+              try {
+                const simCheck = await this.connection.simulateTransaction(signedTx, {
+                  sigVerify: false,
+                  replaceRecentBlockhash: true,
+                });
+                if (simCheck?.value?.err) {
+                  console.warn(`[PumpFun Preflight Warning] Direct pump simulation failed (${JSON.stringify(simCheck.value.err)}). Falling back to Jupiter Swap API V2.`);
+                  useJupiter = true;
+                }
+              } catch (simErr: any) {
+                console.warn(`[PumpFun Preflight Warning] Direct pump simulation error (${simErr.message}). Falling back to Jupiter.`);
+                useJupiter = true;
+              }
             }
           } else {
             const pumpResult = await pumpFunSwapAdapter.buildAndSignSell(
@@ -338,6 +353,20 @@ export class LiveExecutionEngine {
             if (pumpResult.routedViaJupiter && pumpResult.jupiterOrder) {
               isJupiterManaged = true;
               jupOrderResponse = pumpResult.jupiterOrder;
+            } else {
+              try {
+                const simCheck = await this.connection.simulateTransaction(signedTx, {
+                  sigVerify: false,
+                  replaceRecentBlockhash: true,
+                });
+                if (simCheck?.value?.err) {
+                  console.warn(`[PumpFun Preflight Warning] Direct pump sell simulation failed (${JSON.stringify(simCheck.value.err)}). Falling back to Jupiter Swap API V2.`);
+                  useJupiter = true;
+                }
+              } catch (simErr: any) {
+                console.warn(`[PumpFun Preflight Warning] Direct pump sell simulation error (${simErr.message}). Falling back to Jupiter.`);
+                useJupiter = true;
+              }
             }
           }
         } catch (pumpErr: any) {

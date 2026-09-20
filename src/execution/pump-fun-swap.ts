@@ -254,8 +254,9 @@ export class PumpFunSwapAdapter {
   ): Promise<PumpFunBuildResult> {
     const curveState = existingCurveState || await this.getBondingCurveState(mintAddress);
 
-    // If smoke test forces Jupiter, or token graduated, or paired with USDC, route via Jupiter Swap API V2
+    // If Jupiter is forced (or during smoke test), or token graduated, or paired with USDC, route via Jupiter Swap API V2
     if (
+      config.SMOKE_TEST_FORCE_JUPITER ||
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
       curveState.complete ||
       !curveState.isInitialized ||
@@ -369,6 +370,7 @@ export class PumpFunSwapAdapter {
     const curveState = existingCurveState || await this.getBondingCurveState(mintAddress);
 
     if (
+      config.SMOKE_TEST_FORCE_JUPITER ||
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
       curveState.complete ||
       !curveState.isInitialized ||
