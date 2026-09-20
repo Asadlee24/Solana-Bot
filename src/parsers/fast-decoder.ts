@@ -229,6 +229,7 @@ export class FastTransactionDecoder {
           inputMint,
           outputMint,
           tokenMint: reconciled.tokenMint,
+          tokenProgramId: reconciled.tokenProgramId,
           inputAmountRaw: isBuy ? absSol.toString() : absTok.toString(),
           outputAmountRaw: isBuy ? absTok.toString() : absSol.toString(),
           estimatedPrice: reconciled.effectiveTargetPrice,

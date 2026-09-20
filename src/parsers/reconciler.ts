@@ -134,6 +134,14 @@ export class BalanceDeltaReconciler {
       targetSoldFraction = 1.0;
     }
 
+    let primaryProgramId: string | undefined;
+    for (const b of [...postTokens, ...preTokens]) {
+      if (b.mint === primaryMint && (b as any).programId) {
+        primaryProgramId = (b as any).programId;
+        break;
+      }
+    }
+
     return {
       signature,
       slot,
@@ -141,6 +149,7 @@ export class BalanceDeltaReconciler {
       venue,
       side,
       tokenMint: primaryMint,
+      tokenProgramId: primaryProgramId,
       netSolDeltaLamports: netSolDelta,
       netTokenDeltaRaw: netTokenDelta,
       effectiveTargetPrice: effectivePrice,

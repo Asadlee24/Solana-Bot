@@ -82,6 +82,7 @@ export interface SwapIntent {
   confidence: number; // 0.0 to 1.0
   isTransferNoise?: boolean;
   sellFraction?: number;
+  tokenProgramId?: string;
 }
 
 /**
@@ -94,6 +95,7 @@ export interface ReconciledTrade {
   venue: DexVenue;
   side: TradeSide;
   tokenMint: string;
+  tokenProgramId?: string;
   netSolDeltaLamports: bigint; // Negative for buy (spent), positive for sell
   netTokenDeltaRaw: bigint; // Positive for buy (received), negative for sell
   effectiveTargetPrice: number; // Realized SOL per token
@@ -113,6 +115,7 @@ export interface MirrorIntent {
   targetWallet: string;
   side: TradeSide;
   tokenMint: string;
+  tokenProgramId?: string;
   inputMint: string;
   outputMint: string;
   requestedInAmountRaw: string;

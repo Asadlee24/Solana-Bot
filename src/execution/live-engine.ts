@@ -5,7 +5,7 @@ import {
   PublicKey,
   VersionedTransaction,
 } from '@solana/web3.js';
-import { TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import bs58Module from 'bs58';
 import { randomUUID } from 'crypto';
 import {
@@ -300,13 +300,19 @@ export class LiveExecutionEngine {
 
       if (isDirectPumpBondingCurve) {
         try {
+          const tokenProgramId =
+            mirrorIntent.tokenProgramId === TOKEN_2022_PROGRAM_ID.toBase58()
+              ? TOKEN_2022_PROGRAM_ID
+              : TOKEN_PROGRAM_ID;
+
           if (isBuy) {
             const pumpResult = await pumpFunSwapAdapter.buildAndSignBuy(
               keypair,
               mirrorIntent.tokenMint,
               BigInt(rawInAmount),
               config.MAX_SLIPPAGE_BPS,
-              precalculatedCurveState
+              precalculatedCurveState,
+              tokenProgramId
             );
             signedTx = pumpResult.transaction;
             latestBlockhash = pumpResult.latestBlockhash;
@@ -322,7 +328,8 @@ export class LiveExecutionEngine {
               mirrorIntent.tokenMint,
               BigInt(rawInAmount),
               config.MAX_SLIPPAGE_BPS,
-              precalculatedCurveState
+              precalculatedCurveState,
+              tokenProgramId
             );
             signedTx = pumpResult.transaction;
             latestBlockhash = pumpResult.latestBlockhash;
@@ -452,7 +459,15 @@ export class LiveExecutionEngine {
         // Direct route via real Helius Sender (SWQOS or MAX) / Standard RPC
         const resolved = transactionSubmitter.resolveLandingProvider();
         landingProvider = resolved.provider;
-        await transactionSubmitter.submitAndConfirm(signedTx, latestBlockhash, realTxSignature);
+        const subResult = await transactionSubmitter.submitAndConfirm(signedTx, latestBlockhash, realTxSignature);
+        if (subResult.status === 'FAILED') {
+          order.status = 'FAILED';
+          order.errorMessage = subResult.error || 'Transaction simulation/submission failed';
+          order.landingProvider = landingProvider;
+          db.saveMirrorOrder(order);
+          riskEngine.clearInFlightBuy(mirrorIntent.tokenMint);
+          throw new Error(order.errorMessage);
+        }
       }
 
       order.landingProvider = landingProvider;

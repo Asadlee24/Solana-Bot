@@ -249,10 +249,10 @@ export class PumpFunSwapAdapter {
     mintAddress: string,
     solAmountLamports: bigint,
     slippageBps: number = config.MAX_SLIPPAGE_BPS,
-    existingCurveState?: OnChainBondingCurveState
+    existingCurveState?: OnChainBondingCurveState,
+    tokenProgramId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<PumpFunBuildResult> {
     const curveState = existingCurveState || await this.getBondingCurveState(mintAddress);
-    const tokenProgramId = TOKEN_PROGRAM_ID;
 
     // If smoke test forces Jupiter, or token graduated, or paired with USDC, route via Jupiter Swap API V2
     if (
@@ -363,10 +363,10 @@ export class PumpFunSwapAdapter {
     mintAddress: string,
     tokenAmountRaw: bigint,
     slippageBps: number = config.MAX_SLIPPAGE_BPS,
-    existingCurveState?: OnChainBondingCurveState
+    existingCurveState?: OnChainBondingCurveState,
+    tokenProgramId: PublicKey = TOKEN_PROGRAM_ID
   ): Promise<PumpFunBuildResult> {
     const curveState = existingCurveState || await this.getBondingCurveState(mintAddress);
-    const tokenProgramId = TOKEN_PROGRAM_ID;
 
     if (
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||

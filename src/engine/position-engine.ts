@@ -78,6 +78,7 @@ export class PositionEngine {
       targetWallet: targetIntent.targetWallet,
       side: targetIntent.side,
       tokenMint: targetIntent.tokenMint,
+      tokenProgramId: targetIntent.tokenProgramId,
       inputMint: targetIntent.inputMint,
       outputMint: targetIntent.outputMint,
       requestedInAmountRaw,
