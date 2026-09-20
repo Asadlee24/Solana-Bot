@@ -90,13 +90,14 @@ export class SolanaRpcPoller {
     }
   }
 
-  private async fetchParsedTxWithRetry(signature: string, maxRetries = 4, initialDelayMs = 250): Promise<any> {
+  private async fetchParsedTxWithRetry(signature: string, maxRetries = 5, initialDelayMs = 40): Promise<any> {
     let delay = initialDelayMs;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
+        const commitment = (attempt <= 3 ? 'processed' : 'confirmed') as any;
         const txRes = await this.connection.getParsedTransaction(signature, {
           maxSupportedTransactionVersion: 1,
-          commitment: 'confirmed',
+          commitment,
         });
         if (txRes && txRes.transaction) {
           return txRes;
@@ -105,7 +106,7 @@ export class SolanaRpcPoller {
         if (attempt === maxRetries) throw err;
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
-      delay = Math.min(delay * 1.5, 1200);
+      delay = Math.min(delay * 1.5, 500);
     }
     return null;
   }

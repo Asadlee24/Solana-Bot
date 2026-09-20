@@ -3,6 +3,7 @@ import { config } from './config/index.js';
 import { db } from './db/database.js';
 import { autoExitManager } from './engine/auto-exit-manager.js';
 import { riskEngine } from './engine/risk-engine.js';
+import { blockhashService } from './execution/blockhash-service.js';
 import { liveEngine } from './execution/live-engine.js';
 import { executionWalletManager } from './execution/wallet-manager.js';
 import { telegramNotifier } from './notifications/telegram.js';
@@ -98,6 +99,9 @@ async function bootstrap() {
     heliusWs.resubscribe();
   });
 
+  // Start real-time in-memory blockhash cache service
+  blockhashService.start();
+
   // Start live mainnet RPC poller in parallel for 100% failover redundancy
   rpcPoller.start();
 
@@ -108,6 +112,7 @@ async function bootstrap() {
   const shutdown = () => {
     console.info('\n[Shutdown] Stopping bot cleanly...');
     autoExitManager.stop();
+    blockhashService.stop();
     heliusWs.stop();
     rpcPoller.stop();
     server.close();

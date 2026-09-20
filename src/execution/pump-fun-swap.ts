@@ -23,6 +23,7 @@ import {
   WSOL_MINT,
 } from './jupiter-swap.js';
 import { transactionSubmitter } from './transaction-submitter.js';
+import { blockhashService } from './blockhash-service.js';
 
 export const PUMP_PROGRAM_ID = new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
 export const PUMP_FEE_RECIPIENT = new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM');
@@ -247,21 +248,20 @@ export class PumpFunSwapAdapter {
     keypair: Keypair,
     mintAddress: string,
     solAmountLamports: bigint,
-    slippageBps: number = config.MAX_SLIPPAGE_BPS
+    slippageBps: number = config.MAX_SLIPPAGE_BPS,
+    existingCurveState?: OnChainBondingCurveState
   ): Promise<PumpFunBuildResult> {
-    const curveState = await this.getBondingCurveState(mintAddress);
-    const tokenProgramId = await this.resolveTokenProgram(new PublicKey(mintAddress));
-    const isToken2022 = tokenProgramId.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
+    const curveState = existingCurveState || await this.getBondingCurveState(mintAddress);
+    const tokenProgramId = TOKEN_PROGRAM_ID;
 
-    // If smoke test forces Jupiter, or token graduated, or paired with USDC, or Token-2022, route via Jupiter Swap API V2
+    // If smoke test forces Jupiter, or token graduated, or paired with USDC, route via Jupiter Swap API V2
     if (
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
       curveState.complete ||
       !curveState.isInitialized ||
-      curveState.pairAsset === 'USDC' ||
-      isToken2022
+      curveState.pairAsset === 'USDC'
     ) {
-      console.info(`[PumpFun Routing] Token ${mintAddress} routed buy via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}, isToken2022=${isToken2022}).`);
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed buy via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         WSOL_MINT,
         mintAddress,
@@ -333,7 +333,7 @@ export class PumpFunSwapAdapter {
       );
     }
 
-    const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
+    const latestBlockhash = await blockhashService.getLatestBlockhash();
 
     const message = new TransactionMessage({
       payerKey: user,
@@ -362,20 +362,19 @@ export class PumpFunSwapAdapter {
     keypair: Keypair,
     mintAddress: string,
     tokenAmountRaw: bigint,
-    slippageBps: number = config.MAX_SLIPPAGE_BPS
+    slippageBps: number = config.MAX_SLIPPAGE_BPS,
+    existingCurveState?: OnChainBondingCurveState
   ): Promise<PumpFunBuildResult> {
-    const curveState = await this.getBondingCurveState(mintAddress);
-    const tokenProgramId = await this.resolveTokenProgram(new PublicKey(mintAddress));
-    const isToken2022 = tokenProgramId.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
+    const curveState = existingCurveState || await this.getBondingCurveState(mintAddress);
+    const tokenProgramId = TOKEN_PROGRAM_ID;
 
     if (
       (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER) ||
       curveState.complete ||
       !curveState.isInitialized ||
-      curveState.pairAsset === 'USDC' ||
-      isToken2022
+      curveState.pairAsset === 'USDC'
     ) {
-      console.info(`[PumpFun Routing] Token ${mintAddress} routed sell via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}, isToken2022=${isToken2022}).`);
+      console.info(`[PumpFun Routing] Token ${mintAddress} routed sell via Jupiter Swap API V2 (forceJupiter=${config.SMOKE_TEST_FORCE_JUPITER}, complete=${curveState.complete}).`);
       const order = await jupiterSwapV2Adapter.createOrder(
         mintAddress,
         WSOL_MINT,
@@ -441,7 +440,7 @@ export class PumpFunSwapAdapter {
       );
     }
 
-    const latestBlockhash = await this.connection.getLatestBlockhash('confirmed');
+    const latestBlockhash = await blockhashService.getLatestBlockhash();
 
     const message = new TransactionMessage({
       payerKey: user,

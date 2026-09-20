@@ -28,7 +28,7 @@ import {
   JupiterV2OrderResponse,
   WSOL_MINT,
 } from './jupiter-swap.js';
-import { pumpFunSwapAdapter } from './pump-fun-swap.js';
+import { OnChainBondingCurveState, pumpFunSwapAdapter } from './pump-fun-swap.js';
 import { settlementReconciler } from './settlement-reconciler.js';
 import { LandingProvider, transactionSubmitter } from './transaction-submitter.js';
 import { executionWalletManager } from './wallet-manager.js';
@@ -285,16 +285,14 @@ export class LiveExecutionEngine {
       // 4. Routing Decision: Force Jupiter for first smoke test or resolve on-chain curve state
       const forceJupiter = config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER;
       let isDirectPumpBondingCurve = false;
+      let precalculatedCurveState: OnChainBondingCurveState | undefined;
 
       if (!forceJupiter && targetIntent.venue === 'PUMPFUN') {
-        const tokenProgramId = await pumpFunSwapAdapter.resolveTokenProgram(new PublicKey(mirrorIntent.tokenMint));
-        const isToken2022 = tokenProgramId.toBase58() === TOKEN_2022_PROGRAM_ID.toBase58();
-        if (!isToken2022) {
-          const curveState = await pumpFunSwapAdapter.getBondingCurveState(mirrorIntent.tokenMint);
-          // Active bonding curve only if initialized, incomplete, and paired with SOL
-          if (curveState.isInitialized && !curveState.complete && curveState.pairAsset === 'SOL') {
-            isDirectPumpBondingCurve = true;
-          }
+        const curveState = await pumpFunSwapAdapter.getBondingCurveState(mirrorIntent.tokenMint);
+        // Active bonding curve only if initialized, incomplete, and paired with SOL
+        if (curveState.isInitialized && !curveState.complete && curveState.pairAsset === 'SOL') {
+          isDirectPumpBondingCurve = true;
+          precalculatedCurveState = curveState;
         }
       }
 
@@ -307,7 +305,8 @@ export class LiveExecutionEngine {
               keypair,
               mirrorIntent.tokenMint,
               BigInt(rawInAmount),
-              config.MAX_SLIPPAGE_BPS
+              config.MAX_SLIPPAGE_BPS,
+              precalculatedCurveState
             );
             signedTx = pumpResult.transaction;
             latestBlockhash = pumpResult.latestBlockhash;
@@ -322,7 +321,8 @@ export class LiveExecutionEngine {
               keypair,
               mirrorIntent.tokenMint,
               BigInt(rawInAmount),
-              config.MAX_SLIPPAGE_BPS
+              config.MAX_SLIPPAGE_BPS,
+              precalculatedCurveState
             );
             signedTx = pumpResult.transaction;
             latestBlockhash = pumpResult.latestBlockhash;
