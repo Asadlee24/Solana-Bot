@@ -163,7 +163,13 @@ export class SignalManager extends EventEmitter {
       }
     } catch (err: any) {
       riskEngine.clearInFlightBuy(swapIntent.tokenMint);
-      riskEngine.recordError(err.message || 'Execution error');
+      const isNormalRiskRejection = 
+        err.message?.includes('Entry price gap') || 
+        err.message?.includes('REJECTED') ||
+        err.message?.includes('tolerance');
+      if (!isNormalRiskRejection) {
+        riskEngine.recordError(err.message || 'Execution error');
+      }
       console.error('[Execution Error]:', err);
       telegramNotifier.notifyTargetDetected(swapIntent, 'EXECUTION_FAILED', err.message || 'Execution error');
       return { intent: swapIntent, order: null };

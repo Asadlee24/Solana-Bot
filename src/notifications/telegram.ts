@@ -26,6 +26,11 @@ export class TelegramNotifier {
     this.chatId = config.TELEGRAM_CHAT_ID;
     this.apiRoot = (config.TELEGRAM_API_ROOT || 'https://api.telegram.org').replace(/\/+$/, '');
     this.enabled = Boolean(this.botToken);
+
+    // Auto-notify operator whenever circuit breaker is tripped
+    riskEngine.onTrip((reason) => {
+      this.notifyCircuitBreaker(reason);
+    });
   }
 
   public setSignalManager(sm: any): void {
@@ -320,6 +325,18 @@ export class TelegramNotifier {
     } else if (clean.includes('refresh')) {
       await this.sendCustomMessage(chatId, '🔄 Synchronizing live on-chain feeds...');
       await this.sendBalanceReport(chatId);
+    } else if (
+      clean === 'reset' ||
+      clean === 'reset_breaker' ||
+      clean === 'resetbreaker' ||
+      clean === 'resume' ||
+      clean === 'unfreeze' ||
+      clean.includes('reset breaker') ||
+      clean.includes('reset circuit')
+    ) {
+      riskEngine.resetCircuitBreaker();
+      await this.sendCustomMessage(chatId, '🛡️ <b>[RISK ENGINE] Circuit breaker has been RESET!</b>\nNormal trading has resumed. All limits and consecutive error counters are cleared.');
+      await this.sendRiskReport(chatId);
     } else if (clean.startsWith('close') || clean.startsWith('sell')) {
       const parts = rawText.split(/\s+/);
       const mint = parts[1];
@@ -1800,6 +1817,13 @@ ${lockedSummary}
       statusText = `⚠️ <b>Execution Failed on Solana:</b> ${reason || 'Routing error'}\n<i>(Follower order could not be executed)</i>`;
     } else if (reason && reason.includes('already held pre-existing tokens')) {
       statusText = `🚫 <b>Target Re-Buy Rejected:</b> Trader already held this coin before this swap. Only fresh initial entries are copied!\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
+    } else if (reason && reason.includes('Circuit breaker is TRIPPED')) {
+      statusText = `🛡️ <b>Skipped by Risk Engine:</b> Circuit breaker is TRIPPED due to consecutive errors.\n<i>(Tap below to instantly reset and resume trading)</i>`;
+      buttons = {
+        inline_keyboard: [
+          [{ text: '🟢 RESET CIRCUIT BREAKER NOW', callback_data: 'reset_breaker' }],
+        ],
+      };
     } else {
       statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
     }

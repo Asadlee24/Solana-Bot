@@ -298,9 +298,22 @@ export class RiskEngine {
     }
   }
 
+  private onCircuitBreakerTrippedListeners: Array<(reason: string) => void> = [];
+
+  public onTrip(listener: (reason: string) => void): void {
+    this.onCircuitBreakerTrippedListeners.push(listener);
+  }
+
   public tripCircuitBreaker(reason: string) {
     this.circuitBreakerTripped = true;
     console.warn(`[RISK CIRCUIT BREAKER TRIPPED]: ${reason}`);
+    for (const listener of this.onCircuitBreakerTrippedListeners) {
+      try {
+        listener(reason);
+      } catch (err: any) {
+        console.error('[RiskEngine] Listener error:', err);
+      }
+    }
   }
 
   public resetCircuitBreaker() {

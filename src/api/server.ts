@@ -311,6 +311,11 @@ export function createApiServer() {
     });
   });
 
+  app.post('/api/risk/reset', (_req: Request, res: Response) => {
+    riskEngine.resetCircuitBreaker();
+    res.json({ success: true, message: 'Circuit breaker reset. Normal trading resumed.' });
+  });
+
   // Live Engine Safety & Status Endpoints
   app.get('/api/live/status', async (_req: Request, res: Response) => {
     if (config.EXECUTION_MODE === 'LIVE') {
