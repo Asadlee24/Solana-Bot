@@ -79,6 +79,10 @@ export class SolanaRpcPoller {
 
       // Process each transaction in chronological order so bursts and bundles are never missed
       for (const s of newSigs.reverse()) {
+        if (s.err) {
+          // Immediately skip on-chain failed transactions without wasting RPC calls
+          continue;
+        }
         await this.processSignature(walletPubkeyStr, s.signature);
       }
     } catch (err: any) {
