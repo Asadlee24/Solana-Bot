@@ -469,10 +469,10 @@ export class TelegramNotifier {
     if (isLive) {
       return {
         keyboard: [
-          [{ text: '📊 POSITIONS' }, { text: '💼 WALLET BALANCE' }],
-          [{ text: '📈 PNL SUMMARY' }, { text: '⚙️ BOT STATUS' }],
-          [{ text: '👥 TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
-          [{ text: '🚨 CLOSE ALL' }, { text: '🏠 MAIN MENU' }],
+          [{ text: '📊 POSITIONS' }, { text: '🚨 CLOSE ALL' }],
+          [{ text: '💼 WALLET BALANCE' }, { text: '📈 PNL SUMMARY' }],
+          [{ text: '⚙️ BOT STATUS' }, { text: '🎯 AUTO TP/SL' }],
+          [{ text: '👥 TARGET TRADERS' }, { text: '🏠 MAIN MENU' }],
         ],
         resize_keyboard: true,
         is_persistent: true,
@@ -852,24 +852,24 @@ ${divider}
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '📊 POSITIONS', callback_data: 'menu_positions' },
-          { text: isLive ? '💼 BALANCE' : '📈 PNL', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
+          { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: '🚨 CLOSE ALL (100%)', callback_data: 'action_close_all' },
+        ],
+        [
+          { text: isLive ? '💼 WALLET BALANCE' : '📈 PNL', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
+          { text: '⚙️ BOT STATUS', callback_data: 'menu_status' },
         ],
         [
           { text: isArmed ? '🔴 PAUSE BOT' : '🟢 ACTIVATE', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-          { text: '⚙️ STATUS', callback_data: 'menu_status' },
-        ],
-        [
           { text: '🎯 AUTO TP/SL', callback_data: 'menu_tpsl' },
-          { text: '🛡️ RISK LIMITS', callback_data: 'menu_risk' },
         ],
         [
           { text: '👥 TARGETS', callback_data: 'menu_wallets' },
-          { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
+          { text: '🛡️ RISK LIMITS', callback_data: 'menu_risk' },
         ],
         [
-          { text: '🚨 CLOSE ALL', callback_data: 'action_close_all' },
-          { text: '🔄 REFRESH', callback_data: 'menu_main' },
+          { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
+          { text: '🔄 REFRESH MENU', callback_data: 'menu_main' },
         ],
       ],
     };
@@ -882,34 +882,67 @@ ${divider}
    */
   public async sendOpenPositionsReport(chatId: string | number): Promise<void> {
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
-    const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
-    const allowedWallets = new Set([...config.WATCHED_WALLETS, ...dbWallets]);
     const rawPositions = db.getOpenPositions().filter((p) => {
       const mint = p.tokenMint || '';
-      const isAllowed = allowedWallets.has(p.targetWallet) || !p.targetWallet;
       const isNotDummy =
         !mint.toLowerCase().includes('tokenmint') &&
         !mint.toLowerCase().includes('paper1111') &&
         !mint.toLowerCase().includes('test');
-      return p.state === 'OPEN' && isAllowed && isNotDummy;
+      return p.state === 'OPEN' && isNotDummy;
     });
 
     const openPositions: FollowerPosition[] = [];
+    const knownMints = new Set<string>();
+
     for (const pos of rawPositions) {
       if (config.EXECUTION_MODE === 'LIVE') {
         try {
-          const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
-          if (onChainBal <= 0n) {
+          const onChainBal = await executionWalletManager.getTokenBalanceChecked(pos.tokenMint);
+          if (onChainBal !== null && onChainBal <= 0n) {
             pos.state = 'CLOSED';
             pos.qtyRaw = '0';
             pos.closedAt = Date.now();
             pos.updatedAt = Date.now();
             db.savePosition(pos);
             continue;
+          } else if (onChainBal !== null && onChainBal > 0n) {
+            pos.qtyRaw = onChainBal.toString();
           }
         } catch {}
       }
       openPositions.push(pos);
+      knownMints.add(pos.tokenMint);
+    }
+
+    // IN LIVE MODE: Directly scan on-chain token accounts so no wallet token is ever missed!
+    if (config.EXECUTION_MODE === 'LIVE') {
+      try {
+        const held = await executionWalletManager.getHeldTokensWithAmounts();
+        for (const item of held) {
+          if (!knownMints.has(item.mint)) {
+            const dynamicPos: FollowerPosition = {
+              id: `onchain_${item.mint}`,
+              targetWallet: 'On-Chain Wallet',
+              tokenMint: item.mint,
+              qtyRaw: item.amountRaw,
+              costBasisLamports: '0',
+              avgEntryPriceSol: 0,
+              realizedPnlLamports: '0',
+              unrealizedPnlLamports: '0',
+              state: 'OPEN',
+              openedAt: Date.now(),
+              updatedAt: Date.now(),
+              closedAt: undefined,
+              tp1Triggered: false,
+              peakPnlPct: 0,
+            };
+            openPositions.push(dynamicPos);
+            knownMints.add(item.mint);
+          }
+        }
+      } catch (scanErr: any) {
+        console.warn('[Telegram] Error scanning on-chain tokens for report:', scanErr?.message || scanErr);
+      }
     }
 
     if (openPositions.length === 0) {
@@ -1005,11 +1038,15 @@ ${divider}
         inline_keyboard: [
           [
             { text: `🚨 CLOSE 100% ($${symbol})`, callback_data: `sell_100_${pos.tokenMint}` },
-            { text: `TP 50% ($${symbol})`, callback_data: `sell_50_${pos.tokenMint}` },
+            { text: `💰 TP 50% ($${symbol})`, callback_data: `sell_50_${pos.tokenMint}` },
           ],
           [
-            { text: `TP 25% ($${symbol})`, callback_data: `sell_25_${pos.tokenMint}` },
-            { text: `TP 75% ($${symbol})`, callback_data: `sell_75_${pos.tokenMint}` },
+            { text: `⚡ TP 25%`, callback_data: `sell_25_${pos.tokenMint}` },
+            { text: `⚡ TP 75%`, callback_data: `sell_75_${pos.tokenMint}` },
+          ],
+          [
+            { text: '🚨 CLOSE ALL (100%)', callback_data: 'action_close_all' },
+            { text: '🔄 REFRESH', callback_data: 'menu_positions' },
           ],
         ],
       };
@@ -1065,33 +1102,58 @@ ${divider}
       return;
     }
 
+    const isLive = config.EXECUTION_MODE === 'LIVE';
+    const mintsToClose = new Set<string>();
+
+    // 1. From DB open positions
     const openPositions = db.getOpenPositions().filter((p) => p.state === 'OPEN');
-    if (openPositions.length === 0) {
-      await this.sendCustomMessage(chatId, 'ℹ️ No open positions found to close.');
+    for (const p of openPositions) {
+      if (p.tokenMint) mintsToClose.add(p.tokenMint);
+    }
+
+    // 2. In LIVE mode: directly query on-chain tokens held in wallet!
+    if (isLive) {
+      try {
+        const held = await executionWalletManager.getHeldTokensWithAmounts();
+        for (const h of held) {
+          if (h.mint && h.mint !== 'So11111111111111111111111111111111111111112') {
+            mintsToClose.add(h.mint);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[Telegram] Error scanning on-chain tokens in close all:', err?.message || err);
+      }
+    }
+
+    if (mintsToClose.size === 0) {
+      await this.sendCustomMessage(
+        chatId,
+        'ℹ️ <b>No open token positions found to close.</b>\nYour wallet holds 100% pure SOL.'
+      );
       return;
     }
 
     await this.sendCustomMessage(
       chatId,
-      `🔄 <b>[CLOSING ALL]</b> Found ${openPositions.length} active position(s). Submitting 100% exit orders...`
+      `🚨 <b>[CLOSING ALL]</b> Found ${mintsToClose.size} active token(s) to exit. Submitting 100% market sells...`
     );
 
     let successCount = 0;
-    for (const pos of openPositions) {
+    for (const mint of mintsToClose) {
       try {
-        await this.executeManualSellFromChat(chatId, pos.tokenMint, 1.0);
+        await this.executeManualSellFromChat(chatId, mint, 1.0);
         successCount++;
       } catch (err: any) {
         await this.sendCustomMessage(
           chatId,
-          `❌ [CLOSE FAILED] <code>${pos.tokenMint}</code>: ${err.message || err}`
+          `❌ [CLOSE FAILED] <code>${mint}</code>: ${err?.message || err}`
         );
       }
     }
 
     await this.sendCustomMessage(
       chatId,
-      `✅ <b>[CLOSE ALL COMPLETE]</b> Successfully exited ${successCount}/${openPositions.length} positions.`
+      `✅ <b>[CLOSE ALL COMPLETE]</b> Successfully exited ${successCount}/${mintsToClose.size} token(s).`
     );
   }
 

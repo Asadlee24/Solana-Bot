@@ -127,6 +127,15 @@ export class ExecutionWalletManager {
    * Queries the follower's on-chain SPL token balance for a specific mint.
    */
   public async getTokenBalanceRaw(mint: string): Promise<bigint> {
+    const checked = await this.getTokenBalanceChecked(mint);
+    return checked === null ? 0n : checked;
+  }
+
+  /**
+   * Queries the follower's on-chain SPL token balance for a specific mint.
+   * Returns null on RPC network error to avoid falsely closing active positions.
+   */
+  public async getTokenBalanceChecked(mint: string): Promise<bigint | null> {
     if (!this.keypair) return 0n;
     try {
       const parsed = await this.connection.getParsedTokenAccountsByOwner(
@@ -142,8 +151,9 @@ export class ExecutionWalletManager {
         total += BigInt(rawAmt);
       }
       return total;
-    } catch {
-      return 0n;
+    } catch (err: any) {
+      console.warn(`[WalletManager] getTokenBalanceChecked error for ${mint}:`, err?.message || err);
+      return null;
     }
   }
 
@@ -151,22 +161,42 @@ export class ExecutionWalletManager {
    * Queries all SPL token mints currently held with positive balance in the follower wallet.
    */
   public async getHeldTokenMints(): Promise<string[]> {
+    const tokens = await this.getHeldTokensWithAmounts();
+    return tokens.map((t) => t.mint);
+  }
+
+  /**
+   * Queries all SPL token mints and raw amounts currently held with positive balance in the follower wallet.
+   * Scans both standard SPL Token and Token-2022 programs.
+   */
+  public async getHeldTokensWithAmounts(): Promise<Array<{ mint: string; amountRaw: string }>> {
     if (!this.keypair) return [];
     try {
-      const parsed = await this.connection.getParsedTokenAccountsByOwner(
-        this.keypair.publicKey,
-        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') },
-        'confirmed'
-      );
-      const held: string[] = [];
-      for (const item of parsed.value || []) {
-        const rawAmt = item.account.data.parsed?.info?.tokenAmount?.amount || '0';
-        if (BigInt(rawAmt) > 0n) {
-          const mint = item.account.data.parsed?.info?.mint;
-          if (mint) held.push(mint);
+      const results: Array<{ mint: string; amountRaw: string }> = [];
+      const programIds = [
+        new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+        new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
+      ];
+
+      for (const programId of programIds) {
+        try {
+          const parsed = await this.connection.getParsedTokenAccountsByOwner(
+            this.keypair.publicKey,
+            { programId },
+            'confirmed'
+          );
+          for (const item of parsed.value || []) {
+            const rawAmt = item.account.data.parsed?.info?.tokenAmount?.amount || '0';
+            const mint = item.account.data.parsed?.info?.mint;
+            if (mint && BigInt(rawAmt) > 0n && mint !== 'So11111111111111111111111111111111111111112') {
+              results.push({ mint, amountRaw: rawAmt });
+            }
+          }
+        } catch (innerErr: any) {
+          console.warn(`[WalletManager] Error scanning program ${programId.toBase58()}:`, innerErr?.message || innerErr);
         }
       }
-      return held;
+      return results;
     } catch {
       return [];
     }

@@ -221,17 +221,45 @@ export class SignalManager extends EventEmitter {
     fraction: number = 1.0
   ): Promise<{ order: MirrorOrder; position: FollowerPosition | null }> {
     const openPositions = db.getOpenPositions();
-    const pos = openPositions.find(
+    let pos = openPositions.find(
       (p) => p.id === positionIdOrMint || p.tokenMint.toLowerCase() === positionIdOrMint.toLowerCase()
     );
+
+    if (!pos && config.EXECUTION_MODE === 'LIVE') {
+      try {
+        const onChainBal = await executionWalletManager.getTokenBalanceRaw(positionIdOrMint);
+        if (onChainBal !== null && onChainBal > 0n) {
+          const dynamicPos: FollowerPosition = {
+            id: `onchain_${positionIdOrMint}`,
+            targetWallet: 'On-Chain Wallet',
+            tokenMint: positionIdOrMint,
+            qtyRaw: onChainBal.toString(),
+            costBasisLamports: '0',
+            avgEntryPriceSol: 0,
+            realizedPnlLamports: '0',
+            unrealizedPnlLamports: '0',
+            state: 'OPEN',
+            openedAt: Date.now(),
+            updatedAt: Date.now(),
+            closedAt: undefined,
+            tp1Triggered: false,
+            peakPnlPct: 0,
+          };
+          db.savePosition(dynamicPos);
+          pos = dynamicPos;
+        }
+      } catch {}
+    }
 
     if (!pos) {
       throw new Error(`Open position not found for "${positionIdOrMint}"`);
     }
 
+    const activePos: FollowerPosition = pos;
+
     if (config.EXECUTION_MODE === 'LIVE') {
       const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
-      if (onChainBal <= 0n) {
+      if (onChainBal !== null && onChainBal <= 0n) {
         pos.state = 'CLOSED';
         pos.qtyRaw = '0';
         pos.closedAt = Date.now();
@@ -239,6 +267,8 @@ export class SignalManager extends EventEmitter {
         db.savePosition(pos);
         this.emit('positionUpdate', pos);
         throw new Error(`Position already closed: Wallet holds 0 tokens of ${pos.tokenMint.substring(0, 6)}... on-chain.`);
+      } else if (onChainBal !== null && onChainBal > 0n) {
+        pos.qtyRaw = onChainBal.toString();
       }
     }
 
