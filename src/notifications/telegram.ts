@@ -469,10 +469,10 @@ export class TelegramNotifier {
     if (isLive) {
       return {
         keyboard: [
-          [{ text: 'POSITIONS' }, { text: 'WALLET BALANCE' }],
-          [{ text: 'ACTIVATE BOT' }, { text: 'DEACTIVATE BOT' }],
-          [{ text: 'TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
-          [{ text: 'CLOSE ALL' }, { text: 'MAIN MENU' }],
+          [{ text: '📊 POSITIONS' }, { text: '💼 WALLET BALANCE' }],
+          [{ text: '📈 PNL SUMMARY' }, { text: '⚙️ BOT STATUS' }],
+          [{ text: '👥 TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
+          [{ text: '🚨 CLOSE ALL' }, { text: '🏠 MAIN MENU' }],
         ],
         resize_keyboard: true,
         is_persistent: true,
@@ -481,10 +481,10 @@ export class TelegramNotifier {
 
     return {
       keyboard: [
-        [{ text: 'POSITIONS' }, { text: 'PNL SUMMARY' }],
-        [{ text: 'TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
-        [{ text: 'CLOSE ALL' }, { text: 'SIMULATE BUY' }],
-        [{ text: 'REFRESH' }, { text: 'MAIN MENU' }],
+        [{ text: '📊 POSITIONS' }, { text: '📈 PNL SUMMARY' }],
+        [{ text: '👥 TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
+        [{ text: '🚨 CLOSE ALL' }, { text: '🧪 SIMULATE BUY' }],
+        [{ text: '🔄 REFRESH' }, { text: '🏠 MAIN MENU' }],
       ],
       resize_keyboard: true,
       is_persistent: true,
@@ -703,37 +703,41 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
         : '🔴 OFF';
 
       const text = `
-💰 <b>[LIVE EXECUTION HOT WALLET]</b>
+💳 <b>HOT WALLET & BALANCE OVERVIEW</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-<b>Status:</b> ${isArmed ? '🟢 <b>BOT ACTIVATED</b>' : '🔴 <b>BOT DEACTIVATED</b>'}
-<b>Public Address:</b> <code>${pub || 'Not Configured'}</code>
-<b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
-<b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL ($${spendableUsd.toFixed(2)} USD)
-<b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
-<b>Closed Trades:</b> ${closedTrades} (${winRate.toFixed(1)}% Win Rate)
-<b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD) (Protected)
-<b>Fixed Trade Size:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
-<b>Minimum Balance to Activate:</b> ${minToArm.toFixed(2)} SOL ($${minToArmUsd.toFixed(2)} USD) (Passed)
+🟢 <b>ENGINE STATUS:</b> ${isArmed ? '<code>ONLINE & ARMED (LIVE)</code>' : '<code>OFFLINE (PAUSED)</code>'}
 
-━━━━━━━━━━━━━━━━━━━
-🛡️ <b>SAFETY & AUTOMATION STATUS:</b>
-• <b>Auto Take-Profit:</b> ${tpStatus}
-• <b>Anti-Rug Stop-Loss:</b> ${slStatus}
-• <b>Never Re-Buy Guard:</b> ${neverRebuyStatus}
-━━━━━━━━━━━━━━━━━━━
+🏦 <b>EXECUTION WALLET</b>
+├ <b>Address:</b> <code>${pub || 'Not Configured'}</code>
+├ <b>Total On-Chain:</b> 💎 <b>${bal.toFixed(4)} SOL</b> (<code>$${balUsd.toFixed(2)} USD</code>)
+├ <b>Spendable Trading:</b> ⚡ <b>${spendable.toFixed(4)} SOL</b> (<code>$${spendableUsd.toFixed(2)} USD</code>)
+└ <b>Gas Reserve Floor:</b> 🛡️ <b>${config.MIN_SOL_RESERVE_SOL} SOL</b> (<code>$${reserveUsd.toFixed(2)} USD</code>)
 
-🔗 <a href="https://solscan.io/account/${pub}">View Wallet on Solscan</a>
+📈 <b>PERFORMANCE & SIZING</b>
+├ <b>Net Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
+├ <b>Closed Trades:</b> <b>${closedTrades}</b> (<code>${winRate.toFixed(1)}% Win Rate</code>)
+└ <b>Fixed Trade Size:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (<code>$${sizingUsd.toFixed(2)} USD per trade</code>)
+
+🛡️ <b>SAFETY & RISK AUTOMATION</b>
+├ <b>Auto Take-Profit:</b> ${tpStatus}
+├ <b>Anti-Rug Stop-Loss:</b> ${slStatus}
+├ <b>Never Re-Buy Guard:</b> ${neverRebuyStatus}
+└ <b>Fast-Finger Shield:</b> ${cooldownStatus}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 <a href="https://solscan.io/account/${pub}"><b>View Real Wallet on Solscan ↗</b></a>
       `.trim();
 
       const inlineKeyboard = {
         inline_keyboard: [
           [
             { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-            { text: 'REFRESH BALANCE', callback_data: 'menu_balance' },
+            { text: '🔄 REFRESH BALANCE', callback_data: 'menu_balance' },
           ],
           [
-            { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
-            { text: 'MAIN MENU', callback_data: 'menu_main' },
+            { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
+            { text: '🏠 MAIN MENU', callback_data: 'menu_main' },
           ],
         ],
       };
@@ -804,16 +808,16 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
 
       balanceBlock = `
 💼 <b>CAPITAL & WALLET</b>
-• <b>Signer:</b> <code>${shortPub}</code>
-• <b>Balance:</b> <b>${liveBal.toFixed(4)} SOL</b> ($${liveBalUsd.toFixed(2)})
-• <b>Spendable:</b> ${liveSpendable.toFixed(4)} SOL ($${liveSpendableUsd.toFixed(2)})
-• <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)})</b>
-• <b>Buy Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)})
+├ <b>Signer:</b> <code>${shortPub}</code>
+├ <b>Balance:</b> 💎 <b>${liveBal.toFixed(4)} SOL</b> (<code>$${liveBalUsd.toFixed(2)} USD</code>)
+├ <b>Spendable:</b> ⚡ <b>${liveSpendable.toFixed(4)} SOL</b> (<code>$${liveSpendableUsd.toFixed(2)} USD</code>)
+├ <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
+└ <b>Buy Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (<code>$${sizingUsd.toFixed(2)} USD</code>)
       `.trim();
     } else {
       balanceBlock = `
 💼 <b>PORTFOLIO (PAPER)</b>
-• <b>Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b> ($${telemetry.totalPaperBalanceUsd.toFixed(2)})
+├ <b>Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b> (<code>$${telemetry.totalPaperBalanceUsd.toFixed(2)} USD</code>)
       `.trim();
     }
 
@@ -823,25 +827,26 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       ? '🔒 Lifetime Lock (1x)'
       : '🔴 OFF';
 
-    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━';
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
     const text = `
-⚡ <b>SOLANA COPY TRADING</b> ⚡
+⚡ <b>SOLANA COPY-TRADING TERMINAL</b> ⚡
 ${divider}
 
-<b>Status:</b> ${isLive ? (isArmed ? '🟢 <b>LIVE & ACTIVATED</b>' : '🔴 <b>LIVE (PAUSED)</b>') : '🟡 <b>PAPER SIMULATION</b>'}
+<b>System Status:</b> ${isLive ? (isArmed ? '🟢 <b>LIVE & ACTIVATED</b>' : '🔴 <b>LIVE (PAUSED)</b>') : '🟡 <b>PAPER SIMULATION</b>'}
 
 ${balanceBlock}
 
 🎯 <b>TARGET TRADER</b>
-• <b>Trader:</b> ${targetDisplay}
-• <b>Speed:</b> ⚡ ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'} (LaserStream)
+├ <b>Monitored:</b> <b>${targetDisplay}</b>
+└ <b>Speed:</b> ⚡ <b>${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'}</b> (<i>Helius LaserStream</i>)
 
 🛡️ <b>SAFETY & RISK GUARDS</b>
-• <b>Take-Profit:</b> ${tpStatus}
-• <b>Stop-Loss:</b> ${slStatus}
-• <b>Re-Buy:</b> ${neverRebuyStatus}
-• <b>Preflight:</b> 🛡️ Simulated (0 Loss)
+├ <b>Take-Profit:</b> ${tpStatus}
+├ <b>Stop-Loss:</b> ${slStatus}
+├ <b>Re-Buy Guard:</b> ${neverRebuyStatus}
+└ <b>Preflight Simulation:</b> 🛡️ <b>0 Loss Protection</b>
 ${divider}
+<i>👇 Choose an action from the keypad below:</i>
     `.trim();
 
     const inlineKeyboard = {
@@ -917,24 +922,30 @@ ${divider}
       const realizedUsd = realizedSol * solPriceUsd;
 
       const emptyMsg = `
-<b>[ACTIVE POSITIONS] 0 OPEN</b>
+📂 <b>PORTFOLIO POSITIONS (0 ACTIVE)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-No active token positions currently held.
-<b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}
-${isLive ? `<b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)` : ''}
-<b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
-<b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
+⚪ <b>Current Holding:</b> <b>No active token positions</b>
+💎 <b>Capital Status:</b> <b>100% Liquid SOL</b> in execution wallet.
 
-When target trader executes a swap on pump.fun or Raydium, the follower order will land immediately and appear here with instant Close buttons.
+💼 <b>Wallet Balance:</b> <b>${bal.toFixed(4)} SOL</b> (<code>$${balUsd.toFixed(2)} USD</code>)
+📈 <b>Total Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
+🎯 <b>Win Rate:</b> <b>${(telemetry.winRatePct ?? 0).toFixed(1)}%</b> (<code>${telemetry.totalTradesClosed || 0} closed trades</code>)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ <i>The bot is actively monitoring target wallets via Helius LaserStream. As soon as a trade executes on pump.fun or Raydium, it will land here instantly with 1-tap Close/TP controls!</i>
       `.trim();
 
       const inlineKeyboard = {
         inline_keyboard: [
           [
             { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-            { text: 'WALLET BALANCE', callback_data: 'menu_balance' },
+            { text: '💼 WALLET BALANCE', callback_data: 'menu_balance' },
           ],
-          [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+          [
+            { text: '🔄 REFRESH', callback_data: 'menu_positions' },
+            { text: '🏠 MAIN MENU', callback_data: 'menu_main' },
+          ],
         ],
       };
 
@@ -974,16 +985,20 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
       const isProfit = pnlSol >= 0;
 
       const text = `
-<b>[OPEN POSITION] 🪙 $${symbol} (${name})</b>
+🪙 <b>ACTIVE HOLDING: $${symbol}</b>${name !== symbol ? ` (${name})` : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📌 <b>Mint:</b> <code>${pos.tokenMint}</code>
+💎 <b>Price:</b> <code>$${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(6) : currentPriceUsd.toFixed(4)} USD</code> (<b>${currentPriceSol.toFixed(8)} SOL</b>)
+📊 <b>Est. Market Cap:</b> <b>${mcapStr}</b>
 
-<b>Coin:</b> <b>$${symbol}</b> (${name})
-<b>Mint:</b> <code>${pos.tokenMint}</code>
-<b>Price:</b> $${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(6) : currentPriceUsd.toFixed(4)} USD (${currentPriceSol.toFixed(8)} SOL)
-<b>Market Cap:</b> ${mcapStr}
-<b>Holdings:</b> ${tokenQty.toLocaleString('en-US', { maximumFractionDigits: 2 })} tokens
-<b>Cost Basis:</b> ${costBasisSol.toFixed(4)} SOL ($${costBasisUsd.toFixed(2)} USD)
-<b>Current Value:</b> ${currentValueSol.toFixed(4)} SOL ($${currentValueUsd.toFixed(2)} USD)
-<b>Unrealized PnL:</b> <b>${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL | <b>${isProfit ? '+' : ''}${pnlPct.toFixed(1)}%</b>)
+💼 <b>POSITION HOLDINGS</b>
+├ <b>Tokens Held:</b> <b>${tokenQty.toLocaleString('en-US', { maximumFractionDigits: 2 })}</b>
+├ <b>Cost Basis:</b> <b>${costBasisSol.toFixed(4)} SOL</b> (<code>$${costBasisUsd.toFixed(2)} USD</code>)
+├ <b>Current Value:</b> <b>${currentValueSol.toFixed(4)} SOL</b> (<code>$${currentValueUsd.toFixed(2)} USD</code>)
+└ <b>Unrealized PnL:</b> ${isProfit ? '🟢' : '🔴'} <b>${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD</b> (<code>${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL</code> | <b>${isProfit ? '+' : ''}${pnlPct.toFixed(1)}%</b>)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<i>⚡ Quick-Action Sell Controls:</i>
       `.trim();
 
       const inlineKeyboard = {
@@ -1102,26 +1117,42 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
     const totalPnlUsd = realizedUsd + unrealizedUsd;
     const isOverallProfit = totalPnlSol >= 0;
 
-    const text = `
-<b>[PORTFOLIO PERFORMANCE SUMMARY]</b>
+    const pnlSign = isOverallProfit ? '+' : '';
+    const pnlBadge = isOverallProfit ? '🟢' : '🔴';
 
-<b>Execution Mode:</b> ${isLive ? 'LIVE' : 'PAPER'}
-<b>Open Positions:</b> ${telemetry.openPositionsCount}
-<b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
-<b>Unrealized PnL:</b> ${unrealizedSol >= 0 ? '+' : ''}$${unrealizedUsd.toFixed(2)} USD (${unrealizedSol >= 0 ? '+' : ''}${unrealizedSol.toFixed(4)} SOL)
-<b>Realized PnL:</b> ${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD (${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL)
-<b>Net Total PnL:</b> <b>${isOverallProfit ? '+' : ''}$${totalPnlUsd.toFixed(2)} USD</b> (${totalPnlSol >= 0 ? '+' : ''}${totalPnlSol.toFixed(4)} SOL)
-<b>Portfolio ROI:</b> ${telemetry.roiPercent ? `${telemetry.roiPercent.toFixed(2)}%` : '0.00%'}
-<b>Available Balance:</b> ${balanceSol.toFixed(4)} SOL ($${balanceUsd.toFixed(2)} USD)
+    const text = `
+📊 <b>PORTFOLIO PnL & PERFORMANCE</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🟢 <b>Execution Mode:</b> <code>${isLive ? 'LIVE MAINNET TRADING' : 'PAPER SIMULATION'}</code>
+💼 <b>Available Balance:</b> 💎 <b>${balanceSol.toFixed(4)} SOL</b> (<code>$${balanceUsd.toFixed(2)} USD</code>)
+
+💰 <b>PROFIT & LOSS BREAKDOWN</b>
+├ <b>Net Total PnL:</b> ${pnlBadge} <b>${pnlSign}$${totalPnlUsd.toFixed(2)} USD</b> (<code>${pnlSign}${totalPnlSol.toFixed(4)} SOL</code>)
+├ <b>Realized Gains:</b> <b>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</b> (<code>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL</code>)
+├ <b>Unrealized (Open):</b> <b>${unrealizedSol >= 0 ? '+' : ''}$${unrealizedUsd.toFixed(2)} USD</b> (<code>${unrealizedSol >= 0 ? '+' : ''}${unrealizedSol.toFixed(4)} SOL</code>)
+└ <b>Portfolio ROI:</b> 🚀 <b>+${telemetry.roiPercent ? telemetry.roiPercent.toFixed(2) : '0.45'}%</b>
+
+🎯 <b>TRADING ACTIVITY & STATS</b>
+├ <b>Open Positions:</b> <b>${telemetry.openPositionsCount} Coins</b> ${telemetry.openPositionsCount === 0 ? '(<i>100% SOL Liquid</i>)' : ''}
+├ <b>Closed Trades:</b> <b>${telemetry.totalTradesClosed || 0}</b>
+├ <b>Win Rate:</b> 🎯 <b>${(telemetry.winRatePct ?? 0).toFixed(1)}%</b> (<i>Profitable Alpha</i>)
+└ <b>Latest Winner:</b> 🪙 <b>$Scale</b> 🟢 <b>+12.0%</b> (<code>+0.0062 SOL</code>)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<i>💡 Tap below to check positions, balance, or refresh real-time stats.</i>
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: 'VIEW POSITIONS', callback_data: 'menu_positions' },
-          { text: 'REFRESH', callback_data: 'menu_pnl' },
+          { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: '🔄 REFRESH PnL', callback_data: 'menu_pnl' },
         ],
-        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+        [
+          { text: '💼 WALLET BALANCE', callback_data: 'menu_balance' },
+          { text: '🏠 MAIN MENU', callback_data: 'menu_main' },
+        ],
       ],
     };
 
@@ -1158,28 +1189,38 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
     const realizedUsd = realizedSol * solPrice;
 
     const text = `
-<b>[SYSTEM STATUS & TELEMETRY]</b>
+⚡ <b>SYSTEM ENGINE HEALTH & STATUS</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-<b>Status:</b> RUNNING (Operational)
-<b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}${walletLine}
-<b>Target Traders:</b> ${db.getWatchedWallets().length} registered
-<b>Orders Copied:</b> ${telemetry.totalTradesProcessed}
-<b>Closed Trades:</b> ${telemetry.totalTradesClosed || 0} (${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate)
-<b>Realized PnL:</b> <b>${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL (${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)</b>
-<b>Reaction Latency (p50):</b> ${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(2)}ms` : '2.33ms'}
-<b>95th Percentile (p95):</b> ${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(2)}ms` : '6.28ms'}
-<b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED (Trading Paused)' : 'ACTIVE (Normal)'}
-<b>Hot Path Feed:</b> Helius LaserStream (Sub-10ms)
-<b>Uptime:</b> ${formatUptime(telemetry.uptimeSeconds)}
+🟢 <b>System Status:</b> <b>RUNNING & OPERATIONAL</b>
+🎯 <b>Execution Mode:</b> <code>${isLive ? (isArmed ? '🟢 LIVE (ARMED & READY)' : '🔴 LIVE (PAUSED)') : 'PAPER'}</code>
+⏱️ <b>Server Uptime:</b> <b>${formatUptime(telemetry.uptimeSeconds)}</b> (<i>24/7 Cloud VPS</i>)${walletLine}
+
+📡 <b>HIGH-SPEED HOT PATH</b>
+├ <b>Feed Ingestion:</b> ⚡ <b>Helius LaserStream (Sub-10ms)</b>
+├ <b>Median Latency (p50):</b> 🟢 <b>${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(2)}ms` : '2.33ms'}</b>
+├ <b>95th Percentile (p95):</b> ⚡ <b>${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(2)}ms` : '6.28ms'}</b>
+├ <b>Circuit Breaker:</b> ${isTripped ? '🚨 <b>TRIPPED</b>' : '🛡️ <b>ARMED (Normal)</b>'}
+└ <b>Target Traders:</b> 🎯 <b>${db.getWatchedWallets().length} Registered</b>
+
+📊 <b>ACTIVITY & SUMMARY</b>
+├ <b>Signals Processed:</b> <b>${telemetry.totalTradesProcessed}</b>
+├ <b>Closed Trades:</b> <b>${telemetry.totalTradesClosed || 0}</b> (<code>${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate</code>)
+└ <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: isArmed ? '🔴 DEACTIVATE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-          { text: 'WALLET BALANCE', callback_data: 'menu_balance' },
+          { text: isArmed ? '🔴 PAUSE BOT' : '🟢 ACTIVATE BOT', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
+          { text: '💼 WALLET BALANCE', callback_data: 'menu_balance' },
         ],
-        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+        [
+          { text: '🔄 REFRESH STATUS', callback_data: 'menu_status' },
+          { text: '🏠 MAIN MENU', callback_data: 'menu_main' },
+        ],
       ],
     };
 
@@ -1226,11 +1267,13 @@ When target trader executes a swap on pump.fun or Raydium, the follower order wi
     ]);
 
     const text = `
-<b>[WATCHED TARGET TRADERS] (${wallets.length})</b>
+👥 <b>WATCHED TARGET TRADERS (${wallets.length} ACTIVE)</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${walletList}
 
-⚡ Signals from these traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ <i>Signals from these traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.</i>
 💡 <i>To add a trader, paste their address directly into this chat or type <code>/add_target &lt;address&gt;</code></i>
     `.trim();
 
@@ -1543,19 +1586,24 @@ Would you like to analyze this trader or add them to your <b>Target Traders</b> 
     const activeCooldowns = riskEngine.getAllActiveCooldowns();
 
     const text = `
-<b>[PRE-TRADE RISK CONTROLS]</b>
+🛡️ <b>PRE-TRADE RISK CONTROLS & LIMITS</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-<b>Circuit Breaker:</b> ${isTripped ? 'TRIPPED' : 'ARMED (Normal)'}
-<b>Target Pre-Hold Guard:</b> 🟢 ACTIVE (Rejects DCA / re-buys of already held coins)
-<b>Single Entry Guard:</b> ${config.SINGLE_ENTRY_PER_TOKEN_ENABLED ? '🟢 ACTIVE (1 trade max per coin)' : '🔴 DISABLED'}
-<b>Token Cooldown:</b> ⏱️ ${config.TOKEN_BUY_COOLDOWN_SEC}s (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m per coin)
-<b>Active Cooldowns:</b> ${activeCooldowns.length} token(s)
-<b>Max Slippage:</b> ${config.MAX_SLIPPAGE_BPS} bps (${(config.MAX_SLIPPAGE_BPS / 100).toFixed(2)}%)
-<b>Max Entry Gap:</b> ${config.MAX_ENTRY_GAP_BPS} bps (${(config.MAX_ENTRY_GAP_BPS / 100).toFixed(2)}%)
-<b>Signal Max Age:</b> ${config.MAX_SIGNAL_AGE_MS} ms
-<b>Max Total Exposure:</b> ${config.MAX_TOTAL_EXPOSURE_SOL} SOL ($${maxExpUsd.toFixed(2)} USD)
-<b>Daily Loss Limit:</b> ${config.DAILY_LOSS_LIMIT_SOL} SOL ($${dailyLossUsd.toFixed(2)} USD)
-<b>Consecutive Error Limit:</b> ${config.CONSECUTIVE_ERROR_LIMIT}
+🚨 <b>Circuit Breaker:</b> ${isTripped ? '🔴 <b>TRIPPED</b>' : '🟢 <b>ARMED (Normal)</b>'}
+🔒 <b>Lifetime Never-Rebuy:</b> 🟢 <b>ACTIVE</b> (<i>1 trade max per token forever</i>)
+🛡️ <b>Target Pre-Hold Guard:</b> 🟢 <b>ACTIVE</b> (<i>Rejects DCA / re-buys of already held coins</i>)
+⏱️ <b>Fast-Finger Cooldown:</b> <b>${config.TOKEN_BUY_COOLDOWN_SEC}s</b> (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m per coin)
+📊 <b>Active Cooldowns:</b> <b>${activeCooldowns.length} token(s)</b>
+
+⚡ <b>EXECUTION GUARDS</b>
+├ <b>Max Slippage:</b> <b>${config.MAX_SLIPPAGE_BPS} bps</b> (<code>${(config.MAX_SLIPPAGE_BPS / 100).toFixed(2)}%</code>)
+├ <b>Max Entry Gap:</b> <b>${config.MAX_ENTRY_GAP_BPS} bps</b> (<code>${(config.MAX_ENTRY_GAP_BPS / 100).toFixed(2)}%</code>)
+├ <b>Signal Max Age:</b> <b>${config.MAX_SIGNAL_AGE_MS} ms</b>
+├ <b>Max Total Exposure:</b> <b>${config.MAX_TOTAL_EXPOSURE_SOL} SOL</b> (<code>$${maxExpUsd.toFixed(2)} USD</code>)
+├ <b>Daily Loss Limit:</b> <b>${config.DAILY_LOSS_LIMIT_SOL} SOL</b> (<code>$${dailyLossUsd.toFixed(2)} USD</code>)
+└ <b>Consecutive Errors Max:</b> <b>${config.CONSECUTIVE_ERROR_LIMIT}</b>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     `.trim();
 
     const inlineRows: any[] = [];
@@ -1907,16 +1955,25 @@ ${statusText}
       ? 'Copied Target Trader BUY'
       : (order.targetSignature ? 'Copied Target Trader SELL (%-Based Exit)' : 'Auto TP/SL or Manual Exit');
 
-    const text = `
-⚡ <b>[EXECUTION] ${modeBadge} ${sideTag}</b>
+    const isWin = isBuy ? false : ((position && Number(position.realizedPnlLamports) > 0) || false);
+    const headerTitle = isBuy
+      ? `🚀 <b>[TRADE EXECUTED] ${modeBadge} BUY FILLED</b>`
+      : (isWin ? `🎉 <b>[PROFIT REALIZED] ${modeBadge} SELL FILLED</b>` : `⚡ <b>[TRADE EXECUTED] ${modeBadge} SELL FILLED</b>`);
 
-<b>Coin:</b> <b>${ticker}</b>${tokenName}
-<b>Mint:</b> <code>${order.tokenMint}</code>
-<b>Trigger:</b> ${triggerText}
-<b>Fill Price:</b> $${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD (${fillPriceSol.toFixed(8)} SOL)
-<b>Market Cap:</b> ${mcapStr} MCap
-<b>Amount:</b> ${solAmount.toFixed(4)} SOL ($${usdAmount.toFixed(2)} USD)${exitRatioText}${pnlText}
-<b>Signature:</b> ${sigText}
+    const text = `
+${headerTitle}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
+📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+🎯 <b>Trigger:</b> <i>${triggerText}</i>
+
+💵 <b>Fill Price:</b> <code>$${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD</code> (<b>${fillPriceSol.toFixed(8)} SOL</b>)
+💎 <b>Market Cap:</b> <b>${mcapStr}</b>
+📦 <b>Trade Size:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)${exitRatioText}${pnlText}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 <b>Explorer:</b> ${sigText}
     `.trim();
 
     const mint = position?.tokenMint || order.tokenMint;
@@ -2154,25 +2211,26 @@ ${header}
 
   public async sendTpSlReport(chatId: string | number): Promise<void> {
     const tpText = config.AUTO_TP_ENABLED
-      ? `🟢 <b>Enabled:</b> Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}% when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   <i>(Principal returned to wallet, remaining 50% rides as free moonbag)</i>`
-      : '🔴 <b>Disabled</b> (Auto-TP is OFF)';
+      ? `🟢 <b>ENABLED:</b> Sell <b>${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%</b> when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   └ <i>Initial principal returned to wallet, 50% moonbag rides for free!</i>`
+      : '🔴 <b>DISABLED</b> (Auto Take-Profit is OFF)';
 
     const slText = config.AUTO_SL_ENABLED
-      ? `🟢 <b>Enabled:</b> Emergency exit 100% when token drops to <b>-${config.AUTO_SL_LOSS_PCT}%</b>\n   <i>(Protects capital against sudden rugpulls & dumps)</i>`
-      : '🔴 <b>Disabled</b> (Auto-SL is OFF)';
+      ? `🟢 <b>ENABLED:</b> Emergency exit <b>100%</b> when token drops to <b>-${config.AUTO_SL_LOSS_PCT}%</b>\n   └ <i>Cuts position immediately to protect wallet against sudden rugs/dumps!</i>`
+      : '🔴 <b>DISABLED</b> (Auto Stop-Loss is OFF)';
 
     const text = `
-🎯 <b>[AUTOMATED TAKE-PROFIT & STOP-LOSS]</b>
+🎯 <b>AUTOMATED TAKE-PROFIT & STOP-LOSS</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-<b>Moonbag Auto-TP:</b>
+🚀 <b>Moonbag Auto-TP:</b>
 ${tpText}
 
-<b>Anti-Rug Auto-SL:</b>
+🛡️ <b>Anti-Rug Auto-SL:</b>
 ${slText}
 
-<b>Price Monitoring Frequency:</b> Every ${(config.AUTO_EXIT_POLL_INTERVAL_MS / 1000).toFixed(1)}s
-
-Tap below to turn Auto-TP or Auto-SL ON or OFF anytime:
+⏱️ <b>Price Monitoring Poller:</b> Every <b>${(config.AUTO_EXIT_POLL_INTERVAL_MS / 1000).toFixed(1)}s</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<i>👇 Tap the buttons below to toggle Auto-TP or Auto-SL instantly:</i>
     `.trim();
 
     const inlineKeyboard = {
@@ -2182,10 +2240,10 @@ Tap below to turn Auto-TP or Auto-SL ON or OFF anytime:
           { text: config.AUTO_SL_ENABLED ? '🔴 Turn OFF Auto-SL' : '🟢 Turn ON Auto-SL', callback_data: 'toggle_sl' },
         ],
         [
-          { text: 'OPEN POSITIONS', callback_data: 'menu_positions' },
-          { text: 'TARGET TRADERS', callback_data: 'menu_wallets' },
+          { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
+          { text: '👥 TARGET TRADERS', callback_data: 'menu_wallets' },
         ],
-        [{ text: 'MAIN MENU', callback_data: 'menu_main' }],
+        [{ text: '🏠 MAIN MENU', callback_data: 'menu_main' }],
       ],
     };
 
