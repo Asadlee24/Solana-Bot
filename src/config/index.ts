@@ -37,8 +37,9 @@ const ConfigSchema = z.object({
   MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(0.02),
   MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.02), // Floor reserved for rent and fees (0.02 SOL)
   MAX_SIGNAL_AGE_MS: z.coerce.number().default(1500), // Max ms before signal discarded as stale
-  MAX_ENTRY_GAP_BPS: z.coerce.number().default(200), // 2.0% max price deterioration vs target
-  MAX_SLIPPAGE_BPS: z.coerce.number().default(200), // 2.0% max AMM slippage
+  MAX_ENTRY_GAP_BPS: z.coerce.number().default(1500), // 15.0% max price deterioration vs target
+  MAX_SLIPPAGE_BPS: z.coerce.number().default(200), // 2.0% max AMM buy slippage
+  MAX_SELL_SLIPPAGE_BPS: z.coerce.number().default(1500), // 15.0% max sell slippage to guarantee immediate exit without 15001 error
   DAILY_LOSS_LIMIT_SOL: z.coerce.number().default(0.03),
   CONSECUTIVE_ERROR_LIMIT: z.coerce.number().default(5),
 

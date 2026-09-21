@@ -338,11 +338,12 @@ export class LiveExecutionEngine {
               }
             }
           } else {
+            const sellSlippageBps = config.MAX_SELL_SLIPPAGE_BPS || 1500;
             const pumpResult = await pumpFunSwapAdapter.buildAndSignSell(
               keypair,
               mirrorIntent.tokenMint,
               BigInt(rawInAmount),
-              config.MAX_SLIPPAGE_BPS,
+              sellSlippageBps,
               precalculatedCurveState,
               tokenProgramId
             );
@@ -380,13 +381,14 @@ export class LiveExecutionEngine {
         isJupiterManaged = true;
         const inputMint = isBuy ? WSOL_MINT : mirrorIntent.tokenMint;
         const outputMint = isBuy ? mirrorIntent.tokenMint : WSOL_MINT;
+        const activeSlippageBps = isBuy ? config.MAX_SLIPPAGE_BPS : (config.MAX_SELL_SLIPPAGE_BPS || 1500);
 
         jupOrderResponse = await jupiterSwapV2Adapter.createOrder(
           inputMint,
           outputMint,
           rawInAmount,
           keypair.publicKey.toBase58(),
-          config.MAX_SLIPPAGE_BPS
+          activeSlippageBps
         );
 
         const signedResult = await jupiterSwapV2Adapter.signOrder(keypair, jupOrderResponse);
