@@ -19,6 +19,7 @@ import { OverviewLiveChart } from '../components/trading/OverviewLiveChart';
 import { TargetVsFollowerPanel } from '../components/trading/TargetVsFollowerPanel';
 import { TokenIdentity } from '../components/trading/TokenIdentity';
 import { TradeFeed } from '../components/trading/TradeFeed';
+import { PnlShowcaseBanner } from '../components/analytics/PnlShowcaseBanner';
 import {
   formatBps,
   formatLatency,
@@ -110,6 +111,14 @@ export const Overview: React.FC<OverviewProps> = ({
         telemetry={telemetry}
         positions={positions}
         lastRefreshedAt={lastRefreshedAt || Date.now()}
+      />
+
+      {/* Hero PnL & Profit Transparency Showcase */}
+      <PnlShowcaseBanner
+        telemetry={telemetry}
+        orders={orders}
+        positions={positions}
+        isLive={isLive}
       />
 
       {/* Top KPI Row */}
