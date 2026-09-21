@@ -18,8 +18,9 @@ const ConfigSchema = z.object({
   HELIUS_SENDER_URL: z.string().default(''),
   LASERSTREAM_GRPC_URL: z.string().default(''),
 
-  // Execution Wallet Key (Base58 or JSON byte array) - Strictly isolated backend hot wallet
+  // Execution Hot Wallet (Dedicated smoke-test wallet only; do not use primary wallet)
   FOLLOWER_PRIVATE_KEY: z.string().default(''),
+  LIVE_INITIAL_BALANCE_SOL: z.coerce.number().default(0.2610), // Starting capital in LIVE mode for accurate PnL tracking
 
   // Target Wallets to watch (comma-separated list of base58 public keys, defaults to empty)
   WATCHED_WALLETS: z
