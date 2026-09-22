@@ -112,15 +112,22 @@ export class ExecutionWalletManager {
       return 0n;
     }
 
-    try {
-      const lamports = await this.connection.getBalance(this.keypair.publicKey, 'confirmed');
-      this.cachedBalanceLamports = BigInt(lamports);
-      this.lastBalanceFetchTime = Date.now();
-      return this.cachedBalanceLamports;
-    } catch (err: any) {
-      console.warn('[Execution Wallet] Failed to query on-chain balance:', err.message);
-      return this.cachedBalanceLamports;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const lamports = await this.connection.getBalance(this.keypair.publicKey, 'confirmed');
+        this.cachedBalanceLamports = BigInt(lamports);
+        this.lastBalanceFetchTime = Date.now();
+        return this.cachedBalanceLamports;
+      } catch (err: any) {
+        if (attempt < 3) {
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
+        } else {
+          console.warn('[Execution Wallet] Failed to query on-chain balance:', err.message);
+          return this.cachedBalanceLamports;
+        }
+      }
     }
+    return this.cachedBalanceLamports;
   }
 
   /**
