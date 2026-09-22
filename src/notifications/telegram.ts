@@ -7,6 +7,7 @@ import { executionWalletManager } from '../execution/wallet-manager.js';
 import { liveEngine } from '../execution/live-engine.js';
 import { traderAnalyzerService } from '../services/trader-analyzer.js';
 import { FollowerPosition, MirrorOrder, SwapIntent, WatchedWallet } from '../types/index.js';
+import { targetSyncService } from '../services/target-sync.js';
 
 export class TelegramNotifier {
   private botToken: string;
@@ -65,6 +66,8 @@ export class TelegramNotifier {
             { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
             { command: 'status', description: 'Engine Health, Telemetry & Feed' },
             { command: 'pnl', description: 'Portfolio Profit/Loss Performance' },
+            { command: 'restore', description: 'Restore Bottom Interactive Keypad' },
+            { command: 'keypad', description: 'Restore Bottom Interactive Keypad' },
             { command: 'help', description: 'Terminal Usage Guide & Commands' },
           ],
         }),
@@ -74,6 +77,17 @@ export class TelegramNotifier {
       if (res.ok) {
         console.info('[Telegram Bot] Successfully registered native Telegram command menu.');
       }
+
+      // Configure native Telegram bot menu button
+      const menuButtonUrl = `${this.apiRoot}/bot${this.botToken}/setChatMenuButton`;
+      await fetch(menuButtonUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          menu_button: { type: 'commands' },
+        }),
+        signal: AbortSignal.timeout(8000),
+      }).catch(() => {});
     } catch {
       // Ignored if network connection to Telegram is temporarily blocked
     }
@@ -221,7 +235,12 @@ export class TelegramNotifier {
       clean === 'menu' ||
       clean.includes('main menu') ||
       clean === 'help' ||
-      clean.includes('guide')
+      clean.includes('guide') ||
+      clean === 'keypad' ||
+      clean === 'keyboard' ||
+      clean === 'restore' ||
+      clean.includes('restore') ||
+      clean.includes('keypad')
     ) {
       await this.sendMainMenu(chatId);
     } else if (
@@ -442,6 +461,9 @@ export class TelegramNotifier {
       const fraction = pct / 100;
 
       await this.executeManualSellFromChat(chatId, posIdOrMint, fraction);
+    } else if (data.startsWith('toggle_wallet_')) {
+      const address = data.replace('toggle_wallet_', '').trim();
+      await this.handleToggleTargetWallet(chatId, address);
     } else if (data.startsWith('del_wallet_')) {
       const address = data.replace('del_wallet_', '').trim();
       await this.handleRemoveTargetWallet(chatId, address);
@@ -876,7 +898,15 @@ ${divider}
       ],
     };
 
-    await this.sendCustomMessage(chatId, text, inlineKeyboard, this.getPersistentReplyKeyboard());
+    // 1. Deliver the persistent keypad first so Telegram client pins it to the bottom of the screen
+    await this.sendCustomMessage(
+      chatId,
+      '⌨️ <i>Interactive quick-access terminal keypad active.</i>',
+      this.getPersistentReplyKeyboard()
+    );
+
+    // 2. Deliver the rich control terminal card with inline buttons
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
   }
 
   /**
@@ -1357,8 +1387,10 @@ ${divider}
 
       for (const w of wallets) {
         const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
+        const statusBtn = w.enabled ? '⏸️ Pause' : '▶️ Resume';
         inlineKeyboardRows.push([
-          { text: `🧠 Score ${w.label || short}`, callback_data: `score_${w.wallet}` },
+          { text: statusBtn, callback_data: `toggle_wallet_${w.wallet}` },
+          { text: `🧠 Score`, callback_data: `score_${w.wallet}` },
           { text: `🗑️ Remove`, callback_data: `del_wallet_${w.wallet}` },
         ]);
       }
@@ -1374,14 +1406,14 @@ ${divider}
     ]);
 
     const text = `
-👥 <b>WATCHED TARGET TRADERS (${wallets.length} ACTIVE)</b>
+👥 <b>WATCHED TARGET TRADERS (${wallets.length} SAVED)</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 ${walletList}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-⚡ <i>Signals from these traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.</i>
-💡 <i>To add a trader, paste their address directly into this chat or type <code>/add_target &lt;address&gt;</code></i>
+⚡ <i>Signals from active traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.</i>
+💡 <i>Tap <b>⏸️ Pause</b> to temporarily disable a trader without deleting them!</i>
     `.trim();
 
     await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineKeyboardRows });
@@ -1408,6 +1440,20 @@ ${walletList}
 
     const existing = db.getWatchedWallet(address);
     if (existing) {
+      if (!existing.enabled) {
+        existing.enabled = true;
+        db.upsertWatchedWallet(existing);
+        if (this.signalManagerRef) {
+          this.signalManagerRef.refreshWallets();
+        }
+        await targetSyncService.syncAll();
+        await this.sendCustomMessage(
+          chatId,
+          `✅ <b>[TARGET RE-ACTIVATED]</b>\nWallet <code>${address}</code> was already saved in your bot and has been re-activated for copy-trading!`
+        );
+        await this.sendWalletsReport(chatId);
+        return;
+      }
       await this.sendCustomMessage(
         chatId,
         `ℹ️ <b>[ALREADY MONITORED]</b>\nWallet <code>${address}</code> is already in your target list (${existing.label || 'Target'}).`
@@ -1432,6 +1478,8 @@ ${walletList}
       this.signalManagerRef.refreshWallets();
     }
 
+    await targetSyncService.syncAll();
+
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
 
@@ -1442,6 +1490,7 @@ ${walletList}
 <b>Label:</b> ${newTarget.label}
 <b>Copy Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD) per trade
 <b>Stream:</b> Live on Helius LaserStream & Webhook
+<b>Persistence:</b> 🔒 Saved permanently (never lost across redeployments)
 
 The bot will now detect and copy all buy & sell transactions from this wallet in real time!
     `.trim();
@@ -1460,6 +1509,35 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
   }
 
   /**
+   * Toggle enable / pause for target trader wallet without removing it
+   */
+  public async handleToggleTargetWallet(chatId: string | number, rawAddress: string): Promise<void> {
+    const address = rawAddress.trim();
+    const existing = db.getWatchedWallet(address);
+    if (!existing) {
+      await this.sendCustomMessage(chatId, `ℹ️ Wallet <code>${address}</code> not found.`);
+      await this.sendWalletsReport(chatId);
+      return;
+    }
+
+    existing.enabled = !existing.enabled;
+    db.upsertWatchedWallet(existing);
+
+    if (this.signalManagerRef) {
+      this.signalManagerRef.refreshWallets();
+    }
+
+    await targetSyncService.syncAll();
+
+    const statusText = existing.enabled ? '🟢 <b>ACTIVE (Copying ON)</b>' : '⏸️ <b>PAUSED (Copying OFF)</b>';
+    await this.sendCustomMessage(
+      chatId,
+      `🎯 Target <code>${existing.label || address.slice(0, 4) + '...' + address.slice(-4)}</code> is now ${statusText}.\n<i>The wallet stays saved in your bot permanently so you never have to re-enter it.</i>`
+    );
+    await this.sendWalletsReport(chatId);
+  }
+
+  /**
    * Remove a target trader wallet
    */
   public async handleRemoveTargetWallet(chatId: string | number, rawAddress: string): Promise<void> {
@@ -1469,6 +1547,8 @@ The bot will now detect and copy all buy & sell transactions from this wallet in
     if (this.signalManagerRef) {
       this.signalManagerRef.refreshWallets();
     }
+
+    await targetSyncService.syncAll();
 
     if (removed) {
       await this.sendCustomMessage(

@@ -12,6 +12,7 @@ import { telegramNotifier } from '../notifications/telegram.js';
 import { FastTransactionDecoder, ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
 import { tokenMetadataService } from '../services/token-metadata.js';
 import { latencyTracker } from '../telemetry/latency-tracker.js';
+import { targetSyncService } from '../services/target-sync.js';
 import {
   FollowerPosition,
   MirrorIntent,
@@ -27,6 +28,7 @@ export class SignalManager extends EventEmitter {
 
   constructor() {
     super();
+    targetSyncService.initializeOnStartup();
     this.refreshWallets();
   }
 
@@ -38,19 +40,23 @@ export class SignalManager extends EventEmitter {
         this.watchedWallets.set(w.wallet, w);
       }
     }
-    // Fallback: Also monitor any wallets configured in config.WATCHED_WALLETS
-    for (const walletStr of config.WATCHED_WALLETS) {
-      if (!this.watchedWallets.has(walletStr)) {
-        this.watchedWallets.set(walletStr, {
-          wallet: walletStr,
-          label: 'Target Trader',
-          enabled: true,
-          buyMode: config.DEFAULT_SIZING_MODE,
-          fixedBuyLamports: (config.FIXED_BUY_SOL * 1e9).toString(),
-          copyRatio: config.COPY_RATIO,
-          maxBuyLamports: (config.MAX_BUY_SOL * 1e9).toString(),
-          createdAt: Date.now(),
-        });
+    // Fallback: If and ONLY if there are zero registered wallets in the database, seed from config
+    if (list.length === 0) {
+      for (const walletStr of config.WATCHED_WALLETS) {
+        if (walletStr && walletStr.trim()) {
+          const wObj: WatchedWallet = {
+            wallet: walletStr.trim(),
+            label: 'Target Trader',
+            enabled: true,
+            buyMode: config.DEFAULT_SIZING_MODE,
+            fixedBuyLamports: (config.FIXED_BUY_SOL * 1e9).toString(),
+            copyRatio: config.COPY_RATIO,
+            maxBuyLamports: (config.MAX_BUY_SOL * 1e9).toString(),
+            createdAt: Date.now(),
+          };
+          db.upsertWatchedWallet(wObj);
+          this.watchedWallets.set(wObj.wallet, wObj);
+        }
       }
     }
     this.emit('walletsUpdated', Array.from(this.watchedWallets.values()));
