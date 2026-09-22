@@ -84,14 +84,15 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
             ) : (
               filtered.map((pos) => {
                 const meta = pos.metadata;
-                const costSol = Number(pos.costBasisLamports) / 1e9;
-                const costUsd = costSol * 100.0;
+                const costSol = (pos as any).costBasisSol ?? (Number(pos.costBasisLamports) / 1e9);
+                const solPrice = (pos as any).solPriceUsd || 140.0;
+                const costUsd = (pos as any).costBasisUsd ?? (costSol * solPrice);
                 const pnlSol = pos.unrealizedPnlSol ?? 0;
                 const pnlUsd = (pos.currentValueUsd ?? 0) - costUsd;
                 const pnlPct = pos.unrealizedPnlPct ?? 0;
                 const isProfit = pnlSol >= 0;
 
-                const priceUsd = meta?.priceUsd || (pos.currentPriceSol ? pos.currentPriceSol * 100.0 : 0);
+                const priceUsd = meta?.priceUsd || (pos.currentPriceSol ? pos.currentPriceSol * solPrice : 0);
 
                 return (
                   <tr key={pos.id}>
@@ -103,7 +104,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                     {/* Quantity */}
                     <td>
                       <div className="mono font-semibold">
-                        {formatTokenQty(pos.qtyRaw, 6)}
+                        {formatTokenQty(pos.qtyRaw, (pos as any).decimals || 6)}
                       </div>
                     </td>
 

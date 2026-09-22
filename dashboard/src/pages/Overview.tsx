@@ -257,8 +257,8 @@ export const Overview: React.FC<OverviewProps> = ({
             {openPositions.map((pos) => {
               const meta = pos.metadata;
               const symbol = meta?.symbol || pos.tokenMint.substring(0, 5);
-              const costSol = Number(pos.costBasisLamports) / 1e9;
-              const costUsd = costSol * solPriceUsd;
+              const costSol = (pos as any).costBasisSol ?? (Number(pos.costBasisLamports) / 1e9);
+              const costUsd = (pos as any).costBasisUsd ?? (costSol * solPriceUsd);
 
               const pnlSol = pos.unrealizedPnlSol || 0;
               const pnlUsd = (pos.currentValueUsd || 0) - costUsd;

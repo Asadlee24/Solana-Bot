@@ -1,0 +1,17 @@
+[
+  {
+    "id": "onchain_FyJKJvt7DHvCwVH9NF4bXmsDhKGdyu3Fu7xEHgUXpump",
+    "targetWallet": "On-Chain Wallet",
+    "tokenMint": "FyJKJvt7DHvCwVH9NF4bXmsDhKGdyu3Fu7xEHgUXpump",
+    "qtyRaw": "1650944118721",
+    "costBasisLamports": "50000000",
+    "avgEntryPriceSol": 3.02857053e-8,
+    "realizedPnlLamports": "0",
+    "unrealizedPnlLamports": "-40343638",
+    "state": "OPEN",
+    "openedAt": 1789652046625,
+    "updatedAt": 1790085533651,
+    "tp1Triggered": false,
+    "peakPnlPct": 0
+  }
+]

@@ -91,6 +91,9 @@ export class AutoExitManager {
       try {
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
         const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : 0;
+        if (pos.avgEntryPriceSol <= 0 && BigInt(pos.costBasisLamports || '0') > 0n && BigInt(pos.qtyRaw) > 0n) {
+          pos.avgEntryPriceSol = (Number(pos.costBasisLamports) / 1e9) / (Number(pos.qtyRaw) / 1e6);
+        }
         if (!currentPriceSol || pos.avgEntryPriceSol <= 0) continue;
 
         // Unrealized ROI in percent

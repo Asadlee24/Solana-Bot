@@ -8,6 +8,8 @@ import { liveEngine } from '../execution/live-engine.js';
 import { traderAnalyzerService } from '../services/trader-analyzer.js';
 import { FollowerPosition, MirrorOrder, SwapIntent, WatchedWallet } from '../types/index.js';
 import { targetSyncService } from '../services/target-sync.js';
+import { mintDecimalsService } from '../services/mint-decimals.js';
+import { positionSyncService } from '../services/position-sync.js';
 
 export class TelegramNotifier {
   private botToken: string;
@@ -962,11 +964,12 @@ ${divider}
               continue;
             }
 
-            // 2. Fetch metadata & price
+            // 2. Fetch metadata, decimals & spot price
+            const decimals = await mintDecimalsService.getDecimals(item.mint);
             const meta = await tokenMetadataService.getTokenMetadata(item.mint);
             const priceSol = meta?.priceSol || 0;
             const priceUsd = meta?.priceUsd || priceSol * solPriceUsd;
-            const tokenQty = Number(item.amountRaw) / 1e6;
+            const tokenQty = Number(item.amountRaw) / (10 ** decimals);
             const estValueUsd = tokenQty * priceUsd;
 
             // If token has 0 price or total position value is less than $0.05 USD, it's dead dust/spam!
@@ -974,13 +977,25 @@ ${divider}
               continue;
             }
 
+            // Check if there is a past BUY order in DB
+            const orders = db.getRecentOrders(100);
+            const buyOrder = orders.find(
+              (o) => o.token_mint === item.mint && o.side === 'BUY' && (o.status === 'FILLED' || o.status === 'LANDED' || o.status === 'CONFIRMED')
+            );
+            let costBasisLamports = Math.round((config.FIXED_BUY_SOL || 0.05) * 1e9).toString();
+            let avgEntryPriceSol = tokenQty > 0 ? (Number(costBasisLamports) / 1e9) / tokenQty : priceSol;
+            if (buyOrder) {
+              costBasisLamports = buyOrder.actualInAmountRaw || buyOrder.in_amount_raw || costBasisLamports;
+              avgEntryPriceSol = buyOrder.actualExecutionPrice || buyOrder.effective_price || avgEntryPriceSol;
+            }
+
             const dynamicPos: FollowerPosition = {
               id: `onchain_${item.mint}`,
-              targetWallet: 'On-Chain Wallet',
+              targetWallet: buyOrder?.target_signature || 'On-Chain Wallet',
               tokenMint: item.mint,
               qtyRaw: item.amountRaw,
-              costBasisLamports: '0',
-              avgEntryPriceSol: priceSol,
+              costBasisLamports,
+              avgEntryPriceSol,
               realizedPnlLamports: '0',
               unrealizedPnlLamports: '0',
               state: 'OPEN',
@@ -990,6 +1005,7 @@ ${divider}
               tp1Triggered: false,
               peakPnlPct: 0,
             };
+            db.savePosition(dynamicPos);
             openPositions.push(dynamicPos);
             knownMints.add(item.mint);
           }
@@ -1048,6 +1064,7 @@ ${divider}
     );
 
     for (const pos of openPositions) {
+      const decimals = await mintDecimalsService.getDecimals(pos.tokenMint);
       const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
       const symbol = meta?.symbol || pos.tokenMint.substring(0, 6).toUpperCase();
       const name = meta?.name || symbol;
@@ -1061,8 +1078,12 @@ ${divider}
           ? `$${(estMarketCapUsd / 1_000_000).toFixed(2)}M`
           : `$${(estMarketCapUsd / 1_000).toFixed(1)}K`;
 
-      const tokenQty = Number(pos.qtyRaw) / 1e6;
-      const costBasisSol = Number(pos.costBasisLamports) / 1e9;
+      const tokenQty = Number(pos.qtyRaw) / (10 ** decimals);
+      let costBasisLamports = BigInt(pos.costBasisLamports || '0');
+      if (costBasisLamports === 0n) {
+        costBasisLamports = BigInt(Math.round((config.FIXED_BUY_SOL || 0.05) * 1e9));
+      }
+      const costBasisSol = Number(costBasisLamports) / 1e9;
       const costBasisUsd = costBasisSol * solPriceUsd;
 
       const currentValueSol = tokenQty * currentPriceSol;
@@ -1077,7 +1098,7 @@ ${divider}
 🪙 <b>ACTIVE HOLDING: $${symbol}</b>${name !== symbol ? ` (${name})` : ''}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📌 <b>Mint:</b> <code>${pos.tokenMint}</code>
-💎 <b>Price:</b> <code>$${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(6) : currentPriceUsd.toFixed(4)} USD</code> (<b>${currentPriceSol.toFixed(8)} SOL</b>)
+💎 <b>Price:</b> <code>$${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(7) : currentPriceUsd.toFixed(4)} USD</code> (<b>${currentPriceSol.toFixed(8)} SOL</b>)
 📊 <b>Est. Market Cap:</b> <b>${mcapStr}</b>
 
 💼 <b>POSITION HOLDINGS</b>
@@ -1117,6 +1138,8 @@ ${divider}
         ],
       });
     }
+
+    await positionSyncService.persistOpenPositions();
   }
 
   /**

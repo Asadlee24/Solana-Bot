@@ -7,6 +7,7 @@ import { blockhashService } from './execution/blockhash-service.js';
 import { liveEngine } from './execution/live-engine.js';
 import { executionWalletManager } from './execution/wallet-manager.js';
 import { telegramNotifier } from './notifications/telegram.js';
+import { positionSyncService } from './services/position-sync.js';
 import { HeliusWebSocketStream } from './streams/helius-ws.js';
 import { rpcPoller } from './streams/rpc-poller.js';
 import { signalManager } from './streams/signal-manager.js';
@@ -24,6 +25,9 @@ async function bootstrap() {
       console.warn(`[LIVE ENGINE STARTUP] Could not auto-arm on startup: ${armRes.reason}`);
     }
   }
+
+  // Restore and reconcile live positions with on-chain wallet tokens & accurate cost basis
+  await positionSyncService.initializeOnStartup();
 
   const liveStatus = liveEngine.getStatus();
 

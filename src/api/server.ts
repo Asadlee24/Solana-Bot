@@ -8,9 +8,11 @@ import { riskEngine } from '../engine/risk-engine.js';
 import { liveEngine } from '../execution/live-engine.js';
 import { executionWalletManager } from '../execution/wallet-manager.js';
 import { tokenMetadataService } from '../services/token-metadata.js';
+import { mintDecimalsService } from '../services/mint-decimals.js';
+import { positionSyncService } from '../services/position-sync.js';
 import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
-import { SystemTelemetry } from '../types/index.js';
+import { SystemTelemetry, FollowerPosition } from '../types/index.js';
 
 // Authentication middleware for state-modifying actions
 export const requireControlAuth = (req: Request, res: Response, next: express.NextFunction) => {
@@ -72,6 +74,8 @@ export function createApiServer() {
     });
 
     const open: any[] = [];
+    const knownMints = new Set<string>();
+
     for (const pos of rawOpen) {
       if (config.EXECUTION_MODE === 'LIVE') {
         try {
@@ -83,22 +87,92 @@ export function createApiServer() {
             pos.updatedAt = Date.now();
             db.savePosition(pos);
             continue;
+          } else {
+            pos.qtyRaw = onChainBal.toString();
           }
         } catch {}
       }
       open.push(pos);
+      knownMints.add(pos.tokenMint);
     }
 
-    const solPriceUsd = 100.0;
+    // IN LIVE MODE: Directly scan on-chain wallet tokens so dashboard is 100% in sync with wallet
+    if (config.EXECUTION_MODE === 'LIVE') {
+      try {
+        const held = await executionWalletManager.getHeldTokensWithAmounts();
+        for (const item of held) {
+          if (!knownMints.has(item.mint)) {
+            if (
+              item.mint === '9aaDsN9KkSy9q3LmAwhXiJF75veH4wsbEFkJXqMH54VW' ||
+              item.mint === 'So11111111111111111111111111111111111111112'
+            ) {
+              continue;
+            }
+
+            const decimals = await mintDecimalsService.getDecimals(item.mint);
+            const meta = await tokenMetadataService.getTokenMetadata(item.mint);
+            const priceSol = meta?.priceSol || 0;
+            const liveSol = (await tokenMetadataService.getSolPriceUsd()) || 140.0;
+            const priceUsd = meta?.priceUsd || priceSol * liveSol;
+            const tokenQty = Number(item.amountRaw) / (10 ** decimals);
+            const estValueUsd = tokenQty * priceUsd;
+
+            if (priceUsd <= 0 || estValueUsd < 0.05) continue;
+
+            const orders = db.getRecentOrders(100);
+            const buyOrder = orders.find(
+              (o) => o.token_mint === item.mint && o.side === 'BUY' && (o.status === 'FILLED' || o.status === 'LANDED' || o.status === 'CONFIRMED')
+            );
+            let costBasisLamports = Math.round((config.FIXED_BUY_SOL || 0.05) * 1e9).toString();
+            let avgEntryPriceSol = tokenQty > 0 ? (Number(costBasisLamports) / 1e9) / tokenQty : priceSol;
+            if (buyOrder) {
+              costBasisLamports = buyOrder.actualInAmountRaw || buyOrder.in_amount_raw || costBasisLamports;
+              avgEntryPriceSol = buyOrder.actualExecutionPrice || buyOrder.effective_price || avgEntryPriceSol;
+            }
+
+            const dynamicPos: FollowerPosition = {
+              id: `onchain_${item.mint}`,
+              targetWallet: buyOrder?.target_signature || 'On-Chain Wallet',
+              tokenMint: item.mint,
+              qtyRaw: item.amountRaw,
+              costBasisLamports,
+              avgEntryPriceSol,
+              realizedPnlLamports: '0',
+              unrealizedPnlLamports: '0',
+              state: 'OPEN',
+              openedAt: Date.now(),
+              updatedAt: Date.now(),
+              closedAt: undefined,
+              tp1Triggered: false,
+              peakPnlPct: 0,
+            };
+            db.savePosition(dynamicPos);
+            open.push(dynamicPos);
+            knownMints.add(item.mint);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[API Server] Error scanning on-chain tokens for positions API:', err?.message || err);
+      }
+    }
+
+    const solPriceUsd = (await tokenMetadataService.getSolPriceUsd()) || 140.0;
+
     return Promise.all(
       open.map(async (pos) => {
+        const decimals = await mintDecimalsService.getDecimals(pos.tokenMint);
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
         const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : pos.avgEntryPriceSol;
         const currentPriceUsd = meta?.priceUsd && meta.priceUsd > 0 ? meta.priceUsd : (currentPriceSol * solPriceUsd);
 
-        // SPL pump.fun tokens have 6 decimals: raw / 1e6 = tokens
-        const tokenQty = Number(pos.qtyRaw) / 1e6;
-        const costBasisSol = Number(pos.costBasisLamports) / 1e9;
+        const tokenQty = Number(pos.qtyRaw) / (10 ** decimals);
+        let costBasisLamports = BigInt(pos.costBasisLamports || '0');
+        if (costBasisLamports === 0n) {
+          costBasisLamports = BigInt(Math.round((config.FIXED_BUY_SOL || 0.05) * 1e9));
+        }
+        const costBasisSol = Number(costBasisLamports) / 1e9;
+        const costBasisUsd = costBasisSol * solPriceUsd;
+
         const currentValueSol = tokenQty * currentPriceSol;
         const currentValueUsd = currentValueSol * solPriceUsd;
 
@@ -108,17 +182,19 @@ export function createApiServer() {
 
         try {
           db.updateUnrealizedPnl(pos.id, unrealizedPnlLamports);
-        } catch {
-          // ignore
-        }
+        } catch {}
 
         return {
           ...pos,
           metadata: meta,
+          decimals,
+          solPriceUsd,
           currentPriceSol,
           currentPriceUsd,
           currentValueSol: Number(currentValueSol.toFixed(4)),
           currentValueUsd: Number(currentValueUsd.toFixed(2)),
+          costBasisSol: Number(costBasisSol.toFixed(4)),
+          costBasisUsd: Number(costBasisUsd.toFixed(2)),
           unrealizedPnlSol: Number(unrealizedPnlSol.toFixed(4)),
           unrealizedPnlPct: Number(unrealizedPnlPct.toFixed(2)),
           unrealizedPnlLamports,
