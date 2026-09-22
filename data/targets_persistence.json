@@ -1,0 +1,192 @@
+[
+  {
+    "wallet": "CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS",
+    "label": "Alpha Whale (CwUH)",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789629942660
+  },
+  {
+    "wallet": "5pUgxQGgX36GyV5BdsBNRAw9JxJ6Br4UVddJmJ3sumhc",
+    "label": "Trader_5pUg",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000001
+  },
+  {
+    "wallet": "4UrFSCrGxgoCtCUBAEZq7ZmPK3Pczkxx7PwYnkBMi1KR",
+    "label": "Trader_4UrF",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000002
+  },
+  {
+    "wallet": "24L6uekgvsQRgT41DZRhahEAAVnkseTT7x4qyigC3HvH",
+    "label": "Trader_24L6",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000003
+  },
+  {
+    "wallet": "Bmi9zf27MNN5pjCtyv2Y15TDQoYgcbcmPTxvEoQ6UwWs",
+    "label": "Trader_Bmi9",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000004
+  },
+  {
+    "wallet": "EeXvxkcGqMDZeTaVeawzxm9mbzZwqDUMmfG3bF7uzumH",
+    "label": "Trader_EeXv",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000005
+  },
+  {
+    "wallet": "J23qr98GjGJJqKq9CBEnyRhHbmkaVxtTJNNxKu597wsA",
+    "label": "Trader_J23q",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000006
+  },
+  {
+    "wallet": "2M2vLX34LXMg24dMEnjWHvRXS1tshpEDRWzmXgV8ENNZ",
+    "label": "Trader_2M2v",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000007
+  },
+  {
+    "wallet": "ardinRsN1mNYVeoJWTBsWeYeXvuR9UUDGMsCDKpb6AT",
+    "label": "Trader_ardi",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000008
+  },
+  {
+    "wallet": "HsQnUgdVVUJNTTEe5mzpQFFi55oXq4UwcjByEFb3Rd52",
+    "label": "Trader_HsQn",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000009
+  },
+  {
+    "wallet": "9LXWa7V3AE15VfBupcx5gDts2ix3Y9NzbcKZKjkkq6hV",
+    "label": "Trader_9LXW",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000010
+  },
+  {
+    "wallet": "3fkpFTci5PdEYWxxkucVovJfhJM1td7ecJXrbXjXcSjN",
+    "label": "Trader_3fkp",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000011
+  },
+  {
+    "wallet": "2kudSNH3r48B5thdYqDijxhfjGWXqSXkhFaRofvZt9hC",
+    "label": "Trader_2kud",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000012
+  },
+  {
+    "wallet": "JVmu8WuRzdhdbj97PZeVUnYLfcDjy8jt4fk1Cqj4VKp",
+    "label": "Trader_JVmu",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000013
+  },
+  {
+    "wallet": "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
+    "label": "Trader_Cw8C",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000014
+  },
+  {
+    "wallet": "6JKFLiQckuQP755USQg38fwoHS7bpPkbKYyK7stwpaid",
+    "label": "Trader_6JKF",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000015
+  },
+  {
+    "wallet": "DRuAtesZSWEm7yNRXmT9Vo8L2pn9bPUirmyJ8vVvm58K",
+    "label": "Trader_DRuA",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000016
+  },
+  {
+    "wallet": "HqknEzuNDvDpGgHDtbxJuSD41bBBwk2CixD5gPg12z6",
+    "label": "Trader_Hqkn",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000017
+  },
+  {
+    "wallet": "BMofZXeaBSzWWdSnMbnRQNFCabDfziwxMMeS32jKUoyf",
+    "label": "Trader_BMof",
+    "enabled": true,
+    "buyMode": "FIXED_SIZE",
+    "fixedBuyLamports": "50000000",
+    "copyRatio": 0.05,
+    "maxBuyLamports": "50000000",
+    "createdAt": 1789630000018
+  }
+]

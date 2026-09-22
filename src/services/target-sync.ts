@@ -37,13 +37,7 @@ export class TargetSyncService {
    */
   public initializeOnStartup(): void {
     try {
-      const dbWallets = db.getWatchedWallets();
-      if (dbWallets.length > 0) {
-        this.saveToFile(dbWallets);
-        return;
-      }
-
-      // Check backup JSON
+      // 1. Primary: If persistent backup JSON exists, restore all saved wallets into DB
       if (fs.existsSync(BACKUP_FILE)) {
         const raw = fs.readFileSync(BACKUP_FILE, 'utf8');
         const parsed: WatchedWallet[] = JSON.parse(raw);
@@ -52,28 +46,32 @@ export class TargetSyncService {
             db.upsertWatchedWallet(w);
           }
           console.info(`[TargetSync] Restored ${parsed.length} target wallet(s) from persistent backup file.`);
-          return;
         }
       }
 
-      // Fallback: seed from config.WATCHED_WALLETS
+      // 2. Also ensure config.WATCHED_WALLETS are registered if not present
       if (config.WATCHED_WALLETS && config.WATCHED_WALLETS.length > 0) {
         for (const walletStr of config.WATCHED_WALLETS) {
           if (walletStr && walletStr.trim()) {
-            db.upsertWatchedWallet({
-              wallet: walletStr.trim(),
-              label: 'Target Trader',
-              enabled: true,
-              buyMode: config.DEFAULT_SIZING_MODE,
-              fixedBuyLamports: (config.FIXED_BUY_SOL * 1e9).toString(),
-              copyRatio: config.COPY_RATIO,
-              maxBuyLamports: (config.MAX_BUY_SOL * 1e9).toString(),
-              createdAt: Date.now(),
-            });
+            const cleanW = walletStr.trim();
+            if (!db.getWatchedWallet(cleanW)) {
+              db.upsertWatchedWallet({
+                wallet: cleanW,
+                label: 'Target Trader',
+                enabled: true,
+                buyMode: config.DEFAULT_SIZING_MODE,
+                fixedBuyLamports: (config.FIXED_BUY_SOL * 1e9).toString(),
+                copyRatio: config.COPY_RATIO,
+                maxBuyLamports: (config.MAX_BUY_SOL * 1e9).toString(),
+                createdAt: Date.now(),
+              });
+            }
           }
         }
-        this.saveToFile(db.getWatchedWallets());
       }
+
+      const allWallets = db.getWatchedWallets();
+      this.saveToFile(allWallets);
     } catch (err) {
       console.warn('[TargetSync] Initialization error:', err);
     }
