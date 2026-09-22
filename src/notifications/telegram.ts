@@ -10,6 +10,7 @@ import { FollowerPosition, MirrorOrder, SwapIntent, WatchedWallet } from '../typ
 import { targetSyncService } from '../services/target-sync.js';
 import { mintDecimalsService } from '../services/mint-decimals.js';
 import { positionSyncService } from '../services/position-sync.js';
+import { traderNamingService } from '../services/trader-naming.js';
 
 export class TelegramNotifier {
   private botToken: string;
@@ -58,9 +59,11 @@ export class TelegramNotifier {
             { command: 'balance', description: 'Real On-Chain Wallet Balance' },
             { command: 'activate', description: 'Activate Bot (Start Live Trading)' },
             { command: 'deactivate', description: 'Deactivate Bot (Pause Live Trading)' },
-            { command: 'positions', description: 'Open Positions & Close Controls' },
+            { command: 'positions', description: 'Open Positions & Copied Trader Info' },
             { command: 'close_all', description: 'Emergency Close All Open Positions' },
             { command: 'targets', description: 'View & Manage Watched Target Traders' },
+            { command: 'traders', description: 'View Watched Traders & Nicknames' },
+            { command: 'label', description: 'Rename Trader: /label <number> <nickname>' },
             { command: 'score', description: 'Analyze Trader Win-Rate & PnL: /score <wallet>' },
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
@@ -275,7 +278,21 @@ export class TelegramNotifier {
       await this.sendPnlSummaryReport(chatId);
     } else if (clean === 'status' || clean.includes('bot status') || clean === 'health' || clean === 'stats') {
       await this.sendStatusReport(chatId);
-    } else if (clean === 'wallets' || clean.includes('watched wallets') || clean === 'targets' || clean.includes('target traders') || clean.includes('target wallets')) {
+    } else if (clean.startsWith('label') || clean.startsWith('name ') || clean.startsWith('rename ')) {
+      const parts = rawText.trim().split(/\s+/);
+      if (parts.length < 3) {
+        await this.sendCustomMessage(
+          chatId,
+          'ℹ️ <b>Trader Nickname Usage:</b>\n<code>/label &lt;trader_number_or_address&gt; &lt;nickname&gt;</code>\n\n<b>Examples:</b>\n• <code>/label 1 Alpha Whale</code>\n• <code>/label 2 Pump Sniper</code>\n• <code>/label CwUH Smart Insider</code>\n\n<i>Type /traders to view all your traders and their numbers!</i>'
+        );
+        return;
+      }
+      const target = parts[1];
+      const newName = parts.slice(2).join(' ');
+      const res = await traderNamingService.setTraderLabel(target, newName);
+      await this.sendCustomMessage(chatId, res.message);
+      await this.sendWalletsReport(chatId);
+    } else if (clean === 'traders' || clean === 'wallets' || clean.includes('watched wallets') || clean === 'targets' || clean.includes('target traders') || clean.includes('target wallets')) {
       await this.sendWalletsReport(chatId);
     } else if (clean.startsWith('add_target') || clean.startsWith('addtarget') || clean.startsWith('add ') || clean.startsWith('watch ')) {
       const parts = rawText.split(/\s+/);
@@ -1094,10 +1111,14 @@ ${divider}
       const pnlPct = costBasisSol > 0 ? (pnlSol / costBasisSol) * 100 : 0;
       const isProfit = pnlSol >= 0;
 
+      const traderInfo = traderNamingService.getTraderInfo(pos.targetWallet || pos.tokenMint);
+
       const text = `
 🪙 <b>ACTIVE HOLDING: $${symbol}</b>${name !== symbol ? ` (${name})` : ''}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📌 <b>Mint:</b> <code>${pos.tokenMint}</code>
+👤 <b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
+🔗 <b>Trader Links:</b> <a href="${traderInfo.solscanUrl}">Solscan</a> | <a href="${traderInfo.gmgnUrl}">GMGN Profile</a>
 💎 <b>Price:</b> <code>$${currentPriceUsd < 0.01 ? currentPriceUsd.toFixed(7) : currentPriceUsd.toFixed(4)} USD</code> (<b>${currentPriceSol.toFixed(8)} SOL</b>)
 📊 <b>Est. Market Cap:</b> <b>${mcapStr}</b>
 
@@ -1404,7 +1425,8 @@ ${divider}
       walletList = wallets
         .map((w, idx) => {
           const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
-          return `${idx + 1}. <b>${w.label || 'Target'}</b>: <code>${short}</code>\n   Mode: ${w.buyMode} | Sizing: ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD) | Active: ${w.enabled ? '✅' : '⏸️'}`;
+          const label = w.label && w.label !== 'Target Trader' ? w.label : `Trader #${idx + 1}`;
+          return `${idx + 1}. 🏷️ <b>${label}</b>: <code>${short}</code>\n   🔗 <a href="https://solscan.io/account/${w.wallet}">Solscan</a> | <a href="https://gmgn.ai/sol/address/${w.wallet}">GMGN</a>\n   Mode: ${w.buyMode} | Sizing: ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD) | Status: ${w.enabled ? '🟢 Copying' : '⏸️ Paused'}`;
         })
         .join('\n\n');
 
@@ -1435,11 +1457,12 @@ ${divider}
 ${walletList}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 <i>To give any trader a custom name, type: <code>/label 1 Alpha Whale</code></i>
 ⚡ <i>Signals from active traders are ingested via Helius LaserStream within <b>&lt;3ms</b>.</i>
-💡 <i>Tap <b>⏸️ Pause</b> to temporarily disable a trader without deleting them!</i>
     `.trim();
 
     await this.sendCustomMessage(chatId, text, { inline_keyboard: inlineKeyboardRows });
+    return;
   }
 
   /**
@@ -2170,12 +2193,16 @@ ${statusText}
       ? `🚀 <b>[TRADE EXECUTED] ${modeBadge} BUY FILLED</b>`
       : (isWin ? `🎉 <b>[PROFIT REALIZED] ${modeBadge} SELL FILLED</b>` : `⚡ <b>[TRADE EXECUTED] ${modeBadge} SELL FILLED</b>`);
 
+    const traderWallet = (order as any).targetWallet || position?.targetWallet || traderNamingService.findTargetWalletByMint(order.tokenMint);
+    const traderInfo = traderNamingService.getTraderInfo(traderWallet);
+
     const text = `
 ${headerTitle}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
 📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+👤 <b>Target Trader:</b> <b>${traderInfo.displayName}</b> (<a href="${traderInfo.solscanUrl}">Solscan</a> | <a href="${traderInfo.gmgnUrl}">GMGN</a>)
 🎯 <b>Trigger:</b> <i>${triggerText}</i>
 
 💵 <b>Fill Price:</b> <code>$${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD</code> (<b>${fillPriceSol.toFixed(8)} SOL</b>)
@@ -2273,11 +2300,14 @@ Trading automatically paused for portfolio protection.
     const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
     const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
 
+    const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
+
     const text = `
 🎯 <b>[AUTO TAKE-PROFIT FILLED] (+${pnlPct.toFixed(1)}%)</b>
 
 <b>Coin:</b> <b>$${sym}</b>${tokenName}
 <b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
 <b>Strategy:</b> Moonbag 2x (Sold ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
 <b>Realized Profit:</b> <b>+$${realizedUsd.toFixed(2)} USD</b> (+${realizedSol.toFixed(4)} SOL)
@@ -2305,11 +2335,14 @@ Trading automatically paused for portfolio protection.
     const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
     const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
 
+    const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
+
     const text = `
 🛡️ <b>[AUTO STOP-LOSS FILLED] (${pnlPct.toFixed(1)}%)</b>
 
 <b>Coin:</b> <b>$${sym}</b>${tokenName}
 <b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
 <b>Strategy:</b> Anti-Rug Emergency Cut (100% Exited)
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
 <b>Loss Capped At:</b> $${realizedUsd.toFixed(2)} USD (${realizedSol.toFixed(4)} SOL)

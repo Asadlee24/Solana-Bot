@@ -291,6 +291,22 @@ export const Overview: React.FC<OverviewProps> = ({
                     </div>
                   </div>
 
+                  <div className="holding-trader-badge" style={{ fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px', margin: '6px 0 10px 0', padding: '4px 8px', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', width: 'fit-content' }}>
+                    <span>👤 Copied Trader:</span>
+                    <span className="font-semibold text-cyan">{(pos as any).traderLabel || 'Alpha Whale'}</span>
+                    {pos.targetWallet && pos.targetWallet !== 'On-Chain Wallet' && (
+                      <a
+                        href={`https://solscan.io/account/${pos.targetWallet}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-muted hover:underline mono"
+                        style={{ fontSize: '10.5px' }}
+                      >
+                        ({pos.targetWallet.slice(0, 4)}...{pos.targetWallet.slice(-4)})
+                      </a>
+                    )}
+                  </div>
+
                   <div className="holding-stats-row">
                     <div className="h-stat">
                       <span className="lbl">Cost Basis</span>

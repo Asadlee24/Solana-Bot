@@ -136,6 +136,11 @@ export interface LiveEngineStatus {
 export interface Position {
   id: string;
   targetWallet: string;
+  traderLabel?: string;
+  traderShort?: string;
+  traderDisplay?: string;
+  traderSolscanUrl?: string;
+  traderGmgnUrl?: string;
   tokenMint: string;
   qtyRaw: string;
   costBasisLamports: string;

@@ -10,6 +10,7 @@ import { executionWalletManager } from '../execution/wallet-manager.js';
 import { tokenMetadataService } from '../services/token-metadata.js';
 import { mintDecimalsService } from '../services/mint-decimals.js';
 import { positionSyncService } from '../services/position-sync.js';
+import { traderNamingService } from '../services/trader-naming.js';
 import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
 import { SystemTelemetry, FollowerPosition } from '../types/index.js';
@@ -130,9 +131,11 @@ export function createApiServer() {
               avgEntryPriceSol = buyOrder.actualExecutionPrice || buyOrder.effective_price || avgEntryPriceSol;
             }
 
+            const targetTrader = traderNamingService.findTargetWalletByMint(item.mint) || config.WATCHED_WALLETS[0] || 'Target Trader';
+
             const dynamicPos: FollowerPosition = {
               id: `onchain_${item.mint}`,
-              targetWallet: buyOrder?.target_signature || 'On-Chain Wallet',
+              targetWallet: targetTrader,
               tokenMint: item.mint,
               qtyRaw: item.amountRaw,
               costBasisLamports,
@@ -184,8 +187,16 @@ export function createApiServer() {
           db.updateUnrealizedPnl(pos.id, unrealizedPnlLamports);
         } catch {}
 
+        const traderInfo = traderNamingService.getTraderInfo(pos.targetWallet || pos.tokenMint);
+
         return {
           ...pos,
+          targetWallet: traderInfo.address,
+          traderLabel: traderInfo.label,
+          traderShort: traderInfo.short,
+          traderDisplay: traderInfo.displayName,
+          traderSolscanUrl: traderInfo.solscanUrl,
+          traderGmgnUrl: traderInfo.gmgnUrl,
           metadata: meta,
           decimals,
           solPriceUsd,

@@ -55,6 +55,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
           <thead>
             <tr>
               <th>Token</th>
+              <th>Copied Trader</th>
               <th>Holding Qty</th>
               <th>Cost Basis (USD & SOL)</th>
               <th>Avg Entry Price</th>
@@ -68,7 +69,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <EmptyState
                     title="No Positions Found"
                     description={
@@ -99,6 +100,29 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                     {/* Token */}
                     <td>
                       <TokenIdentity mint={pos.tokenMint} metadata={meta} />
+                    </td>
+
+                    {/* Copied Trader */}
+                    <td>
+                      <div className="trader-cell" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span className="font-semibold text-cyan" style={{ fontSize: '12px' }}>
+                          {(pos as any).traderLabel || 'Alpha Whale'}
+                        </span>
+                        {pos.targetWallet && pos.targetWallet !== 'On-Chain Wallet' ? (
+                          <a
+                            href={`https://solscan.io/account/${pos.targetWallet}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-muted mono hover:underline"
+                            style={{ fontSize: '10.5px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                          >
+                            <span>{`${pos.targetWallet.slice(0, 4)}...${pos.targetWallet.slice(-4)}`}</span>
+                            <ExternalLink size={10} />
+                          </a>
+                        ) : (
+                          <span className="text-muted mono" style={{ fontSize: '10.5px' }}>Hot Wallet</span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Quantity */}

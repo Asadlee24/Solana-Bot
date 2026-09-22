@@ -6,6 +6,7 @@ import { executionWalletManager } from '../execution/wallet-manager.js';
 import { tokenMetadataService } from './token-metadata.js';
 import { mintDecimalsService } from './mint-decimals.js';
 import { FollowerPosition } from '../types/index.js';
+import { traderNamingService } from './trader-naming.js';
 
 const PERSISTENCE_FILE = path.resolve('data/positions_persistence.json');
 
@@ -92,9 +93,11 @@ export class PositionSyncService {
               avgEntryPriceSol = buyOrder.actualExecutionPrice || buyOrder.effective_price || avgEntryPriceSol;
             }
 
+            const targetTrader = traderNamingService.findTargetWalletByMint(item.mint) || config.WATCHED_WALLETS[0] || 'Target Trader';
+
             const newPos: FollowerPosition = {
               id: `onchain_${item.mint}`,
-              targetWallet: buyOrder?.target_signature || 'On-Chain Wallet',
+              targetWallet: targetTrader,
               tokenMint: item.mint,
               qtyRaw: item.amountRaw,
               costBasisLamports,
