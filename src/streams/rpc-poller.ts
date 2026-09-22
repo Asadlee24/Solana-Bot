@@ -8,7 +8,7 @@ export class SolanaRpcPoller {
   private connection: Connection;
   private isRunning: boolean = false;
   private lastSignatureMap: Map<string, string> = new Map();
-  private pollIntervalMs: number = 8000; // Poll every 8 seconds with pacing to prevent RPC rate limits
+  private pollIntervalMs: number = 15000; // Poll every 15 seconds with pacing to prevent RPC rate limits
   private timer: NodeJS.Timeout | null = null;
 
   constructor() {
@@ -38,7 +38,7 @@ export class SolanaRpcPoller {
       for (const target of watched) {
         if (!this.isRunning) break;
         await this.checkWallet(target.wallet);
-        await new Promise((r) => setTimeout(r, 250));
+        await new Promise((r) => setTimeout(r, 500));
       }
     } catch (err) {
       // Ignore network hiccup on polling
