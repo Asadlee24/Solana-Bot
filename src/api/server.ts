@@ -189,6 +189,12 @@ export function createApiServer() {
 
         const traderInfo = traderNamingService.getTraderInfo(pos.targetWallet || pos.tokenMint);
 
+        const effectivePeak = Math.max(pos.peakPnlPct || 0, unrealizedPnlPct);
+        const isBreakevenLocked = config.TRAILING_SL_ENABLED && effectivePeak >= config.BREAKEVEN_TRIGGER_PCT;
+        const trailingFloorPct = config.TRAILING_SL_ENABLED && effectivePeak >= 30
+          ? Number((effectivePeak - config.TRAILING_SL_CUSHION_PCT).toFixed(1))
+          : (isBreakevenLocked ? config.BREAKEVEN_LOCK_PCT : null);
+
         return {
           ...pos,
           targetWallet: traderInfo.address,
@@ -209,6 +215,9 @@ export function createApiServer() {
           unrealizedPnlSol: Number(unrealizedPnlSol.toFixed(4)),
           unrealizedPnlPct: Number(unrealizedPnlPct.toFixed(2)),
           unrealizedPnlLamports,
+          peakPnlPct: Number(effectivePeak.toFixed(1)),
+          trailingFloorPct,
+          isBreakevenLocked,
         };
       })
     );

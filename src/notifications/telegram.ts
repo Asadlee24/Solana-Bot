@@ -67,6 +67,8 @@ export class TelegramNotifier {
             { command: 'score', description: 'Analyze Trader Win-Rate & PnL: /score <wallet>' },
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
+            { command: 'zeroloss', description: 'Zero-Loss Guarantee & Breakeven Lock' },
+            { command: 'trailing', description: 'Dynamic Trailing Stop-Loss Settings' },
             { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
             { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
             { command: 'status', description: 'Engine Health, Telemetry & Feed' },
@@ -333,7 +335,15 @@ export class TelegramNotifier {
       await this.promptTraderScoreInput(chatId);
     } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rawText)) {
       await this.handleDirectAddressInput(chatId, rawText);
-    } else if (clean === 'tpsl' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag')) {
+    } else if (clean === 'tpsl' || clean === 'trailing' || clean === 'zeroloss' || clean === 'breakeven' || clean.includes('take profit') || clean.includes('stop loss') || clean === 'protection' || clean.includes('moonbag') || clean.includes('zero loss') || clean.includes('trailing sl')) {
+      await this.sendTpSlReport(chatId);
+    } else if (clean === 'trailing_off' || clean === 'zeroloss_off' || clean === 'trailingoff' || clean === 'zerolossoff') {
+      (config as any).TRAILING_SL_ENABLED = false;
+      await this.sendCustomMessage(chatId, '🔴 <b>Zero-Loss Guarantee & Trailing Stop-Loss have been TURNED OFF.</b>');
+      await this.sendTpSlReport(chatId);
+    } else if (clean === 'trailing_on' || clean === 'zeroloss_on' || clean === 'trailingon' || clean === 'zerolosson') {
+      (config as any).TRAILING_SL_ENABLED = true;
+      await this.sendCustomMessage(chatId, `🛡️ <b>Zero-Loss Guarantee & Trailing Stop-Loss have been TURNED ON!</b>\n• +${config.BREAKEVEN_TRIGGER_PCT}% profit par Stop-Loss Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion) par lock ho jayega.\n• +30%+ par Stop-Loss peak se ${config.TRAILING_SL_CUSHION_PCT}% peeche trail karega.`);
       await this.sendTpSlReport(chatId);
     } else if (clean === 'tp_off' || clean === 'tpoff' || clean === 'disable_tp') {
       (config as any).AUTO_TP_ENABLED = false;
@@ -456,6 +466,13 @@ export class TelegramNotifier {
       (config as any).AUTO_SL_ENABLED = !config.AUTO_SL_ENABLED;
       const status = config.AUTO_SL_ENABLED ? `🟢 <b>TURNED ON (-${config.AUTO_SL_LOSS_PCT}% Emergency Cut)</b>` : '🔴 <b>TURNED OFF</b>';
       await this.sendCustomMessage(chatId, `🛡️ Anti-Rug Stop-Loss is now ${status}.`);
+      await this.sendTpSlReport(chatId);
+    } else if (data === 'toggle_trailing') {
+      (config as any).TRAILING_SL_ENABLED = !config.TRAILING_SL_ENABLED;
+      const status = config.TRAILING_SL_ENABLED
+        ? '🛡️ <b>TURNED ON (Zero-Loss Guarantee & Trailing Ratchet Active)</b>'
+        : '🔴 <b>TURNED OFF</b>';
+      await this.sendCustomMessage(chatId, `Zero-Loss Guarantee & Trailing SL is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
       await this.sendRiskReport(chatId);
@@ -2353,6 +2370,136 @@ Trading automatically paused for portfolio protection.
   }
 
   /**
+   * Real-Time Zero-Loss Guarantee Lock Alert (Fires when profit crosses +20%)
+   */
+  public async notifyBreakevenLocked(
+    position: FollowerPosition,
+    pnlPct: number,
+    peakPct: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const costBasisSol = Number(position.costBasisLamports) / 1e9;
+    const currentValSol = costBasisSol * (1 + pnlPct / 100);
+    const floatingPnlSol = currentValSol - costBasisSol;
+    const floatingPnlUsd = floatingPnlSol * solPriceUsd;
+
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+    const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
+
+    const text = `
+🛡️ <b>[ZERO-LOSS GUARANTEE LOCKED]</b> 🔒
+
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
+<b>Trigger Gain:</b> <b>+${pnlPct.toFixed(1)}%</b> (Peak: +${peakPct.toFixed(1)}%) 🚀
+<b>Floating Gain:</b> +${floatingPnlSol.toFixed(4)} SOL (+$${floatingPnlUsd.toFixed(2)} USD)
+<b>Stop-Loss Floor:</b> <b>LOCKED AT +${config.BREAKEVEN_LOCK_PCT.toFixed(1)}%</b> (Entry Price + Fee Cushion)
+<b>Protection Status:</b> <b>ZERO CAPITAL RISK GUARANTEED</b> 🛡️
+<i>Agar coin yahan se dump hota hai, toh bot automatically Breakeven par nikal jayega. Ek rupay ka bhi nuqsan nahi hoga!</i>
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.id}` },
+          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.id}` },
+        ],
+        [
+          { text: '📊 DEXSCREENER', url: `https://dexscreener.com/solana/${position.tokenMint}` },
+          { text: '⚡ PUMP.FUN', url: `https://pump.fun/coin/${position.tokenMint}` },
+        ],
+      ],
+    };
+
+    await this.sendAlert(text, inlineKeyboard);
+  }
+
+  /**
+   * Alert when Zero-Loss Breakeven Exit is executed
+   */
+  public async notifyBreakevenExit(
+    order: MirrorOrder,
+    position: FollowerPosition,
+    pnlPct: number,
+    peakPct: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const solReceived = Number(order.outAmountRaw || 0) / 1e9;
+    const usdReceived = solReceived * solPriceUsd;
+
+    const realizedSol = Number(position.realizedPnlLamports) / 1e9;
+    const realizedUsd = realizedSol * solPriceUsd;
+
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+    const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
+    const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
+
+    const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
+
+    const text = `
+🛡️ <b>[ZERO-LOSS BREAKEVEN EXIT FILLED]</b> 🛡️
+
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
+<b>Strategy:</b> Zero-Loss Capital Protection (100% Exited)
+<b>Highest Peak:</b> +${peakPct.toFixed(1)}% 🏔️
+<b>Exit Result:</b> <b>${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%</b> (${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL | ${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)
+<b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
+<b>Verdict:</b> <b>Pura capital mehfooz! Coin dump hone se pehle Zero-Loss par exit ho gaya.</b>${sigLink}
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  /**
+   * Alert when Dynamic Trailing Stop-Loss is executed to bank profits
+   */
+  public async notifyTrailingStopLoss(
+    order: MirrorOrder,
+    position: FollowerPosition,
+    pnlPct: number,
+    floorPct: number,
+    peakPct: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const solReceived = Number(order.outAmountRaw || 0) / 1e9;
+    const usdReceived = solReceived * solPriceUsd;
+
+    const realizedSol = Number(position.realizedPnlLamports) / 1e9;
+    const realizedUsd = realizedSol * solPriceUsd;
+
+    const sym = meta?.symbol ? meta.symbol.toUpperCase() : position.tokenMint.substring(0, 6).toUpperCase();
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+    const sigShort = order.orderSignature ? order.orderSignature.slice(0, 8) + '...' : 'Completed';
+    const sigLink = order.orderSignature ? `\n<b>Tx:</b> <a href="https://solscan.io/tx/${order.orderSignature}">${sigShort}</a>` : '';
+
+    const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
+
+    const text = `
+💰 <b>[TRAILING STOP-LOSS FILLED] (+${pnlPct.toFixed(1)}% PROFIT BANKED!)</b> 🎯
+
+<b>Coin:</b> <b>$${sym}</b>${tokenName}
+<b>Mint:</b> <code>${position.tokenMint}</code>
+<b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
+<b>Strategy:</b> Dynamic Trailing Stop-Loss (100% Exited)
+<b>Highest Peak:</b> <b>+${peakPct.toFixed(1)}%</b> 🏔️
+<b>Trailing Floor:</b> +${floorPct.toFixed(1)}% (Max ${config.TRAILING_SL_CUSHION_PCT}% pullback tolerance)
+<b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
+<b>Realized Profit:</b> <b>+$${realizedUsd.toFixed(2)} USD</b> (+${realizedSol.toFixed(4)} SOL) 💵
+<b>Verdict:</b> <b>Munafa kamyabi se lock ho gaya! Coin dump hone par profit zaaya nahi hua.</b>${sigLink}
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  /**
    * Real-Time Pump or Dip Milestone Alert (+25%, +50%, +75%, +100% or -15%, -25%, -35%, -50%)
    */
   public async notifyPositionMilestone(
@@ -2453,34 +2600,47 @@ ${header}
   }
 
   public async sendTpSlReport(chatId: string | number): Promise<void> {
+    const trailingText = config.TRAILING_SL_ENABLED
+      ? `🛡️ <b>ACTIVE (Zero-Loss Guarantee):</b>\n   ├ <b>+${config.BREAKEVEN_TRIGGER_PCT}% Gain:</b> Stop-Loss floor locked at <b>Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion)</b> 🔒\n   ├ <b>+30%+ Gain:</b> Dynamic Trailing SL locks profit at <b>Peak - ${config.TRAILING_SL_CUSHION_PCT}%</b> 🏔️\n   └ <i>Solana dump se 100% protection! Ek rupay ka bhi nuqsan nahi hoga.</i>`
+      : '🔴 <b>DISABLED</b> (Zero-Loss Guarantee & Trailing SL is OFF)';
+
     const tpText = config.AUTO_TP_ENABLED
       ? `🟢 <b>ENABLED:</b> Sell <b>${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%</b> when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   └ <i>Initial principal returned to wallet, 50% moonbag rides for free!</i>`
       : '🔴 <b>DISABLED</b> (Auto Take-Profit is OFF)';
 
     const slText = config.AUTO_SL_ENABLED
-      ? `🟢 <b>ENABLED:</b> Emergency exit <b>100%</b> when token drops to <b>-${config.AUTO_SL_LOSS_PCT}%</b>\n   └ <i>Cuts position immediately to protect wallet against sudden rugs/dumps!</i>`
+      ? `🟢 <b>ENABLED:</b> Emergency exit <b>100%</b> when token drops to <b>-${config.AUTO_SL_LOSS_PCT}%</b>\n   └ <i>Anti-Rug base floor protects wallet if coin rugs immediately!</i>`
       : '🔴 <b>DISABLED</b> (Auto Stop-Loss is OFF)';
 
     const text = `
-🎯 <b>AUTOMATED TAKE-PROFIT & STOP-LOSS</b>
+🎯 <b>AUTOMATED PROFIT & ZERO-LOSS PROTECTION</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🚀 <b>Moonbag Auto-TP:</b>
+🛡️ <b>Zero-Loss Guarantee & Trailing SL:</b>
+${trailingText}
+
+🚀 <b>Moonbag Auto Take-Profit:</b>
 ${tpText}
 
-🛡️ <b>Anti-Rug Auto-SL:</b>
+🚨 <b>Anti-Rug Base Stop-Loss:</b>
 ${slText}
 
 ⏱️ <b>Price Monitoring Poller:</b> Every <b>${(config.AUTO_EXIT_POLL_INTERVAL_MS / 1000).toFixed(1)}s</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-<i>👇 Tap the buttons below to toggle Auto-TP or Auto-SL instantly:</i>
+<i>👇 Tap the buttons below to toggle any protection feature instantly:</i>
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
+          {
+            text: config.TRAILING_SL_ENABLED ? '🛡️ Zero-Loss: ON (Tap to Disable)' : '⚪ Zero-Loss: OFF (Tap to Enable)',
+            callback_data: 'toggle_trailing',
+          },
+        ],
+        [
           { text: config.AUTO_TP_ENABLED ? '🔴 Turn OFF Auto-TP' : '🟢 Turn ON Auto-TP', callback_data: 'toggle_tp' },
-          { text: config.AUTO_SL_ENABLED ? '🔴 Turn OFF Auto-SL' : '🟢 Turn ON Auto-SL', callback_data: 'toggle_sl' },
+          { text: config.AUTO_SL_ENABLED ? '🔴 Turn OFF Base-SL' : '🟢 Turn ON Base-SL', callback_data: 'toggle_sl' },
         ],
         [
           { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },

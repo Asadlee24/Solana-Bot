@@ -81,8 +81,14 @@ const ConfigSchema = z.object({
   AUTO_TP_GAIN_PCT: z.coerce.number().default(100), // +100% (2x) gain trigger
   AUTO_TP_SELL_FRACTION: z.coerce.number().default(0.5), // Sell 50% on 2x
   AUTO_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
-  AUTO_SL_LOSS_PCT: z.coerce.number().default(50), // -50% loss trigger (anti-rug exit)
+  AUTO_SL_LOSS_PCT: z.coerce.number().default(30), // -30% loss trigger (anti-rug base floor)
   AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(3000), // 3-second monitoring loop
+
+  // Zero-Loss Guarantee & Dynamic Trailing Stop-Loss
+  TRAILING_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
+  BREAKEVEN_TRIGGER_PCT: z.coerce.number().default(20), // Lock stop-loss at entry (+2% cushion) when profit hits +20%
+  BREAKEVEN_LOCK_PCT: z.coerce.number().default(2), // +2% profit floor once breakeven triggers (covers fees/slippage)
+  TRAILING_SL_CUSHION_PCT: z.coerce.number().default(15), // Allow max 15% pullback from peak after triggering
 
   // Target Spam & Fast-Finger Guard (Single Entry & Cooldown Guard)
   SINGLE_ENTRY_PER_TOKEN_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),

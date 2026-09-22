@@ -158,6 +158,9 @@ export interface Position {
   updatedAt: number;
   closedAt?: number | null;
   metadata?: TokenMeta;
+  peakPnlPct?: number;
+  trailingFloorPct?: number | null;
+  isBreakevenLocked?: boolean;
 }
 
 export interface LatencySample {

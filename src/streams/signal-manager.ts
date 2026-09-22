@@ -224,7 +224,8 @@ export class SignalManager extends EventEmitter {
    */
   public async executeManualExit(
     positionIdOrMint: string,
-    fraction: number = 1.0
+    fraction: number = 1.0,
+    skipNotification: boolean = false
   ): Promise<{ order: MirrorOrder; position: FollowerPosition | null }> {
     const openPositions = db.getOpenPositions();
     let pos = openPositions.find(
@@ -343,7 +344,9 @@ export class SignalManager extends EventEmitter {
       this.emit('positionUpdate', updatedPosition);
     }
 
-    telegramNotifier.notifyManualExit(order, updatedPosition || pos, clampedFraction, meta || undefined);
+    if (!skipNotification) {
+      telegramNotifier.notifyManualExit(order, updatedPosition || pos, clampedFraction, meta || undefined);
+    }
 
     return { order, position: updatedPosition || pos };
   }

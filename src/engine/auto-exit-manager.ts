@@ -15,6 +15,7 @@ export class AutoExitManager {
   private signalManagerRef: any = null;
   private alertedMilestones: Map<string, Set<number>> = new Map();
   private alertedPullbacks: Map<string, Set<number>> = new Map();
+  private breakevenAlerted: Set<string> = new Set();
 
   public start(signalManager: any): void {
     if (this.isRunning) return;
@@ -22,7 +23,7 @@ export class AutoExitManager {
     this.isRunning = true;
 
     console.info(
-      `[AUTO-EXIT] Engine started | TP: ${config.AUTO_TP_ENABLED ? `+${config.AUTO_TP_GAIN_PCT}% (Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)` : 'OFF'} | SL: ${config.AUTO_SL_ENABLED ? `-${config.AUTO_SL_LOSS_PCT}% (Sell 100%)` : 'OFF'} | Poll: ${config.AUTO_EXIT_POLL_INTERVAL_MS}ms`
+      `[AUTO-EXIT] Engine started | TP: ${config.AUTO_TP_ENABLED ? `+${config.AUTO_TP_GAIN_PCT}% (Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)` : 'OFF'} | SL: ${config.AUTO_SL_ENABLED ? `-${config.AUTO_SL_LOSS_PCT}% (Sell 100%)` : 'OFF'} | Trailing & Zero-Loss: ${config.TRAILING_SL_ENABLED ? `ON (Lock @ +${config.BREAKEVEN_TRIGGER_PCT}% -> +${config.BREAKEVEN_LOCK_PCT}%, Trail -${config.TRAILING_SL_CUSHION_PCT}%)` : 'OFF'} | Poll: ${config.AUTO_EXIT_POLL_INTERVAL_MS}ms`
     );
 
     this.scheduleNextTick();
@@ -83,6 +84,7 @@ export class AutoExitManager {
             db.savePosition(pos);
             this.alertedMilestones.delete(pos.id);
             this.alertedPullbacks.delete(pos.id);
+            this.breakevenAlerted.delete(pos.id);
             continue;
           }
         } catch {}
@@ -172,15 +174,54 @@ export class AutoExitManager {
           }
         }
 
-        // 4. Check Take-Profit Trigger (+100% / 2x Moonbag)
+        // 4. Calculate Dynamic Stop-Loss Floor & Zero-Loss Guarantee
+        let effectiveSlFloor = -config.AUTO_SL_LOSS_PCT; // Base anti-rug floor (e.g. -30%)
+        let isBreakevenActive = false;
+        let isTrailingActive = false;
+
+        if (config.TRAILING_SL_ENABLED) {
+          // Zero-Loss Guarantee: If coin peak has crossed Breakeven Trigger (default: +20%)
+          if (currentPeak >= config.BREAKEVEN_TRIGGER_PCT) {
+            effectiveSlFloor = Math.max(effectiveSlFloor, config.BREAKEVEN_LOCK_PCT);
+            isBreakevenActive = true;
+
+            // One-time alert that Zero-Loss Guarantee is active
+            if (!this.breakevenAlerted.has(pos.id)) {
+              this.breakevenAlerted.add(pos.id);
+              telegramNotifier.notifyBreakevenLocked(
+                pos,
+                pnlPct,
+                currentPeak,
+                meta || undefined
+              );
+            }
+          }
+
+          // Dynamic Trailing Ratchet: When peak >= +30%, ratchet SL floor behind the peak
+          if (currentPeak >= 30) {
+            const dynamicFloor = currentPeak - config.TRAILING_SL_CUSHION_PCT;
+            if (dynamicFloor > effectiveSlFloor) {
+              effectiveSlFloor = dynamicFloor;
+              isTrailingActive = true;
+            }
+          }
+        }
+
+        // 5. Check Take-Profit Trigger (+100% / 2x Moonbag)
         if (config.AUTO_TP_ENABLED && pnlPct >= config.AUTO_TP_GAIN_PCT && !pos.tp1Triggered) {
           await this.triggerTakeProfit(pos, pnlPct, meta || undefined);
           continue;
         }
 
-        // 5. Check Stop-Loss Trigger (-50% Anti-Rug)
-        if (config.AUTO_SL_ENABLED && pnlPct <= -config.AUTO_SL_LOSS_PCT) {
-          await this.triggerStopLoss(pos, pnlPct, meta || undefined);
+        // 6. Check Stop-Loss / Trailing SL / Breakeven Exit Trigger
+        if (config.AUTO_SL_ENABLED && pnlPct <= effectiveSlFloor) {
+          if (isTrailingActive && effectiveSlFloor > config.BREAKEVEN_LOCK_PCT) {
+            await this.triggerTrailingStopLoss(pos, pnlPct, effectiveSlFloor, currentPeak, meta || undefined);
+          } else if (isBreakevenActive && effectiveSlFloor >= config.BREAKEVEN_LOCK_PCT) {
+            await this.triggerBreakevenExit(pos, pnlPct, currentPeak, meta || undefined);
+          } else {
+            await this.triggerStopLoss(pos, pnlPct, meta || undefined);
+          }
           continue;
         }
       } catch (err: any) {
@@ -198,7 +239,8 @@ export class AutoExitManager {
     try {
       const { order, position } = await this.signalManagerRef.executeManualExit(
         pos.id,
-        config.AUTO_TP_SELL_FRACTION
+        config.AUTO_TP_SELL_FRACTION,
+        true
       );
 
       db.markPositionTpTriggered(pos.id, pnlPct);
@@ -212,6 +254,57 @@ export class AutoExitManager {
     }
   }
 
+  private async triggerBreakevenExit(
+    pos: any,
+    pnlPct: number,
+    peakPct: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    this.inFlightExits.add(pos.tokenMint);
+    console.info(
+      `🛡️ [ZERO-LOSS BREAKEVEN EXIT] ${pos.tokenMint} at ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% (Peak was +${peakPct.toFixed(1)}%). Executing 100% exit...`
+    );
+
+    try {
+      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0, true);
+
+      this.alertedMilestones.delete(pos.id);
+      this.alertedPullbacks.delete(pos.id);
+      this.breakevenAlerted.delete(pos.id);
+      telegramNotifier.notifyBreakevenExit(order, position || pos, pnlPct, peakPct, meta);
+    } catch (err: any) {
+      console.error(`❌ [ZERO-LOSS EXIT ERROR] ${pos.tokenMint}:`, err.message || err);
+    } finally {
+      this.inFlightExits.delete(pos.tokenMint);
+    }
+  }
+
+  private async triggerTrailingStopLoss(
+    pos: any,
+    pnlPct: number,
+    floorPct: number,
+    peakPct: number,
+    meta?: TokenMetadata
+  ): Promise<void> {
+    this.inFlightExits.add(pos.tokenMint);
+    console.info(
+      `🎯 [TRAILING STOP-LOSS EXIT] ${pos.tokenMint} at +${pnlPct.toFixed(1)}% (Floor: +${floorPct.toFixed(1)}%, Peak: +${peakPct.toFixed(1)}%). Executing 100% exit to lock profit...`
+    );
+
+    try {
+      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0, true);
+
+      this.alertedMilestones.delete(pos.id);
+      this.alertedPullbacks.delete(pos.id);
+      this.breakevenAlerted.delete(pos.id);
+      telegramNotifier.notifyTrailingStopLoss(order, position || pos, pnlPct, floorPct, peakPct, meta);
+    } catch (err: any) {
+      console.error(`❌ [TRAILING SL ERROR] ${pos.tokenMint}:`, err.message || err);
+    } finally {
+      this.inFlightExits.delete(pos.tokenMint);
+    }
+  }
+
   private async triggerStopLoss(pos: any, pnlPct: number, meta?: TokenMetadata): Promise<void> {
     this.inFlightExits.add(pos.tokenMint);
     console.info(
@@ -219,10 +312,11 @@ export class AutoExitManager {
     );
 
     try {
-      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0);
+      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0, true);
 
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
+      this.breakevenAlerted.delete(pos.id);
       telegramNotifier.notifyAutoStopLoss(order, position || pos, pnlPct, meta);
     } catch (err: any) {
       console.error(`❌ [AUTO SL ERROR] ${pos.tokenMint}:`, err.message || err);

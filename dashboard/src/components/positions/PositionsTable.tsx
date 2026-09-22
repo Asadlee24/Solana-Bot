@@ -174,17 +174,45 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                     {/* Floating PnL with Dollars & SOL */}
                     <td>
                       {pos.state === 'OPEN' ? (
-                        <div className={`pnl-pill-dual ${isProfit ? 'pos' : 'neg'}`}>
-                          <div className="pnl-header-line">
-                            {isProfit ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-                            <span className="mono font-bold">
-                              {isProfit ? '+' : '-'}${Math.abs(pnlUsd).toFixed(2)} USD
-                            </span>
+                        <div>
+                          <div className={`pnl-pill-dual ${isProfit ? 'pos' : 'neg'}`}>
+                            <div className="pnl-header-line">
+                              {isProfit ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
+                              <span className="mono font-bold">
+                                {isProfit ? '+' : '-'}${Math.abs(pnlUsd).toFixed(2)} USD
+                              </span>
+                            </div>
+                            <div className="pnl-sub-line mono">
+                              <span>{isProfit ? '+' : ''}{pnlSol.toFixed(4)} SOL</span>
+                              <span className="pnl-tag-pct">{formatPct(pnlPct, true)}</span>
+                            </div>
                           </div>
-                          <div className="pnl-sub-line mono">
-                            <span>{isProfit ? '+' : ''}{pnlSol.toFixed(4)} SOL</span>
-                            <span className="pnl-tag-pct">{formatPct(pnlPct, true)}</span>
-                          </div>
+                          {pos.isBreakevenLocked && (
+                            <div
+                              className="mono"
+                              style={{
+                                fontSize: 10,
+                                marginTop: 4,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                color: '#34d399',
+                                background: 'rgba(16, 185, 129, 0.12)',
+                                padding: '2px 6px',
+                                borderRadius: 4,
+                                border: '1px solid rgba(16, 185, 129, 0.3)',
+                                fontWeight: 600,
+                              }}
+                              title={`Highest Peak: +${pos.peakPnlPct}%. Stop-loss floor locked at ${pos.trailingFloorPct ? `+${pos.trailingFloorPct}%` : 'Breakeven (+2%)'}`}
+                            >
+                              <span>🛡️</span>
+                              <span>
+                                {pos.trailingFloorPct !== null && pos.trailingFloorPct !== undefined && pos.trailingFloorPct > 2
+                                  ? `Trailing Floor: +${pos.trailingFloorPct}%`
+                                  : `Zero-Loss Locked`}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="mono text-muted">
@@ -195,9 +223,24 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
 
                     {/* State */}
                     <td>
-                      <Badge variant={pos.state === 'OPEN' ? 'success' : 'neutral'} size="sm">
-                        {pos.state}
-                      </Badge>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                        <Badge variant={pos.state === 'OPEN' ? 'success' : 'neutral'} size="sm">
+                          {pos.state}
+                        </Badge>
+                        {pos.state === 'OPEN' && pos.isBreakevenLocked && (
+                          <span
+                            className="mono"
+                            style={{
+                              fontSize: 9,
+                              fontWeight: 700,
+                              color: '#10b981',
+                              letterSpacing: 0.5,
+                            }}
+                          >
+                            SAFE (0-LOSS) 🔒
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Manual Actions & External DEX Links */}
