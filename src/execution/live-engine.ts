@@ -303,7 +303,7 @@ export class LiveExecutionEngine {
           const tokenProgramId =
             mirrorIntent.tokenProgramId === TOKEN_2022_PROGRAM_ID.toBase58()
               ? TOKEN_2022_PROGRAM_ID
-              : TOKEN_PROGRAM_ID;
+              : await pumpFunSwapAdapter.resolveTokenProgram(new PublicKey(mirrorIntent.tokenMint));
 
           if (isBuy) {
             const pumpResult = await pumpFunSwapAdapter.buildAndSignBuy(
