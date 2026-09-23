@@ -8,6 +8,8 @@ import { mintDecimalsService } from '../services/mint-decimals.js';
 const PUMP_MILESTONES = [25, 50, 75, 100, 150, 200, 300, 500, 1000];
 const DIP_MILESTONES = [-15, -25, -35, -50];
 const PULLBACK_DROP_THRESHOLDS = [20, 35, 50];
+// Minimum gap between two milestone alerts for the same position (30 seconds)
+const ALERT_COOLDOWN_MS = 30_000;
 
 export class AutoExitManager {
   private timer: NodeJS.Timeout | null = null;
@@ -162,11 +164,17 @@ export class AutoExitManager {
         const posAlerted = this.alertedMilestones.get(pos.id)!;
 
         // Positive Pump Milestones (+25%, +50%, +75%, +100%, +150%...)
-        if (pnlPct > 0) {
+        // Rate-limited: max 1 milestone alert per position per ALERT_COOLDOWN_MS (30s)
+        const now = Date.now();
+        const lastAlert = this.lastMilestoneAlertTime.get(pos.id) || 0;
+        const milestoneOnCooldown = (now - lastAlert) < ALERT_COOLDOWN_MS;
+
+        if (pnlPct > 0 && !milestoneOnCooldown) {
           for (const m of PUMP_MILESTONES) {
             if (pnlPct >= m && !posAlerted.has(m)) {
               posAlerted.add(m);
               db.saveAlertedMilestones(pos.id, posAlerted); // persist to DB
+              this.lastMilestoneAlertTime.set(pos.id, now);
               telegramNotifier.notifyPositionMilestone(
                 pos,
                 pnlPct,
@@ -181,11 +189,13 @@ export class AutoExitManager {
         }
 
         // Negative Dip Milestones (-15%, -25%, -35%, -50%...)
-        if (pnlPct < 0) {
+        // Rate-limited: same 30s cooldown as pump milestones
+        if (pnlPct < 0 && !milestoneOnCooldown) {
           for (const m of DIP_MILESTONES) {
             if (pnlPct <= m && !posAlerted.has(m)) {
               posAlerted.add(m);
               db.saveAlertedMilestones(pos.id, posAlerted); // persist to DB
+              this.lastMilestoneAlertTime.set(pos.id, now);
               telegramNotifier.notifyPositionMilestone(
                 pos,
                 pnlPct,
