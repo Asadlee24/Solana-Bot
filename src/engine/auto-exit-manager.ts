@@ -147,51 +147,36 @@ export class AutoExitManager {
 
         // Positive Pump Milestones (+25%, +50%, +75%, +100%, +150%...)
         if (pnlPct > 0) {
-          const eligiblePumpMilestones = PUMP_MILESTONES.filter((m) => pnlPct >= m);
-          if (eligiblePumpMilestones.length > 0) {
-            const highestMilestone = Math.max(...eligiblePumpMilestones);
-            if (!posAlerted.has(highestMilestone)) {
-              // Mark all lower milestones as alerted to prevent spamming
-              eligiblePumpMilestones.forEach((m) => posAlerted.add(m));
-
-              const now = Date.now();
-              const lastAlert = this.lastMilestoneAlertTime.get(pos.id) || 0;
-              if (now - lastAlert >= 30000) {
-                this.lastMilestoneAlertTime.set(pos.id, now);
-                telegramNotifier.notifyPositionMilestone(
-                  pos,
-                  pnlPct,
-                  highestMilestone,
-                  pos.peakPnlPct || pnlPct,
-                  currentPriceSol,
-                  meta || undefined
-                );
-              }
+          for (const m of PUMP_MILESTONES) {
+            if (pnlPct >= m && !posAlerted.has(m)) {
+              posAlerted.add(m);
+              telegramNotifier.notifyPositionMilestone(
+                pos,
+                pnlPct,
+                m,
+                pos.peakPnlPct || pnlPct,
+                currentPriceSol,
+                meta || undefined
+              );
+              break;
             }
           }
         }
 
         // Negative Dip Milestones (-15%, -25%, -35%, -50%...)
         if (pnlPct < 0) {
-          const eligibleDipMilestones = DIP_MILESTONES.filter((m) => pnlPct <= m);
-          if (eligibleDipMilestones.length > 0) {
-            const deepestMilestone = Math.min(...eligibleDipMilestones);
-            if (!posAlerted.has(deepestMilestone)) {
-              eligibleDipMilestones.forEach((m) => posAlerted.add(m));
-
-              const now = Date.now();
-              const lastAlert = this.lastMilestoneAlertTime.get(pos.id) || 0;
-              if (now - lastAlert >= 30000) {
-                this.lastMilestoneAlertTime.set(pos.id, now);
-                telegramNotifier.notifyPositionMilestone(
-                  pos,
-                  pnlPct,
-                  deepestMilestone,
-                  pos.peakPnlPct || 0,
-                  currentPriceSol,
-                  meta || undefined
-                );
-              }
+          for (const m of DIP_MILESTONES) {
+            if (pnlPct <= m && !posAlerted.has(m)) {
+              posAlerted.add(m);
+              telegramNotifier.notifyPositionMilestone(
+                pos,
+                pnlPct,
+                m,
+                pos.peakPnlPct || 0,
+                currentPriceSol,
+                meta || undefined
+              );
+              break;
             }
           }
         }
