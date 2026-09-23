@@ -10,6 +10,8 @@ export class SolanaRpcPoller {
   private lastSignatureMap: Map<string, string> = new Map();
   private pollIntervalMs: number = 15000; // Poll every 15 seconds with pacing to prevent RPC rate limits
   private timer: NodeJS.Timeout | null = null;
+  private isRateLimited: boolean = false;
+  private lastRateLimitLogged: number = 0;
 
   constructor() {
     this.connection = new Connection(config.SOLANA_RPC_URL, 'processed');
@@ -38,6 +40,7 @@ export class SolanaRpcPoller {
       for (const target of watched) {
         if (!this.isRunning) break;
         await this.checkWallet(target.wallet);
+        if (this.isRateLimited) break;
         await new Promise((r) => setTimeout(r, 500));
       }
     } catch (err) {
@@ -45,7 +48,8 @@ export class SolanaRpcPoller {
     }
 
     if (this.isRunning) {
-      this.timer = setTimeout(() => this.pollLoop(), this.pollIntervalMs);
+      const interval = this.isRateLimited ? 45000 : this.pollIntervalMs;
+      this.timer = setTimeout(() => this.pollLoop(), interval);
     }
   }
 
@@ -88,7 +92,18 @@ export class SolanaRpcPoller {
         await this.processSignature(walletPubkeyStr, s.signature);
       }
     } catch (err: any) {
-      console.warn('[RPC Poller Error]:', err?.message || err);
+      const msg = err?.message || String(err);
+      if (msg.includes('429') || msg.includes('max usage')) {
+        this.isRateLimited = true;
+        const now = Date.now();
+        if (now - this.lastRateLimitLogged > 60000) {
+          this.lastRateLimitLogged = now;
+          console.warn('[RPC Poller]: RPC rate limit (429) hit. Backing off for 45s...');
+        }
+      } else {
+        this.isRateLimited = false;
+        console.warn('[RPC Poller Error]:', msg);
+      }
     }
   }
 

@@ -19,6 +19,7 @@ export class HeliusWebSocketStream {
   private url: string;
   private connection: Connection;
   private recentSigs: Set<string> = new Set();
+  private reconnectAttempts: number = 0;
 
   constructor(callbacks: HeliusWsCallbacks) {
     this.callbacks = callbacks;
@@ -60,6 +61,7 @@ export class HeliusWebSocketStream {
       this.ws = new WebSocket(this.url);
 
       this.ws.on('open', () => {
+        this.reconnectAttempts = 0;
         console.info('[Helius WS] Connected to Helius Real-Time WebSocket stream');
         this.subscribe();
         this.callbacks.onOpen?.();
@@ -118,13 +120,16 @@ export class HeliusWebSocketStream {
       });
 
       this.ws.on('close', () => {
-        console.info('[Helius WS] Disconnected. Reconnecting in 3 seconds...');
+        this.reconnectAttempts++;
+        const backoffSeconds = Math.min(30, 3 * Math.pow(1.5, Math.min(this.reconnectAttempts - 1, 5)));
+        const delayMs = Math.round(backoffSeconds * 1000);
+        console.info(`[Helius WS] Disconnected. Reconnecting in ${(delayMs / 1000).toFixed(0)} seconds (attempt #${this.reconnectAttempts})...`);
         if (this.pingInterval) {
           clearInterval(this.pingInterval);
           this.pingInterval = null;
         }
         if (this.isRunning) {
-          this.reconnectTimeout = setTimeout(() => this.connect(), 3000);
+          this.reconnectTimeout = setTimeout(() => this.connect(), delayMs);
         }
       });
     } catch (err) {

@@ -18,6 +18,7 @@ export class AutoExitManager {
   private alertedPullbacks: Map<string, Set<number>> = new Map();
   private breakevenAlerted: Set<string> = new Set();
   private lastMilestoneAlertTime: Map<string, number> = new Map();
+  private lastOnChainBalanceCheck: Map<string, number> = new Map();
 
   public start(signalManager: any): void {
     if (this.isRunning) return;
@@ -76,21 +77,26 @@ export class AutoExitManager {
       }
 
       if (config.EXECUTION_MODE === 'LIVE') {
-        try {
-          const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
-          if (onChainBal <= 0n) {
-            pos.state = 'CLOSED';
-            pos.qtyRaw = '0';
-            pos.closedAt = Date.now();
-            pos.updatedAt = Date.now();
-            db.savePosition(pos);
-            this.alertedMilestones.delete(pos.id);
-            this.alertedPullbacks.delete(pos.id);
-            this.breakevenAlerted.delete(pos.id);
-            this.lastMilestoneAlertTime.delete(pos.id);
-            continue;
-          }
-        } catch {}
+        const now = Date.now();
+        const lastCheck = this.lastOnChainBalanceCheck.get(pos.tokenMint) || 0;
+        if (now - lastCheck > 30000) {
+          this.lastOnChainBalanceCheck.set(pos.tokenMint, now);
+          try {
+            const onChainBal = await executionWalletManager.getTokenBalanceRaw(pos.tokenMint);
+            if (onChainBal <= 0n) {
+              pos.state = 'CLOSED';
+              pos.qtyRaw = '0';
+              pos.closedAt = Date.now();
+              pos.updatedAt = Date.now();
+              db.savePosition(pos);
+              this.alertedMilestones.delete(pos.id);
+              this.alertedPullbacks.delete(pos.id);
+              this.breakevenAlerted.delete(pos.id);
+              this.lastMilestoneAlertTime.delete(pos.id);
+              continue;
+            }
+          } catch {}
+        }
       }
 
       try {

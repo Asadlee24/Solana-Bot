@@ -6,7 +6,7 @@ export class BlockhashService {
   private cachedBlockhash: BlockhashWithExpiryBlockHeight | null = null;
   private lastFetchedAt: number = 0;
   private isRunning: boolean = false;
-  private refreshIntervalMs: number = 1000;
+  private refreshIntervalMs: number = 10000; // Refreshes every 10s (saves ~78,000 RPC requests/day while staying fresh within Solana's ~60-90s blockhash lifetime)
   private timer: NodeJS.Timeout | null = null;
 
   constructor() {
