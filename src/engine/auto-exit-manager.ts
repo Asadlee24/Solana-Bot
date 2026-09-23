@@ -14,11 +14,23 @@ export class AutoExitManager {
   private isRunning: boolean = false;
   private inFlightExits: Set<string> = new Set();
   private signalManagerRef: any = null;
+  // In-memory cache; always backed by DB for restart-safety
   private alertedMilestones: Map<string, Set<number>> = new Map();
   private alertedPullbacks: Map<string, Set<number>> = new Map();
   private breakevenAlerted: Set<string> = new Set();
   private lastMilestoneAlertTime: Map<string, number> = new Map();
   private lastOnChainBalanceCheck: Map<string, number> = new Map();
+
+  /** Load persisted milestone state from DB for a position (called once per position, lazily) */
+  private loadMilestonesFromDb(posId: string): void {
+    if (!this.alertedMilestones.has(posId)) {
+      const persisted = db.getAlertedMilestones(posId);
+      this.alertedMilestones.set(posId, persisted);
+    }
+    if (!this.breakevenAlerted.has(posId) && db.getBreakevenAlerted(posId)) {
+      this.breakevenAlerted.add(posId);
+    }
+  }
 
   public start(signalManager: any): void {
     if (this.isRunning) return;
@@ -102,6 +114,10 @@ export class AutoExitManager {
       try {
         const decimals = await mintDecimalsService.getDecimals(pos.tokenMint);
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
+
+        // --- Lazy-load persisted milestone state from DB (restart-safe) ---
+        this.loadMilestonesFromDb(pos.id);
+
         let currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : 0;
         if (pos.avgEntryPriceSol <= 0 && BigInt(pos.costBasisLamports || '0') > 0n && BigInt(pos.qtyRaw) > 0n) {
           pos.avgEntryPriceSol = (Number(pos.costBasisLamports) / 1e9) / (Number(pos.qtyRaw) / (10 ** decimals));
@@ -150,6 +166,7 @@ export class AutoExitManager {
           for (const m of PUMP_MILESTONES) {
             if (pnlPct >= m && !posAlerted.has(m)) {
               posAlerted.add(m);
+              db.saveAlertedMilestones(pos.id, posAlerted); // persist to DB
               telegramNotifier.notifyPositionMilestone(
                 pos,
                 pnlPct,
@@ -158,7 +175,7 @@ export class AutoExitManager {
                 currentPriceSol,
                 meta || undefined
               );
-              break;
+              break; // ONE alert per cycle
             }
           }
         }
@@ -168,6 +185,7 @@ export class AutoExitManager {
           for (const m of DIP_MILESTONES) {
             if (pnlPct <= m && !posAlerted.has(m)) {
               posAlerted.add(m);
+              db.saveAlertedMilestones(pos.id, posAlerted); // persist to DB
               telegramNotifier.notifyPositionMilestone(
                 pos,
                 pnlPct,
@@ -176,7 +194,7 @@ export class AutoExitManager {
                 currentPriceSol,
                 meta || undefined
               );
-              break;
+              break; // ONE alert per cycle
             }
           }
         }
@@ -219,6 +237,7 @@ export class AutoExitManager {
             // One-time alert that Zero-Loss Guarantee is active
             if (!this.breakevenAlerted.has(pos.id)) {
               this.breakevenAlerted.add(pos.id);
+              db.saveBreakevenAlerted(pos.id, true); // persist to DB
               telegramNotifier.notifyBreakevenLocked(
                 pos,
                 pnlPct,

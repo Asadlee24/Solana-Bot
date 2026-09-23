@@ -26,7 +26,18 @@ export class DBManager {
     this.db = new Database(dbPath);
     this.initPragmas();
     this.initSchema();
+    this.runMigrations();
     this.seedHistoricalTrades();
+  }
+
+  private runMigrations() {
+    // Safe incremental migrations — IF NOT EXISTS / column check pattern
+    try {
+      this.db.exec(`ALTER TABLE positions ADD COLUMN alerted_milestones TEXT DEFAULT '[]'`);
+    } catch { /* column already exists */ }
+    try {
+      this.db.exec(`ALTER TABLE positions ADD COLUMN breakeven_alerted INTEGER DEFAULT 0`);
+    } catch { /* column already exists */ }
   }
 
   private initPragmas() {
@@ -613,6 +624,39 @@ export class DBManager {
       WHERE id = ?
     `);
     stmt.run(peakPnlPct, Date.now(), positionId);
+  }
+
+  public getAlertedMilestones(positionId: string): Set<number> {
+    try {
+      const row = this.db.prepare(`SELECT alerted_milestones FROM positions WHERE id = ?`).get(positionId) as any;
+      if (!row || !row.alerted_milestones) return new Set();
+      const arr: number[] = JSON.parse(row.alerted_milestones);
+      return new Set(arr);
+    } catch {
+      return new Set();
+    }
+  }
+
+  public saveAlertedMilestones(positionId: string, milestones: Set<number>): void {
+    try {
+      const json = JSON.stringify(Array.from(milestones));
+      this.db.prepare(`UPDATE positions SET alerted_milestones = ? WHERE id = ?`).run(json, positionId);
+    } catch { /* non-critical */ }
+  }
+
+  public getBreakevenAlerted(positionId: string): boolean {
+    try {
+      const row = this.db.prepare(`SELECT breakeven_alerted FROM positions WHERE id = ?`).get(positionId) as any;
+      return Boolean(row?.breakeven_alerted);
+    } catch {
+      return false;
+    }
+  }
+
+  public saveBreakevenAlerted(positionId: string, value: boolean): void {
+    try {
+      this.db.prepare(`UPDATE positions SET breakeven_alerted = ? WHERE id = ?`).run(value ? 1 : 0, positionId);
+    } catch { /* non-critical */ }
   }
 
   // Position Lots
