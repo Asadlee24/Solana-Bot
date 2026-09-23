@@ -23,9 +23,13 @@ export class HeliusWebSocketStream {
 
   constructor(callbacks: HeliusWsCallbacks) {
     this.callbacks = callbacks;
-    this.url = config.HELIUS_WSS_URL.includes('api-key=') && !config.HELIUS_WSS_URL.endsWith('=')
-      ? config.HELIUS_WSS_URL
-      : `wss://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
+    if (config.HELIUS_WSS_URL && config.HELIUS_WSS_URL.startsWith('wss://') && !config.HELIUS_WSS_URL.endsWith('=')) {
+      this.url = config.HELIUS_WSS_URL;
+    } else if (config.HELIUS_API_KEY) {
+      this.url = `wss://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
+    } else {
+      this.url = config.SOLANA_RPC_URL.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
+    }
     this.connection = new Connection(config.SOLANA_RPC_URL, 'processed');
   }
 
@@ -52,8 +56,8 @@ export class HeliusWebSocketStream {
   }
 
   private connect(): void {
-    if (!config.HELIUS_API_KEY) {
-      console.info('[Helius WS] No HELIUS_API_KEY supplied. WebSocket live stream idle (use Replay Stream or supply key in .env).');
+    if (!this.url) {
+      console.info('[WS Stream] No WebSocket URL supplied. Stream idle.');
       return;
     }
 
@@ -62,7 +66,7 @@ export class HeliusWebSocketStream {
 
       this.ws.on('open', () => {
         this.reconnectAttempts = 0;
-        console.info('[Helius WS] Connected to Helius Real-Time WebSocket stream');
+        console.info('[WS Stream] Connected to Real-Time WebSocket stream');
         this.subscribe();
         this.callbacks.onOpen?.();
 
