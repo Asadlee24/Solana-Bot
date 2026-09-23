@@ -290,6 +290,35 @@ export class AutoExitManager {
     }
   }
 
+  /**
+   * Retry wrapper for executeManualExit — survives transient 429 / network errors.
+   * Tries up to maxAttempts times with increasing delay before giving up.
+   */
+  private async executeExitWithRetry(
+    posId: string,
+    fraction: number,
+    isAuto: boolean,
+    maxAttempts: number = 3
+  ): Promise<{ order: any; position: any }> {
+    let lastErr: any;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.signalManagerRef.executeManualExit(posId, fraction, isAuto);
+      } catch (err: any) {
+        lastErr = err;
+        const is429 = err.message?.includes('429') || err.message?.includes('Too many requests');
+        if (attempt < maxAttempts) {
+          const waitMs = is429 ? attempt * 5000 : attempt * 2000; // 429 → 5s, 10s; other → 2s, 4s
+          console.warn(
+            `[AUTO-EXIT] Exit attempt ${attempt}/${maxAttempts} failed${is429 ? ' (429 rate limit)' : ''}: ${err.message?.slice(0, 80)}. Retrying in ${waitMs / 1000}s...`
+          );
+          await new Promise((r) => setTimeout(r, waitMs));
+        }
+      }
+    }
+    throw lastErr;
+  }
+
   private async triggerTakeProfit(pos: any, pnlPct: number, meta?: TokenMetadata): Promise<void> {
     this.inFlightExits.add(pos.tokenMint);
     console.info(
@@ -297,11 +326,7 @@ export class AutoExitManager {
     );
 
     try {
-      const { order, position } = await this.signalManagerRef.executeManualExit(
-        pos.id,
-        config.AUTO_TP_SELL_FRACTION,
-        true
-      );
+      const { order, position } = await this.executeExitWithRetry(pos.id, config.AUTO_TP_SELL_FRACTION, true);
 
       db.markPositionTpTriggered(pos.id, pnlPct);
       this.alertedMilestones.delete(pos.id);
@@ -326,7 +351,7 @@ export class AutoExitManager {
     );
 
     try {
-      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0, true);
+      const { order, position } = await this.executeExitWithRetry(pos.id, 1.0, true);
 
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
@@ -352,7 +377,7 @@ export class AutoExitManager {
     );
 
     try {
-      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0, true);
+      const { order, position } = await this.executeExitWithRetry(pos.id, 1.0, true);
 
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
@@ -372,7 +397,7 @@ export class AutoExitManager {
     );
 
     try {
-      const { order, position } = await this.signalManagerRef.executeManualExit(pos.id, 1.0, true);
+      const { order, position } = await this.executeExitWithRetry(pos.id, 1.0, true);
 
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);

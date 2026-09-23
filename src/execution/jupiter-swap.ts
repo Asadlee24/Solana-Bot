@@ -69,7 +69,7 @@ export class JupiterSwapV2Adapter {
     takerAddress: string,
     slippageBps: number = config.MAX_SLIPPAGE_BPS
   ): Promise<JupiterV2OrderResponse> {
-    const maxAttempts = 3;
+    const maxAttempts = 5; // Extra retries to survive 429 rate limits on exits
     let lastError: any;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -94,6 +94,17 @@ export class JupiterSwapV2Adapter {
 
         if (!res.ok) {
           const errText = await res.text();
+
+          // 429 Rate Limit — exponential backoff and retry
+          if (res.status === 429 && attempt < maxAttempts) {
+            const waitMs = Math.min(2000 * Math.pow(2, attempt - 1), 16000); // 2s, 4s, 8s, 16s
+            console.warn(
+              `[Jupiter Swap API V2] Rate limited (429) on attempt ${attempt}/${maxAttempts}. Waiting ${waitMs}ms before retry...`
+            );
+            await new Promise((r) => setTimeout(r, waitMs));
+            continue;
+          }
+
           if (res.status === 400 && attempt < maxAttempts) {
             console.warn(`[Jupiter Swap API V2] Attempt ${attempt}/${maxAttempts} (${useDirect ? 'direct' : 'multi-hop'}): "${errText.slice(0, 80)}". Retrying...`);
             await new Promise((r) => setTimeout(r, attempt * 1000));
@@ -138,6 +149,7 @@ export class JupiterSwapV2Adapter {
 
     throw lastError || new Error('Jupiter Swap API V2 order failed after retries');
   }
+
 
   /**
    * Deserializes and signs the returned Jupiter V2 order transaction locally.
