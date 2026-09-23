@@ -71,11 +71,25 @@ export class TokenMetadataService {
 
       const data = (await res.json()) as any;
       const pairs = Array.isArray(data?.pairs) ? data.pairs : [];
-      // Prefer native SOL quote pair if available
-      const pair = pairs.find((p: any) =>
-        p.quoteToken?.address === WSOL_MINT ||
-        p.quoteToken?.symbol?.toUpperCase() === 'SOL'
-      ) || pairs[0];
+      if (pairs.length === 0) {
+        return await this.resolveFallbackMetadata(mint);
+      }
+
+      // Sort all pairs by liquidity USD descending
+      const sortedPairs = [...pairs].sort(
+        (a: any, b: any) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
+      );
+
+      const maxLiquidity = sortedPairs[0]?.liquidity?.usd || 0;
+
+      // Select the true market pair:
+      // Prefer a native SOL quote pair ONLY IF it has substantial liquidity (>= $500 and >= 25% of max liquidity).
+      // Otherwise, pick the most liquid pair overall to prevent dust-pool manipulation.
+      const pair = sortedPairs.find((p: any) => {
+        const isSol = p.quoteToken?.address === WSOL_MINT || p.quoteToken?.symbol?.toUpperCase() === 'SOL';
+        const liq = p.liquidity?.usd || 0;
+        return isSol && (liq >= 500 || (maxLiquidity > 0 && liq >= maxLiquidity * 0.25));
+      }) || sortedPairs[0];
 
       if (pair) {
         const quoteSymbol = pair.quoteToken?.symbol?.toUpperCase();
@@ -85,7 +99,7 @@ export class TokenMetadataService {
         if (quoteSymbol === 'SOL' || pair.quoteToken?.address === WSOL_MINT) {
           priceSol = parseFloat(pair.priceNative || '0');
         } else {
-          // If paired with USDC/USD, compute priceSol from priceUsd / currentSolPriceUsd
+          // If paired with USDC/USD/COPX etc, compute priceSol from priceUsd / currentSolPriceUsd
           const solPriceUsd = await this.getSolPriceUsd();
           priceSol = priceUsd > 0 && solPriceUsd > 0 ? priceUsd / solPriceUsd : 0;
         }
@@ -217,6 +231,46 @@ export class TokenMetadataService {
     } catch {}
 
     return this.cachedSolPriceUsd;
+  }
+
+  /**
+   * Real-time executable sell price for an exact token quantity via Jupiter Swap API (/order)
+   * This provides the GROUND TRUTH of what the wallet will actually receive in SOL upon selling.
+   */
+  public async getExecutableSellPriceSol(
+    mint: string,
+    rawAmount: string | bigint,
+    decimals: number = 6
+  ): Promise<{ priceSol: number; outSol: number } | null> {
+    try {
+      const rawStr = rawAmount.toString();
+      if (!rawStr || rawStr === '0') return null;
+
+      const jupUrl = `https://api.jup.ag/swap/v2/order?inputMint=${mint}&outputMint=${WSOL_MINT}&amount=${rawStr}&slippageBps=300`;
+      const headers: Record<string, string> = {};
+      if (config.JUPITER_API_KEY && config.JUPITER_API_KEY.trim().length > 10) {
+        headers['x-api-key'] = config.JUPITER_API_KEY.trim();
+      }
+
+      let res = await fetch(jupUrl, { headers: Object.keys(headers).length ? headers : undefined, signal: AbortSignal.timeout(3000) });
+      if (res.status === 401 && Object.keys(headers).length) {
+        // Fallback without API key if 401 Unauthorized
+        res = await fetch(jupUrl, { signal: AbortSignal.timeout(3000) });
+      }
+
+      if (!res.ok) return null;
+
+      const data = (await res.json()) as any;
+      if (data?.outAmount && BigInt(data.outAmount) > 0n) {
+        const outSol = Number(data.outAmount) / 1e9;
+        const tokenQty = Number(rawStr) / (10 ** decimals);
+        if (tokenQty > 0 && outSol > 0) {
+          const priceSol = outSol / tokenQty;
+          return { priceSol, outSol };
+        }
+      }
+    } catch {}
+    return null;
   }
 }
 

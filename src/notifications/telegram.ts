@@ -1986,10 +1986,10 @@ ${lockedSummary}
       const exitPct = Math.round(fraction * 100);
       await this.sendCustomMessage(chatId, `⏳ Submitting exit order (${exitPct}%)...`);
 
-      const { order, position } = await this.signalManagerRef.executeManualExit(posIdOrMint, fraction);
+      const { order, position } = await this.signalManagerRef.executeManualExit(posIdOrMint, fraction, true);
 
       const solReceived = Number(order.outAmountRaw || 0) / 1e9;
-      const solPriceUsd = 100.0;
+      const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
       const usdReceived = solReceived * solPriceUsd;
 
       const realizedSol = position ? Number(position.realizedPnlLamports) / 1e9 : 0;

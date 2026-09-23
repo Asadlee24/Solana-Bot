@@ -3,6 +3,7 @@ import { db } from '../db/database.js';
 import { tokenMetadataService, TokenMetadata } from '../services/token-metadata.js';
 import { telegramNotifier } from '../notifications/telegram.js';
 import { executionWalletManager } from '../execution/wallet-manager.js';
+import { mintDecimalsService } from '../services/mint-decimals.js';
 
 const PUMP_MILESTONES = [25, 50, 75, 100, 150, 200, 300, 500, 1000];
 const DIP_MILESTONES = [-15, -25, -35, -50];
@@ -16,6 +17,7 @@ export class AutoExitManager {
   private alertedMilestones: Map<string, Set<number>> = new Map();
   private alertedPullbacks: Map<string, Set<number>> = new Map();
   private breakevenAlerted: Set<string> = new Set();
+  private lastMilestoneAlertTime: Map<string, number> = new Map();
 
   public start(signalManager: any): void {
     if (this.isRunning) return;
@@ -85,21 +87,44 @@ export class AutoExitManager {
             this.alertedMilestones.delete(pos.id);
             this.alertedPullbacks.delete(pos.id);
             this.breakevenAlerted.delete(pos.id);
+            this.lastMilestoneAlertTime.delete(pos.id);
             continue;
           }
         } catch {}
       }
 
       try {
+        const decimals = await mintDecimalsService.getDecimals(pos.tokenMint);
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
-        const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : 0;
+        let currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : 0;
         if (pos.avgEntryPriceSol <= 0 && BigInt(pos.costBasisLamports || '0') > 0n && BigInt(pos.qtyRaw) > 0n) {
-          pos.avgEntryPriceSol = (Number(pos.costBasisLamports) / 1e9) / (Number(pos.qtyRaw) / 1e6);
+          pos.avgEntryPriceSol = (Number(pos.costBasisLamports) / 1e9) / (Number(pos.qtyRaw) / (10 ** decimals));
         }
         if (!currentPriceSol || pos.avgEntryPriceSol <= 0) continue;
 
         // Unrealized ROI in percent
-        const pnlPct = ((currentPriceSol - pos.avgEntryPriceSol) / pos.avgEntryPriceSol) * 100;
+        let pnlPct = ((currentPriceSol - pos.avgEntryPriceSol) / pos.avgEntryPriceSol) * 100;
+
+        // REALITY CHECK: If nominal PnL looks profitable (>= +15%), verify against actual Jupiter executable sell quote!
+        // This stops illiquid dust pools (e.g. $96 Meteora pools) or API glitches from faking pump alerts and false exits.
+        if (pnlPct >= 15 && BigInt(pos.qtyRaw) > 0n) {
+          const exec = await tokenMetadataService.getExecutableSellPriceSol(pos.tokenMint, pos.qtyRaw, decimals);
+          if (exec && exec.priceSol > 0) {
+            const execPnlPct = ((exec.priceSol - pos.avgEntryPriceSol) / pos.avgEntryPriceSol) * 100;
+            // If DexScreener says >= +20% but real Jupiter sell gives less than +5% (or negative):
+            if (pnlPct >= 20 && execPnlPct < pnlPct - 15) {
+              console.warn(
+                `[PRICE REALITY CHECK] Discrepancy detected for ${pos.tokenMint}: Pool claims +${pnlPct.toFixed(1)}%, but Jupiter real executable sell is only ${execPnlPct >= 0 ? '+' : ''}${execPnlPct.toFixed(1)}%. Overriding with real executable price.`
+              );
+              currentPriceSol = exec.priceSol;
+              pnlPct = execPnlPct;
+              if (meta) {
+                meta.priceSol = exec.priceSol;
+                meta.priceUsd = exec.priceSol * (await tokenMetadataService.getSolPriceUsd());
+              }
+            }
+          }
+        }
 
         // 1. Update Peak High Watermark
         const currentPeak = Math.max(pos.peakPnlPct || 0, pnlPct);
@@ -116,36 +141,51 @@ export class AutoExitManager {
 
         // Positive Pump Milestones (+25%, +50%, +75%, +100%, +150%...)
         if (pnlPct > 0) {
-          for (const m of PUMP_MILESTONES) {
-            if (pnlPct >= m && !posAlerted.has(m)) {
-              posAlerted.add(m);
-              telegramNotifier.notifyPositionMilestone(
-                pos,
-                pnlPct,
-                m,
-                pos.peakPnlPct || pnlPct,
-                currentPriceSol,
-                meta || undefined
-              );
-              break;
+          const eligiblePumpMilestones = PUMP_MILESTONES.filter((m) => pnlPct >= m);
+          if (eligiblePumpMilestones.length > 0) {
+            const highestMilestone = Math.max(...eligiblePumpMilestones);
+            if (!posAlerted.has(highestMilestone)) {
+              // Mark all lower milestones as alerted to prevent spamming
+              eligiblePumpMilestones.forEach((m) => posAlerted.add(m));
+
+              const now = Date.now();
+              const lastAlert = this.lastMilestoneAlertTime.get(pos.id) || 0;
+              if (now - lastAlert >= 30000) {
+                this.lastMilestoneAlertTime.set(pos.id, now);
+                telegramNotifier.notifyPositionMilestone(
+                  pos,
+                  pnlPct,
+                  highestMilestone,
+                  pos.peakPnlPct || pnlPct,
+                  currentPriceSol,
+                  meta || undefined
+                );
+              }
             }
           }
         }
 
         // Negative Dip Milestones (-15%, -25%, -35%, -50%...)
         if (pnlPct < 0) {
-          for (const m of DIP_MILESTONES) {
-            if (pnlPct <= m && !posAlerted.has(m)) {
-              posAlerted.add(m);
-              telegramNotifier.notifyPositionMilestone(
-                pos,
-                pnlPct,
-                m,
-                pos.peakPnlPct || 0,
-                currentPriceSol,
-                meta || undefined
-              );
-              break;
+          const eligibleDipMilestones = DIP_MILESTONES.filter((m) => pnlPct <= m);
+          if (eligibleDipMilestones.length > 0) {
+            const deepestMilestone = Math.min(...eligibleDipMilestones);
+            if (!posAlerted.has(deepestMilestone)) {
+              eligibleDipMilestones.forEach((m) => posAlerted.add(m));
+
+              const now = Date.now();
+              const lastAlert = this.lastMilestoneAlertTime.get(pos.id) || 0;
+              if (now - lastAlert >= 30000) {
+                this.lastMilestoneAlertTime.set(pos.id, now);
+                telegramNotifier.notifyPositionMilestone(
+                  pos,
+                  pnlPct,
+                  deepestMilestone,
+                  pos.peakPnlPct || 0,
+                  currentPriceSol,
+                  meta || undefined
+                );
+              }
             }
           }
         }
