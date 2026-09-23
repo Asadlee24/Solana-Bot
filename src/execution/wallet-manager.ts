@@ -92,6 +92,10 @@ export class ExecutionWalletManager {
     return this.keypair ? this.keypair.publicKey.toBase58() : null;
   }
 
+  public getConnection(): Connection {
+    return this.connection;
+  }
+
   /**
    * Startup self-test: Prints ONLY the public key. Never prints private key or secret bytes.
    */

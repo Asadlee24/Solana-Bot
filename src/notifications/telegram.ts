@@ -451,7 +451,7 @@ export class TelegramNotifier {
       await this.sendOpenPositionsReport(chatId);
     } else if (data === 'menu_pnl') {
       await this.sendPnlSummaryReport(chatId);
-    } else if (data === 'menu_status') {
+    } else if (data === 'menu_status' || data === 'menu_balance') {
       await this.sendStatusReport(chatId);
     } else if (data === 'menu_wallets') {
       await this.sendWalletsReport(chatId);
@@ -1289,9 +1289,30 @@ ${divider}
     let balanceSol = telemetry.currentPaperBalanceSol || 10.0;
     if (isLive) {
       try {
-        await executionWalletManager.refreshBalance();
+        const balLamports = await executionWalletManager.refreshBalance();
+        balanceSol = Number(balLamports) / 1e9;
       } catch {}
-      balanceSol = executionWalletManager.getCachedBalanceSol();
+      if (balanceSol <= 0) {
+        balanceSol = executionWalletManager.getCachedBalanceSol();
+      }
+      if (balanceSol <= 0 && executionWalletManager.getKeypair()) {
+        try {
+          const directLamports = await executionWalletManager.getConnection().getBalance(
+            executionWalletManager.getKeypair()!.publicKey,
+            'confirmed'
+          );
+          balanceSol = directLamports / 1e9;
+        } catch {}
+      }
+
+      // Safeguard: Never display fake -100% portfolio wipeout if RPC fails to return balance
+      if (balanceSol <= 0) {
+        await this.sendCustomMessage(
+          chatId,
+          '⚠️ <b>[WALLET BALANCE SYNCING]</b>\n\nCould not query on-chain wallet balance right now due to RPC latency. Your funds are safe on-chain.\nPlease tap <b>/stats</b> again in a few seconds.'
+        );
+        return;
+      }
     }
     const balanceUsd = balanceSol * solPrice;
 
