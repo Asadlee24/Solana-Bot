@@ -8,7 +8,7 @@ export class SolanaRpcPoller {
   private connection: Connection;
   private isRunning: boolean = false;
   private lastSignatureMap: Map<string, string> = new Map();
-  private pollIntervalMs: number = 8000; // Poll every 8 seconds (was 15s) for faster fallback detection
+  private pollIntervalMs: number = 30000; // Backup poller every 30s (WebSocket handles instant hot path)
   private timer: NodeJS.Timeout | null = null;
   private isRateLimited: boolean = false;
   private lastRateLimitLogged: number = 0;
@@ -38,10 +38,10 @@ export class SolanaRpcPoller {
     try {
       const watched = db.getWatchedWallets().filter((w) => w.enabled);
       for (const target of watched) {
-        if (!this.isRunning) break;
+        if (!this.isRunning || this.isRateLimited) break;
         await this.checkWallet(target.wallet);
         if (this.isRateLimited) break;
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, 2000));
       }
     } catch (err) {
       // Ignore network hiccup on polling
@@ -49,7 +49,10 @@ export class SolanaRpcPoller {
 
     if (this.isRunning) {
       const interval = this.isRateLimited ? 45000 : this.pollIntervalMs;
-      this.timer = setTimeout(() => this.pollLoop(), interval);
+      this.timer = setTimeout(() => {
+        this.isRateLimited = false;
+        this.pollLoop();
+      }, interval);
     }
   }
 
