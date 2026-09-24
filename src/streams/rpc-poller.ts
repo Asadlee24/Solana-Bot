@@ -8,7 +8,7 @@ export class SolanaRpcPoller {
   private connection: Connection;
   private isRunning: boolean = false;
   private lastSignatureMap: Map<string, string> = new Map();
-  private pollIntervalMs: number = 15000; // Poll every 15 seconds with pacing to prevent RPC rate limits
+  private pollIntervalMs: number = 8000; // Poll every 8 seconds (was 15s) for faster fallback detection
   private timer: NodeJS.Timeout | null = null;
   private isRateLimited: boolean = false;
   private lastRateLimitLogged: number = 0;
