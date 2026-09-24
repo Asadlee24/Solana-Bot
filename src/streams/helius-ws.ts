@@ -10,6 +10,12 @@ export interface HeliusWsCallbacks {
   onOpen?: () => void;
 }
 
+let activeWsStream: HeliusWebSocketStream | null = null;
+
+export function isRealTimeStreamConnected(): boolean {
+  return activeWsStream !== null && activeWsStream.isConnected();
+}
+
 export class HeliusWebSocketStream {
   private ws: WebSocket | null = null;
   private isRunning: boolean = false;
@@ -23,6 +29,7 @@ export class HeliusWebSocketStream {
 
   constructor(callbacks: HeliusWsCallbacks) {
     this.callbacks = callbacks;
+    activeWsStream = this;
     if (config.HELIUS_WSS_URL && config.HELIUS_WSS_URL.startsWith('wss://') && !config.HELIUS_WSS_URL.endsWith('=')) {
       this.url = config.HELIUS_WSS_URL;
     } else if (config.HELIUS_API_KEY) {
@@ -31,6 +38,10 @@ export class HeliusWebSocketStream {
       this.url = config.SOLANA_RPC_URL.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
     }
     this.connection = new Connection(config.SOLANA_RPC_URL, 'processed');
+  }
+
+  public isConnected(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
   public start(): void {

@@ -146,6 +146,7 @@ export class TelegramNotifier {
 
     const poll = async () => {
       if (!this.isPolling) return;
+      let hasError = false;
       try {
         const url = `${this.apiRoot}/bot${this.botToken}/getUpdates?offset=${this.updateOffset}&timeout=15`;
         const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
@@ -154,11 +155,15 @@ export class TelegramNotifier {
           if (data.ok && Array.isArray(data.result)) {
             for (const update of data.result) {
               this.updateOffset = update.update_id + 1;
-              await this.handleUpdate(update);
+              // Asynchronous non-blocking dispatch so long polling immediately accepts the next command
+              this.handleUpdate(update).catch((err) => {
+                console.warn('[Telegram Update Handler Error]:', err);
+              });
             }
           }
         }
       } catch (err: any) {
+        hasError = true;
         const now = Date.now();
         if (now - this.lastConnectionErrorTime > 60000) {
           this.lastConnectionErrorTime = now;
@@ -172,7 +177,12 @@ export class TelegramNotifier {
         }
       } finally {
         if (this.isPolling) {
-          setTimeout(poll, 1500);
+          if (hasError) {
+            setTimeout(poll, 1000);
+          } else {
+            // Immediate zero-delay next long-poll loop so commands respond in <100ms
+            setImmediate(poll);
+          }
         }
       }
     };
@@ -249,7 +259,7 @@ export class TelegramNotifier {
       clean.includes('restore') ||
       clean.includes('keypad')
     ) {
-      await this.sendMainMenu(chatId);
+      await this.sendMainMenu(chatId, true);
     } else if (
       clean === 'activate' ||
       clean === 'activate bot' ||
@@ -425,13 +435,12 @@ export class TelegramNotifier {
     const chatId = String(rawChatId);
     const data = cq.data || '';
 
-    try {
-      await fetch(`${this.apiRoot}/bot${this.botToken}/answerCallbackQuery`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ callback_query_id: cq.id }),
-      });
-    } catch {}
+    // Instant ACK to Telegram: stops button spinning in user's UI in <20ms
+    fetch(`${this.apiRoot}/bot${this.botToken}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: cq.id }),
+    }).catch(() => {});
 
     if (data === 'menu_main') {
       await this.sendMainMenu(chatId);
@@ -835,7 +844,7 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
   /**
    * Main Menu - Displays live wallet details in LIVE mode
    */
-  public async sendMainMenu(chatId: string | number): Promise<void> {
+  public async sendMainMenu(chatId: string | number, includeKeypad: boolean = false): Promise<void> {
     const telemetry = db.getSystemTelemetry();
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
@@ -934,14 +943,14 @@ ${divider}
       ],
     };
 
-    // 1. Deliver the persistent keypad first so Telegram client pins it to the bottom of the screen
-    await this.sendCustomMessage(
-      chatId,
-      '⌨️ <i>Interactive quick-access terminal keypad active.</i>',
-      this.getPersistentReplyKeyboard()
-    );
+    if (includeKeypad) {
+      await this.sendCustomMessage(
+        chatId,
+        '⌨️ <i>Interactive quick-access terminal keypad active.</i>',
+        this.getPersistentReplyKeyboard()
+      );
+    }
 
-    // 2. Deliver the rich control terminal card with inline buttons
     await this.sendCustomMessage(chatId, text, inlineKeyboard);
   }
 
@@ -949,107 +958,20 @@ ${divider}
    * Open Positions Report with Individual & Bulk Close Controls
    */
   public async sendOpenPositionsReport(chatId: string | number): Promise<void> {
-    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const rawPositions = db.getOpenPositions().filter((p) => {
       const mint = p.tokenMint || '';
       const isNotDummy =
         !mint.toLowerCase().includes('tokenmint') &&
         !mint.toLowerCase().includes('paper1111') &&
         !mint.toLowerCase().includes('test') &&
-        mint !== '9aaDsN9KkSy9q3LmAwhXiJF75veH4wsbEFkJXqMH54VW';
-      return p.state === 'OPEN' && isNotDummy;
+        mint !== '9aaDsN9KkSy9q3LmAwhXiJF75veH4wsbEFkJXqMH54VW' &&
+        mint !== 'So11111111111111111111111111111111111111112';
+      return p.state === 'OPEN' && isNotDummy && BigInt(p.qtyRaw || '0') > 0n;
     });
 
-    const openPositions: FollowerPosition[] = [];
-    const knownMints = new Set<string>();
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
 
-    for (const pos of rawPositions) {
-      if (config.EXECUTION_MODE === 'LIVE') {
-        try {
-          const onChainBal = await executionWalletManager.getTokenBalanceChecked(pos.tokenMint);
-          if (onChainBal !== null && onChainBal <= 0n) {
-            pos.state = 'CLOSED';
-            pos.qtyRaw = '0';
-            pos.closedAt = Date.now();
-            pos.updatedAt = Date.now();
-            db.savePosition(pos);
-            continue;
-          } else if (onChainBal !== null && onChainBal > 0n) {
-            pos.qtyRaw = onChainBal.toString();
-          }
-        } catch {}
-      }
-      openPositions.push(pos);
-      knownMints.add(pos.tokenMint);
-    }
-
-    // IN LIVE MODE: Directly scan on-chain token accounts so no wallet token is ever missed!
-    if (config.EXECUTION_MODE === 'LIVE') {
-      try {
-        const held = await executionWalletManager.getHeldTokensWithAmounts();
-        for (const item of held) {
-          if (!knownMints.has(item.mint)) {
-            // SPAM & DUST FILTER:
-            // 1. Skip known spam/dust/native SOL mints
-            if (
-              item.mint === '9aaDsN9KkSy9q3LmAwhXiJF75veH4wsbEFkJXqMH54VW' ||
-              item.mint === 'So11111111111111111111111111111111111111112'
-            ) {
-              continue;
-            }
-
-            // 2. Fetch metadata, decimals & spot price
-            const decimals = await mintDecimalsService.getDecimals(item.mint);
-            const meta = await tokenMetadataService.getTokenMetadata(item.mint);
-            const priceSol = meta?.priceSol || 0;
-            const priceUsd = meta?.priceUsd || priceSol * solPriceUsd;
-            const tokenQty = Number(item.amountRaw) / (10 ** decimals);
-            const estValueUsd = tokenQty * priceUsd;
-
-            // If token has 0 price or total position value is less than $0.05 USD, it's dead dust/spam!
-            if (priceUsd <= 0 || estValueUsd < 0.05) {
-              continue;
-            }
-
-            // Check if there is a past BUY order in DB
-            const orders = db.getRecentOrders(100);
-            const buyOrder = orders.find(
-              (o) => o.token_mint === item.mint && o.side === 'BUY' && (o.status === 'FILLED' || o.status === 'LANDED' || o.status === 'CONFIRMED')
-            );
-            let costBasisLamports = Math.round((config.FIXED_BUY_SOL || 0.05) * 1e9).toString();
-            let avgEntryPriceSol = tokenQty > 0 ? (Number(costBasisLamports) / 1e9) / tokenQty : priceSol;
-            if (buyOrder) {
-              costBasisLamports = buyOrder.actualInAmountRaw || buyOrder.in_amount_raw || costBasisLamports;
-              avgEntryPriceSol = buyOrder.actualExecutionPrice || buyOrder.effective_price || avgEntryPriceSol;
-            }
-
-            const dynamicPos: FollowerPosition = {
-              id: `onchain_${item.mint}`,
-              targetWallet: buyOrder?.target_signature || 'On-Chain Wallet',
-              tokenMint: item.mint,
-              qtyRaw: item.amountRaw,
-              costBasisLamports,
-              avgEntryPriceSol,
-              realizedPnlLamports: '0',
-              unrealizedPnlLamports: '0',
-              state: 'OPEN',
-              openedAt: Date.now(),
-              updatedAt: Date.now(),
-              closedAt: undefined,
-              tp1Triggered: false,
-              peakPnlPct: 0,
-            };
-            db.savePosition(dynamicPos);
-            openPositions.push(dynamicPos);
-            knownMints.add(item.mint);
-          }
-        }
-      } catch (scanErr: any) {
-        console.warn('[Telegram] Error scanning on-chain tokens for report:', scanErr?.message || scanErr);
-      }
-    }
-
-    if (openPositions.length === 0) {
+    if (rawPositions.length === 0) {
       const isLive = config.EXECUTION_MODE === 'LIVE';
       const isArmed = isLive && liveEngine.getStatus().isArmed;
       const bal = executionWalletManager.getCachedBalanceSol();
@@ -1094,12 +1016,21 @@ ${divider}
 
     await this.sendCustomMessage(
       chatId,
-      `<b>[OPEN POSITIONS] (${openPositions.length} Active)</b>\nUse the buttons below to close individually or tap Close All.`
+      `<b>[OPEN POSITIONS] (${rawPositions.length} Active)</b>\nUse the buttons below to close individually or tap Close All.`
     );
 
-    for (const pos of openPositions) {
-      const decimals = await mintDecimalsService.getDecimals(pos.tokenMint);
-      const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
+    // Parallel fetch metadata for all open positions in a single concurrent sweep (<300ms)
+    const positionDetails = await Promise.all(
+      rawPositions.map(async (pos) => {
+        const [decimals, meta] = await Promise.all([
+          mintDecimalsService.getDecimals(pos.tokenMint),
+          tokenMetadataService.getTokenMetadata(pos.tokenMint),
+        ]);
+        return { pos, decimals, meta };
+      })
+    );
+
+    for (const { pos, decimals, meta } of positionDetails) {
       const symbol = meta?.symbol || pos.tokenMint.substring(0, 6).toUpperCase();
       const name = meta?.name || symbol;
 
@@ -1169,7 +1100,7 @@ ${divider}
       await this.sendCustomMessage(chatId, text, inlineKeyboard);
     }
 
-    if (openPositions.length > 1) {
+    if (rawPositions.length > 1) {
       await this.sendCustomMessage(chatId, '<b>[EMERGENCY BULK CONTROLS]</b>', {
         inline_keyboard: [
           [{ text: '🚨 CLOSE ALL POSITIONS (100%)', callback_data: 'action_close_all' }],
@@ -1191,9 +1122,14 @@ ${divider}
     }
 
     const rows: any[] = [];
-    for (const p of openPositions) {
-      const meta = await tokenMetadataService.getTokenMetadata(p.tokenMint);
-      const sym = meta?.symbol ? meta.symbol.toUpperCase() : p.tokenMint.substring(0, 4).toUpperCase();
+    const enriched = await Promise.all(
+      openPositions.map(async (p) => {
+        const meta = await tokenMetadataService.getTokenMetadata(p.tokenMint);
+        const sym = meta?.symbol ? meta.symbol.toUpperCase() : p.tokenMint.substring(0, 4).toUpperCase();
+        return { p, sym };
+      })
+    );
+    for (const { p, sym } of enriched) {
       rows.push([
         { text: `🚨 CLOSE $${sym} (100%)`, callback_data: `sell_100_${p.tokenMint}` },
         { text: `SELL 50% ($${sym})`, callback_data: `sell_50_${p.tokenMint}` },

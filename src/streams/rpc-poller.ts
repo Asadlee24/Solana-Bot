@@ -3,6 +3,7 @@ import { config } from '../config/index.js';
 import { db } from '../db/database.js';
 import { ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
 import { signalManager } from './signal-manager.js';
+import { isRealTimeStreamConnected } from './helius-ws.js';
 
 export class SolanaRpcPoller {
   private connection: Connection;
@@ -20,7 +21,7 @@ export class SolanaRpcPoller {
   public start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
-    console.info('[RPC Poller] Live mainnet polling active for watched target wallets...');
+    console.info('[RPC Poller] Live mainnet polling backup active for watched target wallets...');
     this.pollLoop();
   }
 
@@ -34,6 +35,14 @@ export class SolanaRpcPoller {
 
   private async pollLoop(): Promise<void> {
     if (!this.isRunning) return;
+
+    // Failover Redundancy: If WebSocket stream is actively connected, skip polling to avoid 429 rate limits!
+    if (isRealTimeStreamConnected()) {
+      if (this.isRunning) {
+        this.timer = setTimeout(() => this.pollLoop(), 30000);
+      }
+      return;
+    }
 
     try {
       const watched = db.getWatchedWallets().filter((w) => w.enabled);
