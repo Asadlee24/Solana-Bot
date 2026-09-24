@@ -144,7 +144,7 @@ export class HeliusWebSocketStream {
     }
   }
 
-  public subscribe(): void {
+  public async subscribe(): Promise<void> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     let dbWallets: string[] = [];
@@ -156,6 +156,7 @@ export class HeliusWebSocketStream {
     const allWallets = dbWallets.length > 0 ? dbWallets : config.WATCHED_WALLETS;
 
     for (const wallet of allWallets) {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) break;
       // logsSubscribe: Universally supported on all plans with sub-50ms push notifications
       const msg = {
         jsonrpc: '2.0',
@@ -171,13 +172,16 @@ export class HeliusWebSocketStream {
         ],
       };
       this.ws.send(JSON.stringify(msg));
+      if (allWallets.length > 1) {
+        await new Promise((r) => setTimeout(r, 60));
+      }
     }
     console.info(`[Helius WS] Subscribed to ${allWallets.length} target wallet(s) via real-time logsSubscribe feed.`);
   }
 
   public resubscribe(): void {
     console.info('[Helius WS] Refreshing target wallet subscriptions...');
-    this.subscribe();
+    this.subscribe().catch(() => {});
   }
 
   private async fetchParsedTxWithRetry(signature: string, maxRetries = 5, initialDelayMs = 40): Promise<any> {

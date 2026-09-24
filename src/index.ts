@@ -16,15 +16,8 @@ async function bootstrap() {
   // Startup self-test for execution wallet (prints ONLY public key)
   executionWalletManager.logStartupStatus();
 
-  // Auto-arm LIVE mode on startup if safety checks & wallet balance pass
-  if (config.EXECUTION_MODE === 'LIVE') {
-    const armRes = await liveEngine.arm();
-    if (armRes.armed) {
-      console.info(`[LIVE ENGINE ARMED] Automatically armed on startup with wallet ${executionWalletManager.getPublicKeyBase58()}`);
-    } else {
-      console.warn(`[LIVE ENGINE STARTUP] Could not auto-arm on startup: ${armRes.reason}`);
-    }
-  }
+  // STRICT: Do NOT auto-arm on startup/deploy. Keep paused/disarmed until operator explicitly turns it on.
+  console.info('[LIVE ENGINE PAUSED] Bot initialized in safe PAUSED state. Operator can arm via Telegram (/arm) or Dashboard.');
 
   // Restore and reconcile live positions with on-chain wallet tokens & accurate cost basis
   await positionSyncService.initializeOnStartup();
