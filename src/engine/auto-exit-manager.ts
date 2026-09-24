@@ -397,7 +397,7 @@ export class AutoExitManager {
   ): Promise<void> {
     this.inFlightExits.add(pos.tokenMint);
     console.info(
-      `🎯 [TRAILING STOP-LOSS EXIT] ${pos.tokenMint} at +${pnlPct.toFixed(1)}% (Floor: +${floorPct.toFixed(1)}%, Peak: +${peakPct.toFixed(1)}%). Executing 100% exit to lock profit...`
+      `🎯 [TRAILING STOP-LOSS EXIT] ${pos.tokenMint} at ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% (Floor: +${floorPct.toFixed(1)}%, Peak: +${peakPct.toFixed(1)}%). Executing 100% exit to lock profit...`
     );
 
     try {

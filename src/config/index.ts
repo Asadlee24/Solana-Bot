@@ -82,7 +82,7 @@ const ConfigSchema = z.object({
   AUTO_TP_SELL_FRACTION: z.coerce.number().default(0.5), // Sell 50% on 2x
   AUTO_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
   AUTO_SL_LOSS_PCT: z.coerce.number().default(30), // -30% loss trigger (anti-rug base floor)
-  AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(3000), // 3-second monitoring loop
+  AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(800), // 800ms high-frequency monitoring loop
 
   // Zero-Loss Guarantee & Dynamic Trailing Stop-Loss
   TRAILING_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
