@@ -2425,8 +2425,8 @@ Trading automatically paused for portfolio protection.
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.id}` },
-          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.id}` },
+          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.tokenMint}` },
+          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.tokenMint}` },
         ],
         [
           { text: '📊 DEXSCREENER', url: `https://dexscreener.com/solana/${position.tokenMint}` },
@@ -2560,8 +2560,8 @@ ${header}
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.id}` },
-          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.id}` },
+          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.tokenMint}` },
+          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.tokenMint}` },
         ],
         [
           { text: '📊 DEXSCREENER', url: `https://dexscreener.com/solana/${position.tokenMint}` },
@@ -2607,8 +2607,8 @@ ${header}
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.id}` },
-          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.id}` },
+          { text: '🚨 SELL 50%', callback_data: `sell_50_${position.tokenMint}` },
+          { text: '🚨 SELL 100%', callback_data: `sell_100_${position.tokenMint}` },
         ],
         [
           { text: '📊 DEXSCREENER', url: `https://dexscreener.com/solana/${position.tokenMint}` },

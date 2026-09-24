@@ -163,16 +163,21 @@ export class LiveExecutionEngine {
     const quotedAt = process.hrtime.bigint();
     const orderId = randomUUID();
 
-    // 1. Fail Closed Guard
-    if (!this.isArmed) {
+    // 1. Fail Closed Guard:
+    // Protects capital by blocking BUY orders when bot is disarmed or paused.
+    // Operator manual exits and protective SELLs (TP/SL) must ALWAYS be permitted to liquidate tokens back to SOL,
+    // even if live copy trading is currently paused/disarmed!
+    const isManualExit = mirrorIntent.targetSignature?.startsWith('manual_exit_');
+    const isSell = mirrorIntent.side === 'SELL';
+
+    if (!this.isArmed && !isManualExit && !isSell) {
       const msg = `Cannot execute live trade: LIVE execution is DISARMED (${this.disarmReason})`;
       console.error(`[LIVE ERROR] ${msg}`);
       throw new Error(msg);
     }
 
-    // 2. Smoke Test Safeguards
-    const isManualExit = mirrorIntent.targetSignature?.startsWith('manual_exit_');
-    if (config.MAINNET_SMOKE_TEST_MODE && !isManualExit) {
+    // 2. Smoke Test Safeguards (only apply to new BUY copy trades)
+    if (config.MAINNET_SMOKE_TEST_MODE && !isManualExit && !isSell) {
       // S1: Smoke Test allowed side guard (default BUY only)
       if (
         config.SMOKE_TEST_ALLOWED_SIDE !== 'BOTH' &&
@@ -282,8 +287,8 @@ export class LiveExecutionEngine {
       let isJupiterManaged = false;
       let jupOrderResponse: JupiterV2OrderResponse | undefined;
 
-      // 4. Routing Decision: Force Jupiter if configured, or resolve on-chain curve state
-      const forceJupiter = config.SMOKE_TEST_FORCE_JUPITER || (config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER);
+      // 4. Routing Decision: Force Jupiter if configured in smoke test, or resolve on-chain curve state
+      const forceJupiter = config.MAINNET_SMOKE_TEST_MODE && config.SMOKE_TEST_FORCE_JUPITER;
       let isDirectPumpBondingCurve = false;
       let precalculatedCurveState: OnChainBondingCurveState | undefined;
 

@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import EventEmitter from 'events';
+import { PublicKey } from '@solana/web3.js';
 import { config, solToLamportsBigInt } from '../config/index.js';
 import { db } from '../db/database.js';
 import { dedupeEngine } from '../engine/dedupe.js';
@@ -228,18 +229,32 @@ export class SignalManager extends EventEmitter {
     skipNotification: boolean = false
   ): Promise<{ order: MirrorOrder; position: FollowerPosition | null }> {
     const openPositions = db.getOpenPositions();
-    let pos = openPositions.find(
+    let pos: FollowerPosition | null | undefined = openPositions.find(
       (p) => p.id === positionIdOrMint || p.tokenMint.toLowerCase() === positionIdOrMint.toLowerCase()
     );
 
-    if (!pos && config.EXECUTION_MODE === 'LIVE') {
+    // If not found in memory open list, query DB by ID or Mint
+    if (!pos) {
+      pos = db.getPositionById(positionIdOrMint) || db.getPositionByMint(positionIdOrMint) || db.getOpenPositionByMint(positionIdOrMint) || undefined;
+    }
+
+    // Determine if argument is a valid base58 Solana token mint address
+    let isBase58Mint = false;
+    const targetMint = pos ? pos.tokenMint : positionIdOrMint;
+    try {
+      new PublicKey(targetMint);
+      isBase58Mint = true;
+    } catch {}
+
+    // Dynamic position discovery: if position is missing from DB but follower wallet holds tokens on-chain
+    if (!pos && config.EXECUTION_MODE === 'LIVE' && isBase58Mint) {
       try {
-        const onChainBal = await executionWalletManager.getTokenBalanceRaw(positionIdOrMint);
+        const onChainBal = await executionWalletManager.getTokenBalanceRaw(targetMint);
         if (onChainBal !== null && onChainBal > 0n) {
           const dynamicPos: FollowerPosition = {
-            id: `onchain_${positionIdOrMint}`,
+            id: `onchain_${targetMint}`,
             targetWallet: 'On-Chain Wallet',
-            tokenMint: positionIdOrMint,
+            tokenMint: targetMint,
             qtyRaw: onChainBal.toString(),
             costBasisLamports: '0',
             avgEntryPriceSol: 0,
@@ -276,6 +291,10 @@ export class SignalManager extends EventEmitter {
         throw new Error(`Position already closed: Wallet holds 0 tokens of ${pos.tokenMint.substring(0, 6)}... on-chain.`);
       } else if (onChainBal !== null && onChainBal > 0n) {
         pos.qtyRaw = onChainBal.toString();
+        if (pos.state !== 'OPEN') {
+          pos.state = 'OPEN';
+          db.savePosition(pos);
+        }
       }
     }
 
