@@ -15,14 +15,18 @@ export class SolanaRpcPoller {
   private lastRateLimitLogged: number = 0;
 
   constructor() {
-    this.connection = new Connection(config.SOLANA_RPC_URL, 'processed');
+    this.connection = new Connection(config.SOLANA_RPC_URL, {
+      commitment: 'confirmed',
+      disableRetryOnRateLimit: true,
+    });
   }
 
   public start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
     console.info('[RPC Poller] Live mainnet polling backup active for watched target wallets...');
-    this.pollLoop();
+    // Give WebSocket 5 seconds to establish connection before running backup poller
+    this.timer = setTimeout(() => this.pollLoop(), 5000);
   }
 
   public stop(): void {

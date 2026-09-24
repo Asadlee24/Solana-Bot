@@ -26,6 +26,9 @@ export class HeliusWebSocketStream {
   private connection: Connection;
   private recentSigs: Set<string> = new Set();
   private reconnectAttempts: number = 0;
+  private activeFetches: number = 0;
+  private readonly maxConcurrentFetches: number = 2;
+  private pendingQueue: Array<{ signature: string; observedAt: bigint }> = [];
 
   constructor(callbacks: HeliusWsCallbacks) {
     this.callbacks = callbacks;
@@ -37,7 +40,10 @@ export class HeliusWebSocketStream {
     } else {
       this.url = config.SOLANA_RPC_URL.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
     }
-    this.connection = new Connection(config.SOLANA_RPC_URL, 'processed');
+    this.connection = new Connection(config.SOLANA_RPC_URL, {
+      commitment: 'processed',
+      disableRetryOnRateLimit: true,
+    });
   }
 
   public isConnected(): boolean {
@@ -98,11 +104,39 @@ export class HeliusWebSocketStream {
           const text = data.toString();
           const parsed = JSON.parse(text);
 
+const SWAP_PROGRAMS_AND_KEYWORDS = [
+  '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H045', // Raydium V4
+  'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', // Raydium CLMM
+  'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C', // Raydium CPMM
+  '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun
+  'MoonCVVNZFSYkqNXP6bxHLPL6QQJiMagDL3qcqUQTrG', // Moonshot
+  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', // Jupiter V6
+  'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB', // Jupiter V4
+  'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', // Orca Whirlpools
+  'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', // Meteora DLMM
+  'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', // Meteora Pools
+  'Swap',
+  'swap',
+  'Buy',
+  'buy',
+  'Sell',
+  'sell',
+];
+
           // 1. Instant logsNotification (<50ms real-time event from Helius)
           if (parsed.method === 'logsNotification' && parsed.params?.result?.value) {
             const val = parsed.params.result.value;
             const signature = val.signature;
             if (!signature || val.err) return; // Skip failed on-chain transactions
+
+            // Pre-filter: Check logs to ensure transaction involves a swap / DEX trade
+            if (Array.isArray(val.logs) && val.logs.length > 0) {
+              const logsText = val.logs.join(' ');
+              const hasSwapIntent = SWAP_PROGRAMS_AND_KEYWORDS.some((kw) => logsText.includes(kw));
+              if (!hasSwapIntent) {
+                return; // Silently drop non-swap/spam logs before spending an RPC call!
+              }
+            }
 
             // In-flight deduplication check
             if (this.recentSigs.has(signature)) return;
@@ -112,7 +146,7 @@ export class HeliusWebSocketStream {
               if (first) this.recentSigs.delete(first);
             }
 
-            this.fetchAndDispatch(signature, observedAt);
+            this.enqueueFetch(signature, observedAt);
             return;
           }
 
@@ -195,23 +229,59 @@ export class HeliusWebSocketStream {
     this.subscribe().catch(() => {});
   }
 
-  private async fetchParsedTxWithRetry(signature: string, maxRetries = 5, initialDelayMs = 40): Promise<any> {
+  private enqueueFetch(signature: string, observedAt: bigint): void {
+    if (this.pendingQueue.length > 20) {
+      this.pendingQueue.shift(); // Drop oldest to avoid lag buildup
+    }
+    this.pendingQueue.push({ signature, observedAt });
+    this.processQueue();
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.activeFetches >= this.maxConcurrentFetches || this.pendingQueue.length === 0) {
+      return;
+    }
+
+    const item = this.pendingQueue.shift();
+    if (!item) return;
+
+    // Check age of signal - if older than 2.5s, it is already too stale to copy
+    const ageMs = Number(process.hrtime.bigint() - item.observedAt) / 1e6;
+    if (ageMs > 2500) {
+      this.processQueue();
+      return;
+    }
+
+    this.activeFetches++;
+    try {
+      await this.fetchAndDispatch(item.signature, item.observedAt);
+    } catch {
+      // ignore
+    } finally {
+      this.activeFetches--;
+      setTimeout(() => this.processQueue(), 50);
+    }
+  }
+
+  private async fetchParsedTxWithRetry(signature: string, maxRetries = 2, initialDelayMs = 50): Promise<any> {
     let delay = initialDelayMs;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const commitment = (attempt <= 3 ? 'processed' : 'confirmed') as any;
         const txRes = await this.connection.getParsedTransaction(signature, {
           maxSupportedTransactionVersion: 1,
-          commitment,
+          commitment: 'confirmed' as any,
         });
         if (txRes && txRes.transaction) {
           return txRes;
         }
       } catch (err: any) {
-        if (attempt === maxRetries) throw err;
+        if (err?.message?.includes('429') || err?.message?.includes('Too Many Requests')) {
+          return null;
+        }
+        if (attempt === maxRetries) return null;
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
-      delay = Math.min(delay * 1.5, 500);
+      delay = Math.min(delay * 1.5, 200);
     }
     return null;
   }
