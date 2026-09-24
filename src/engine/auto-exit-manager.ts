@@ -22,6 +22,8 @@ export class AutoExitManager {
   private breakevenAlerted: Set<string> = new Set();
   private lastMilestoneAlertTime: Map<string, number> = new Map();
   private lastOnChainBalanceCheck: Map<string, number> = new Map();
+  private exitFailCounts: Map<string, number> = new Map();
+  private exitCooldowns: Map<string, number> = new Map();
 
   /** Load persisted milestone state from DB for a position (called once per position, lazily) */
   private loadMilestonesFromDb(posId: string): void {
@@ -87,6 +89,11 @@ export class AutoExitManager {
 
     for (const pos of openPositions) {
       if (this.inFlightExits.has(pos.tokenMint)) {
+        continue;
+      }
+
+      const failCooldown = this.exitCooldowns.get(pos.tokenMint);
+      if (failCooldown && Date.now() < failCooldown) {
         continue;
       }
 
@@ -319,6 +326,19 @@ export class AutoExitManager {
     throw lastErr;
   }
 
+  private handleExitFailure(tokenMint: string, err: any): void {
+    const attempts = (this.exitFailCounts.get(tokenMint) || 0) + 1;
+    this.exitFailCounts.set(tokenMint, attempts);
+    const cooldownSec = Math.min(600, attempts <= 2 ? 30 : attempts === 3 ? 60 : attempts === 4 ? 120 : 300);
+    this.exitCooldowns.set(tokenMint, Date.now() + cooldownSec * 1000);
+    console.warn(`[AUTO-EXIT] ${tokenMint} exit failed (${attempts}x: ${err.message?.slice(0, 50)}). Pausing attempts for ${cooldownSec}s to protect API quota.`);
+  }
+
+  private handleExitSuccess(tokenMint: string): void {
+    this.exitFailCounts.delete(tokenMint);
+    this.exitCooldowns.delete(tokenMint);
+  }
+
   private async triggerTakeProfit(pos: any, pnlPct: number, meta?: TokenMetadata): Promise<void> {
     this.inFlightExits.add(pos.tokenMint);
     console.info(
@@ -328,12 +348,14 @@ export class AutoExitManager {
     try {
       const { order, position } = await this.executeExitWithRetry(pos.id, config.AUTO_TP_SELL_FRACTION, true);
 
+      this.handleExitSuccess(pos.tokenMint);
       db.markPositionTpTriggered(pos.id, pnlPct);
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
       telegramNotifier.notifyAutoTakeProfit(order, position || pos, pnlPct, meta);
     } catch (err: any) {
       console.error(`❌ [AUTO TP ERROR] ${pos.tokenMint}:`, err.message || err);
+      this.handleExitFailure(pos.tokenMint, err);
     } finally {
       this.inFlightExits.delete(pos.tokenMint);
     }
@@ -353,12 +375,14 @@ export class AutoExitManager {
     try {
       const { order, position } = await this.executeExitWithRetry(pos.id, 1.0, true);
 
+      this.handleExitSuccess(pos.tokenMint);
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
       this.breakevenAlerted.delete(pos.id);
       telegramNotifier.notifyBreakevenExit(order, position || pos, pnlPct, peakPct, meta);
     } catch (err: any) {
       console.error(`❌ [ZERO-LOSS EXIT ERROR] ${pos.tokenMint}:`, err.message || err);
+      this.handleExitFailure(pos.tokenMint, err);
     } finally {
       this.inFlightExits.delete(pos.tokenMint);
     }
@@ -379,12 +403,14 @@ export class AutoExitManager {
     try {
       const { order, position } = await this.executeExitWithRetry(pos.id, 1.0, true);
 
+      this.handleExitSuccess(pos.tokenMint);
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
       this.breakevenAlerted.delete(pos.id);
       telegramNotifier.notifyTrailingStopLoss(order, position || pos, pnlPct, floorPct, peakPct, meta);
     } catch (err: any) {
       console.error(`❌ [TRAILING SL ERROR] ${pos.tokenMint}:`, err.message || err);
+      this.handleExitFailure(pos.tokenMint, err);
     } finally {
       this.inFlightExits.delete(pos.tokenMint);
     }
@@ -399,12 +425,14 @@ export class AutoExitManager {
     try {
       const { order, position } = await this.executeExitWithRetry(pos.id, 1.0, true);
 
+      this.handleExitSuccess(pos.tokenMint);
       this.alertedMilestones.delete(pos.id);
       this.alertedPullbacks.delete(pos.id);
       this.breakevenAlerted.delete(pos.id);
       telegramNotifier.notifyAutoStopLoss(order, position || pos, pnlPct, meta);
     } catch (err: any) {
       console.error(`❌ [AUTO SL ERROR] ${pos.tokenMint}:`, err.message || err);
+      this.handleExitFailure(pos.tokenMint, err);
     } finally {
       this.inFlightExits.delete(pos.tokenMint);
     }
