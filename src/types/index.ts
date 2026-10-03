@@ -268,6 +268,8 @@ export interface SystemTelemetry {
   liveWalletReserveSol?: number;
   liveWalletSpendableSol?: number;
   liveEngineArmed?: boolean;
+  liveWalletBalanceAvailable?: boolean;
+  liveWalletBalanceDisplay?: string;
 }
 
 export interface AuditLogEntry {

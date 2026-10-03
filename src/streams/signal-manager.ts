@@ -104,6 +104,11 @@ export class SignalManager extends EventEmitter {
     console.info(`[SWAP DETECTED] ${swapIntent.side} ${swapIntent.tokenMint.slice(0, 8)}... by ${matchedWallet.wallet.slice(0, 8)}... (venue: ${swapIntent.venue}, estPrice: ${swapIntent.estimatedPrice.toExponential(4)} SOL)`);
 
     // 4. Pre-trade Risk Check & Sizing Decision (ULTRA-FAST IN-MEMORY HOT PATH)
+    if (config.EXECUTION_MODE === 'LIVE' && swapIntent.side === 'BUY' && !executionWalletManager.isBalanceAvailable(60000)) {
+      console.warn('[SignalManager] BUY rejected: Execution wallet balance is unavailable or stale. Failing closed.');
+      return { intent: null, order: null };
+    }
+
     const currentSolBalance =
       config.EXECUTION_MODE === 'LIVE'
         ? executionWalletManager.getCachedBalanceLamports()

@@ -325,12 +325,15 @@ export function createApiServer() {
 
     telemetry.isLiveMode = config.EXECUTION_MODE === 'LIVE';
     if (config.EXECUTION_MODE === 'LIVE') {
+      const balanceState = await executionWalletManager.getFreshBalance(20000);
       const walletStatus = executionWalletManager.getStatus();
       telemetry.liveWalletPublicKey = walletStatus.publicKey || undefined;
-      telemetry.liveWalletBalanceSol = walletStatus.balanceSol;
+      telemetry.liveWalletBalanceSol = balanceState.isAvailable ? balanceState.balanceSol : 0;
       telemetry.liveWalletReserveSol = walletStatus.reserveSol;
-      telemetry.liveWalletSpendableSol = walletStatus.spendableSol;
+      telemetry.liveWalletSpendableSol = balanceState.isAvailable ? balanceState.spendableSol : 0;
       telemetry.liveEngineArmed = liveEngine.getStatus().isArmed;
+      telemetry.liveWalletBalanceAvailable = balanceState.isAvailable;
+      telemetry.liveWalletBalanceDisplay = balanceState.displayBalance;
 
       const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
       telemetry.roiPercent = initialCapital > 0
@@ -638,7 +641,7 @@ export function createApiServer() {
   // Live Engine Safety & Status Endpoints
   app.get('/api/live/status', async (_req: Request, res: Response) => {
     if (config.EXECUTION_MODE === 'LIVE') {
-      await executionWalletManager.refreshBalance().catch(() => {});
+      await executionWalletManager.getFreshBalance(20000).catch(() => {});
     }
     const liveStatus = liveEngine.getStatus();
     const walletStatus = executionWalletManager.getStatus();
@@ -654,6 +657,12 @@ export function createApiServer() {
         balanceSol: walletStatus.balanceSol,
         reserveSol: walletStatus.reserveSol,
         spendableSol: walletStatus.spendableSol,
+        lastUpdated: walletStatus.lastUpdated,
+        isAvailable: walletStatus.isAvailable,
+        isInitialized: walletStatus.isInitialized,
+        isVerifiedZero: walletStatus.isVerifiedZero,
+        lastFetchError: walletStatus.lastFetchError,
+        displayBalance: walletStatus.displayBalance,
       },
       limits: {
         fixedBuySol: config.FIXED_BUY_SOL,

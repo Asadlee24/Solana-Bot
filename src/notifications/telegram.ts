@@ -662,12 +662,11 @@ export class TelegramNotifier {
 
     const pub = executionWalletManager.getPublicKeyBase58();
     const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'Hot Wallet';
-    try {
-      await executionWalletManager.refreshBalance();
-    } catch {}
-    const bal = executionWalletManager.getCachedBalanceSol();
+    const balanceState = await executionWalletManager.getFreshBalance(20000);
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
-    const balUsd = bal * solPriceUsd;
+    const balDisplay = balanceState.isAvailable
+      ? `${balanceState.displayBalance} ($${(balanceState.balanceSol * solPriceUsd).toFixed(2)} USD)`
+      : '⚠️ Balance unavailable / RPC syncing';
     const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
     const activeWallets = db.getWatchedWallets().filter((w) => w.enabled);
     let targetShort = 'None (Add target first)';
@@ -686,7 +685,7 @@ Are you sure you want to <b>ACTIVATE</b> the bot for real trading?
 
 • <b>Execution Mode:</b> REAL MAINNET
 • <b>Active Signer:</b> <code>${shortPub}</code>
-• <b>Wallet Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)
+• <b>Wallet Balance:</b> ${balDisplay}
 • <b>Trade Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
 • <b>Target Trader:</b> <code>${targetShort}</code>
 
@@ -750,8 +749,9 @@ Are you sure you want to <b>DEACTIVATE</b> the bot?
 
     if (result.armed) {
       const pub = executionWalletManager.getPublicKeyBase58();
-      const bal = executionWalletManager.getCachedBalanceSol();
-      const spendable = executionWalletManager.getSpendableBalanceSol();
+      const balState = executionWalletManager.getBalanceDisplayState();
+      const bal = balState.balanceSol;
+      const spendable = balState.spendableSol;
       const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
       const balUsd = bal * solPriceUsd;
       const spendableUsd = spendable * solPriceUsd;
@@ -762,7 +762,7 @@ Are you sure you want to <b>DEACTIVATE</b> the bot?
 🟢 <b>[BOT ACTIVATED]</b>
 
 <b>Active Signer:</b> <code>${pub}</code>
-<b>On-Chain Balance:</b> <b>${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)</b>
+<b>On-Chain Balance:</b> <b>${balState.displayBalance} ($${balUsd.toFixed(2)} USD)</b>
 <b>Spendable Balance:</b> ${spendable.toFixed(4)} SOL ($${spendableUsd.toFixed(2)} USD)
 <b>Reserve Floor:</b> ${config.MIN_SOL_RESERVE_SOL} SOL ($${reserveUsd.toFixed(2)} USD)
 <b>Trade Sizing:</b> ${config.FIXED_BUY_SOL} SOL ($${sizingUsd.toFixed(2)} USD)
@@ -829,15 +829,12 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
 
     if (isLive) {
-      try {
-        await executionWalletManager.refreshBalance();
-      } catch {}
-
+      const balanceState = await executionWalletManager.getFreshBalance(20000);
       const pub = executionWalletManager.getPublicKeyBase58();
-      const bal = executionWalletManager.getCachedBalanceSol();
-      const spendable = executionWalletManager.getSpendableBalanceSol();
       const isArmed = liveEngine.getStatus().isArmed;
       const minToArm = config.MIN_SOL_RESERVE_SOL + config.FIXED_BUY_SOL;
+      const bal = balanceState.balanceSol;
+      const spendable = balanceState.spendableSol;
       const balUsd = bal * solPriceUsd;
       const spendableUsd = spendable * solPriceUsd;
       const reserveUsd = config.MIN_SOL_RESERVE_SOL * solPriceUsd;
@@ -859,17 +856,32 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
         ? '🔒 ON (Strict 1-Entry per Coin)'
         : '🔴 OFF';
 
+      let walletOverview = '';
+      if (balanceState.isAvailable) {
+        walletOverview = `
+🏦 <b>EXECUTION WALLET</b>
+├ <b>Address:</b> <code>${pub || 'Not Configured'}</code>
+├ <b>Total On-Chain:</b> 💎 <b>${balanceState.displayBalance}</b> (<code>$${balUsd.toFixed(2)} USD</code>)
+├ <b>Spendable Trading:</b> ⚡ <b>${spendable.toFixed(4)} SOL</b> (<code>$${spendableUsd.toFixed(2)} USD</code>)
+└ <b>Gas Reserve Floor:</b> 🛡️ <b>${config.MIN_SOL_RESERVE_SOL} SOL</b> (<code>$${reserveUsd.toFixed(2)} USD</code>)
+        `.trim();
+      } else {
+        walletOverview = `
+🏦 <b>EXECUTION WALLET</b>
+├ <b>Address:</b> <code>${pub || 'Not Configured'}</code>
+├ <b>Total On-Chain:</b> ⚠️ <i>Balance unavailable / RPC syncing</i>
+├ <b>Spendable Trading:</b> ⚠️ <i>Unavailable</i>
+└ <b>Gas Reserve Floor:</b> 🛡️ <b>${config.MIN_SOL_RESERVE_SOL} SOL</b> (<code>$${reserveUsd.toFixed(2)} USD</code>)
+        `.trim();
+      }
+
       const text = `
 💳 <b>HOT WALLET & BALANCE OVERVIEW</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🟢 <b>ENGINE STATUS:</b> ${isArmed ? '<code>ONLINE & ARMED (LIVE)</code>' : '<code>OFFLINE (PAUSED)</code>'}
 
-🏦 <b>EXECUTION WALLET</b>
-├ <b>Address:</b> <code>${pub || 'Not Configured'}</code>
-├ <b>Total On-Chain:</b> 💎 <b>${bal.toFixed(4)} SOL</b> (<code>$${balUsd.toFixed(2)} USD</code>)
-├ <b>Spendable Trading:</b> ⚡ <b>${spendable.toFixed(4)} SOL</b> (<code>$${spendableUsd.toFixed(2)} USD</code>)
-└ <b>Gas Reserve Floor:</b> 🛡️ <b>${config.MIN_SOL_RESERVE_SOL} SOL</b> (<code>$${reserveUsd.toFixed(2)} USD</code>)
+${walletOverview}
 
 📈 <b>PERFORMANCE & SIZING</b>
 ├ <b>Net Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
@@ -952,26 +964,38 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
 
     let balanceBlock = '';
     if (isLive) {
-      const liveBal = executionWalletManager.getCachedBalanceSol();
-      const liveSpendable = executionWalletManager.getSpendableBalanceSol();
+      const balanceState = await executionWalletManager.getFreshBalance(20000);
       const pub = executionWalletManager.getPublicKeyBase58();
       const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'None';
       const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
-      const liveBalUsd = liveBal * solPriceUsd;
-      const liveSpendableUsd = liveSpendable * solPriceUsd;
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
-      const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-      const realizedSol = liveBal - initialCapital;
-      const realizedUsd = realizedSol * solPriceUsd;
 
-      balanceBlock = `
+      if (balanceState.isAvailable) {
+        const liveBal = balanceState.balanceSol;
+        const liveSpendable = balanceState.spendableSol;
+        const liveBalUsd = liveBal * solPriceUsd;
+        const liveSpendableUsd = liveSpendable * solPriceUsd;
+        const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
+        const realizedSol = liveBal - initialCapital;
+        const realizedUsd = realizedSol * solPriceUsd;
+
+        balanceBlock = `
 💼 <b>CAPITAL & WALLET</b>
 ├ <b>Signer:</b> <code>${shortPub}</code>
-├ <b>Balance:</b> 💎 <b>${liveBal.toFixed(4)} SOL</b> (<code>$${liveBalUsd.toFixed(2)} USD</code>)
+├ <b>Balance:</b> 💎 <b>${balanceState.displayBalance}</b> (<code>$${liveBalUsd.toFixed(2)} USD</code>)
 ├ <b>Spendable:</b> ⚡ <b>${liveSpendable.toFixed(4)} SOL</b> (<code>$${liveSpendableUsd.toFixed(2)} USD</code>)
 ├ <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
 └ <b>Buy Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (<code>$${sizingUsd.toFixed(2)} USD</code>)
-      `.trim();
+        `.trim();
+      } else {
+        balanceBlock = `
+💼 <b>CAPITAL & WALLET</b>
+├ <b>Signer:</b> <code>${shortPub}</code>
+├ <b>Balance:</b> ⚠️ <i>Balance unavailable / RPC syncing</i>
+├ <b>Spendable:</b> ⚠️ <i>Unavailable</i>
+└ <b>Buy Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (<code>$${sizingUsd.toFixed(2)} USD</code>)
+        `.trim();
+      }
     } else {
       balanceBlock = `
 💼 <b>PORTFOLIO (PAPER)</b>
@@ -1063,8 +1087,10 @@ ${divider}
     if (rawPositions.length === 0) {
       const isLive = config.EXECUTION_MODE === 'LIVE';
       const isArmed = isLive && liveEngine.getStatus().isArmed;
-      const bal = executionWalletManager.getCachedBalanceSol();
-      const balUsd = bal * solPriceUsd;
+      const balanceState = isLive ? await executionWalletManager.getFreshBalance(20000) : null;
+      const balDisplay = isLive
+        ? (balanceState?.isAvailable ? `${balanceState.displayBalance} ($${(balanceState.balanceSol * solPriceUsd).toFixed(2)} USD)` : '⚠️ Balance unavailable / RPC syncing')
+        : `${(db.getSystemTelemetry().currentPaperBalanceSol || 10.0).toFixed(4)} SOL ($${((db.getSystemTelemetry().currentPaperBalanceSol || 10.0) * solPriceUsd).toFixed(2)} USD)`;
       const accounting = db.getAccountingSummary();
       const realizedSol = accounting.realizedPnlSol;
       const realizedUsd = realizedSol * solPriceUsd;
@@ -1078,7 +1104,7 @@ ${divider}
 ⚪ <b>Current Holding:</b> <b>No active token positions</b>
 💎 <b>Capital Status:</b> <b>100% Pure Liquid SOL</b> in execution wallet.
 
-💼 <b>Wallet Balance:</b> <b>${bal.toFixed(4)} SOL</b> (<code>$${balUsd.toFixed(2)} USD</code>)
+💼 <b>Wallet Balance:</b> <b>${balDisplay}</b>
 📈 <b>Total Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
 🎯 <b>Win Rate:</b> <b>${winRate.toFixed(1)}%</b> (<code>${closedTrades} closed trades today</code>)
 
@@ -1313,31 +1339,15 @@ ${divider}
 
     let balanceSol = telemetry.currentPaperBalanceSol || 10.0;
     if (isLive) {
-      try {
-        const balLamports = await executionWalletManager.refreshBalance();
-        balanceSol = Number(balLamports) / 1e9;
-      } catch {}
-      if (balanceSol <= 0) {
-        balanceSol = executionWalletManager.getCachedBalanceSol();
-      }
-      if (balanceSol <= 0 && executionWalletManager.getKeypair()) {
-        try {
-          const directLamports = await executionWalletManager.getConnection().getBalance(
-            executionWalletManager.getKeypair()!.publicKey,
-            'confirmed'
-          );
-          balanceSol = directLamports / 1e9;
-        } catch {}
-      }
-
-      // Safeguard: Never display fake -100% portfolio wipeout if RPC fails to return balance
-      if (balanceSol <= 0) {
+      const balanceState = await executionWalletManager.getFreshBalance(20000);
+      if (!balanceState.isAvailable) {
         await this.sendCustomMessage(
           chatId,
           '⚠️ <b>[WALLET BALANCE SYNCING]</b>\n\nCould not query on-chain wallet balance right now due to RPC latency. Your funds are safe on-chain.\nPlease tap <b>/stats</b> again in a few seconds.'
         );
         return;
       }
+      balanceSol = balanceState.balanceSol;
     }
     const balanceUsd = balanceSol * solPrice;
 
@@ -1431,11 +1441,15 @@ ${recentTradesText}
 
     let walletLine = '';
     if (isLive) {
+      const balanceState = await executionWalletManager.getFreshBalance(20000);
       const pub = executionWalletManager.getPublicKeyBase58();
-      const bal = executionWalletManager.getCachedBalanceSol();
       const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'None';
       const solPrice = await tokenMetadataService.getSolPriceUsd();
-      walletLine = `\n<b>Hot Wallet:</b> <code>${shortPub}</code> (${bal.toFixed(4)} SOL | $${(bal * solPrice).toFixed(2)} USD)`;
+      if (balanceState.isAvailable) {
+        walletLine = `\n<b>Hot Wallet:</b> <code>${shortPub}</code> (${balanceState.displayBalance} | $${(balanceState.balanceSol * solPrice).toFixed(2)} USD)`;
+      } else {
+        walletLine = `\n<b>Hot Wallet:</b> <code>${shortPub}</code> (⚠️ <i>Balance unavailable / RPC syncing</i>)`;
+      }
     }
 
     const solPrice = await tokenMetadataService.getSolPriceUsd();
@@ -2718,9 +2732,11 @@ ${slText}
 
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
-    const bal = isLive ? executionWalletManager.getCachedBalanceSol() : 10.0;
+    const balanceState = isLive ? executionWalletManager.getBalanceDisplayState() : null;
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
-    const balUsd = bal * solPriceUsd;
+    const balDisplay = isLive
+      ? (balanceState?.isAvailable ? `${balanceState.displayBalance} ($${(balanceState.balanceSol * solPriceUsd).toFixed(2)} USD)` : '⚠️ Balance unavailable / RPC syncing')
+      : `10.0000 SOL ($${(10.0 * solPriceUsd).toFixed(2)} USD)`;
     const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
 
     const activeWallets = db.getWatchedWallets().filter((w) => w.enabled);
@@ -2734,7 +2750,7 @@ ${slText}
 <b>Mode:</b> ${isLive ? (isArmed ? '🟢 BOT ACTIVATED' : '🔴 BOT DEACTIVATED') : 'PAPER'}
 <b>Target Trader:</b> <code>${targetDisplay}</code>
 <b>Sizing:</b> ${config.DEFAULT_SIZING_MODE} (${config.FIXED_BUY_SOL} SOL | $${sizingUsd.toFixed(2)} USD)
-<b>Balance:</b> ${bal.toFixed(4)} SOL ($${balUsd.toFixed(2)} USD)
+<b>Balance:</b> ${balDisplay}
 <b>Ingestion:</b> Helius LaserStream (Sub-10ms)
 
 Tap <b>ACTIVATE BOT</b> or use the interactive keypad below to manage trades and close positions.

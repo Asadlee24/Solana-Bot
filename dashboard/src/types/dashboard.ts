@@ -53,6 +53,8 @@ export interface Telemetry {
   liveWalletReserveSol?: number;
   liveWalletSpendableSol?: number;
   liveEngineArmed?: boolean;
+  liveWalletBalanceAvailable?: boolean;
+  liveWalletBalanceDisplay?: string;
 }
 
 export interface OrderComparison {

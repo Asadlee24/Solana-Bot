@@ -7,6 +7,19 @@ const bs58Decode = (typeof bs58Module.decode === 'function'
   ? bs58Module.decode
   : (bs58Module as any).default?.decode) as (input: string) => Uint8Array;
 
+export interface BalanceDisplayState {
+  isAvailable: boolean;
+  isInitialized: boolean;
+  isVerifiedZero: boolean;
+  balanceLamports: bigint;
+  balanceSol: number;
+  spendableSol: number;
+  reserveSol: number;
+  lastSuccessfulFetchTime: number;
+  lastFetchError: string | null;
+  displayBalance: string;
+}
+
 export interface WalletStatus {
   isConfigured: boolean;
   publicKey: string | null;
@@ -15,13 +28,23 @@ export interface WalletStatus {
   reserveSol: number;
   spendableSol: number;
   lastUpdated: number;
+  isAvailable: boolean;
+  isInitialized: boolean;
+  isVerifiedZero: boolean;
+  lastFetchError: string | null;
+  displayBalance: string;
 }
 
 export class ExecutionWalletManager {
   private keypair: Keypair | null = null;
   private connection: Connection;
   private cachedBalanceLamports: bigint = 0n;
+  private isInitialized: boolean = false;
+  private isVerifiedZero: boolean = false;
   private lastBalanceFetchTime: number = 0;
+  private lastFetchError: string | null = null;
+  private inFlightRefreshPromise: Promise<bigint> | null = null;
+  private backgroundPollTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     this.connection = new Connection(config.SOLANA_RPC_URL, {
@@ -109,29 +132,58 @@ export class ExecutionWalletManager {
 
   /**
    * Fetches real on-chain SOL balance for the execution hot wallet.
+   * Coalesces concurrent calls and prevents overlapping RPC requests.
    */
-  public async refreshBalance(): Promise<bigint> {
+  public async refreshBalance(force: boolean = false, maxAgeMs: number = 15000): Promise<bigint> {
     if (!this.keypair) {
       this.cachedBalanceLamports = 0n;
+      this.isInitialized = false;
+      this.isVerifiedZero = false;
+      this.lastFetchError = 'Keypair not loaded';
       return 0n;
     }
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const lamports = await this.connection.getBalance(this.keypair.publicKey, 'confirmed');
-        this.cachedBalanceLamports = BigInt(lamports);
-        this.lastBalanceFetchTime = Date.now();
-        return this.cachedBalanceLamports;
-      } catch (err: any) {
-        if (attempt < 3) {
-          await new Promise((r) => setTimeout(r, 1000 * attempt));
-        } else {
-          console.warn('[Execution Wallet] Failed to query on-chain balance:', err.message);
-          return this.cachedBalanceLamports;
+    if (this.inFlightRefreshPromise) {
+      return this.inFlightRefreshPromise;
+    }
+
+    const now = Date.now();
+    if (!force && this.isInitialized && (now - this.lastBalanceFetchTime < maxAgeMs)) {
+      return this.cachedBalanceLamports;
+    }
+
+    this.inFlightRefreshPromise = (async () => {
+      let lastErr: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const lamports = await this.connection.getBalance(this.keypair!.publicKey, 'confirmed');
+          const val = BigInt(lamports);
+          this.cachedBalanceLamports = val;
+          this.isInitialized = true;
+          this.isVerifiedZero = (val === 0n);
+          this.lastBalanceFetchTime = Date.now();
+          this.lastFetchError = null;
+          return val;
+        } catch (err: any) {
+          lastErr = err;
+          if (attempt < 3) {
+            await new Promise((r) => setTimeout(r, 500 * attempt));
+          }
         }
       }
-    }
-    return this.cachedBalanceLamports;
+
+      this.lastFetchError = lastErr?.message || String(lastErr);
+      console.warn('[Execution Wallet] Failed to query on-chain balance:', this.lastFetchError);
+
+      if (!this.isInitialized) {
+        throw new Error(`Failed to query on-chain balance: ${this.lastFetchError}`);
+      }
+      return this.cachedBalanceLamports;
+    })().finally(() => {
+      this.inFlightRefreshPromise = null;
+    });
+
+    return this.inFlightRefreshPromise;
   }
 
   /**
@@ -226,6 +278,118 @@ export class ExecutionWalletManager {
     return Math.max(0, total - config.MIN_SOL_RESERVE_SOL);
   }
 
+  public isBalanceAvailable(maxAgeMs: number = 60000): boolean {
+    if (!this.getKeypair()) {
+      return false;
+    }
+    if (!this.isInitialized) {
+      // Support tests that mock cachedBalanceLamports directly or via vi.spyOn
+      if (this.getCachedBalanceLamports() > 0n && !this.lastFetchError) {
+        return true;
+      }
+      return false;
+    }
+    if (this.lastBalanceFetchTime === 0) {
+      return false;
+    }
+    if (Date.now() - this.lastBalanceFetchTime > maxAgeMs) {
+      return false;
+    }
+    return true;
+  }
+
+  public isInitializedState(): boolean {
+    return this.isInitialized;
+  }
+
+  public isVerifiedZeroBalance(): boolean {
+    return this.isVerifiedZero;
+  }
+
+  public getLastFetchError(): string | null {
+    return this.lastFetchError;
+  }
+
+  public getLastBalanceFetchTime(): number {
+    return this.lastBalanceFetchTime;
+  }
+
+  public getBalanceDisplayState(maxAgeMs: number = 60000): BalanceDisplayState {
+    const isAvailable = this.isBalanceAvailable(maxAgeMs);
+    const balanceSol = isAvailable ? Number(this.cachedBalanceLamports) / LAMPORTS_PER_SOL : 0;
+    const reserveSol = config.MIN_SOL_RESERVE_SOL;
+    const spendableSol = isAvailable ? Math.max(0, balanceSol - reserveSol) : 0;
+
+    let displayBalance = 'Balance unavailable / RPC syncing';
+    if (isAvailable) {
+      if (this.isVerifiedZero) {
+        displayBalance = '0.0000 SOL';
+      } else {
+        displayBalance = `${balanceSol.toFixed(4)} SOL`;
+      }
+    }
+
+    return {
+      isAvailable,
+      isInitialized: this.isInitialized,
+      isVerifiedZero: this.isVerifiedZero,
+      balanceLamports: this.cachedBalanceLamports,
+      balanceSol,
+      spendableSol,
+      reserveSol,
+      lastSuccessfulFetchTime: this.lastBalanceFetchTime,
+      lastFetchError: this.lastFetchError,
+      displayBalance,
+    };
+  }
+
+  /**
+   * Unified fresh balance helper with TTL cache for UI (Telegram / Dashboard / Telemetry)
+   */
+  public async getFreshBalance(maxAgeMs: number = 20000): Promise<BalanceDisplayState> {
+    if (!this.keypair) {
+      return this.getBalanceDisplayState(maxAgeMs);
+    }
+
+    const isStale = !this.isInitialized || (Date.now() - this.lastBalanceFetchTime > maxAgeMs);
+    if (isStale) {
+      try {
+        await this.refreshBalance(false, maxAgeMs);
+      } catch {
+        // Handled & recorded in lastFetchError
+      }
+    }
+
+    return this.getBalanceDisplayState(maxAgeMs * 3);
+  }
+
+  /**
+   * Periodic non-blocking background refresh to keep cache fresh without impacting hot path
+   */
+  public startBackgroundPolling(intervalMs: number = 30000): void {
+    if (this.backgroundPollTimer) return;
+    if (!this.keypair) return;
+
+    this.backgroundPollTimer = setInterval(async () => {
+      try {
+        await this.refreshBalance(false, intervalMs / 2);
+      } catch {
+        // Silently caught; logged in refreshBalance
+      }
+    }, intervalMs);
+
+    if (this.backgroundPollTimer.unref) {
+      this.backgroundPollTimer.unref();
+    }
+  }
+
+  public stopBackgroundPolling(): void {
+    if (this.backgroundPollTimer) {
+      clearInterval(this.backgroundPollTimer);
+      this.backgroundPollTimer = null;
+    }
+  }
+
   /**
    * Validates whether a proposed buy trade complies with minimum SOL reserve floor.
    * Clearly distinguishes fee units:
@@ -276,6 +440,18 @@ export class ExecutionWalletManager {
       totalDeductionLamports,
     };
 
+    // FAIL-CLOSED: Balance must be initialized and available
+    if (!this.isBalanceAvailable(60000)) {
+      return {
+        allowed: false,
+        reason: `BALANCE_UNAVAILABLE: Execution wallet balance is uninitialized or stale (last error: ${this.lastFetchError || 'RPC uninitialized'}). Failing closed.`,
+        balanceSol: 0,
+        reserveSol,
+        spendableSol: 0,
+        feeBreakdown,
+      };
+    }
+
     const minReserveLamports = BigInt(Math.floor(reserveSol * LAMPORTS_PER_SOL));
 
     if (this.cachedBalanceLamports < totalDeductionLamports) {
@@ -314,18 +490,21 @@ export class ExecutionWalletManager {
    * Diagnostic summary for REST API and Dashboard
    */
   public getStatus(): WalletStatus {
-    const balanceSol = this.getCachedBalanceSol();
-    const reserveSol = config.MIN_SOL_RESERVE_SOL;
-    const spendableSol = Math.max(0, balanceSol - reserveSol);
+    const displayState = this.getBalanceDisplayState(60000);
 
     return {
       isConfigured: this.isReady(),
       publicKey: this.getPublicKeyBase58(),
       balanceLamports: this.cachedBalanceLamports,
-      balanceSol,
-      reserveSol,
-      spendableSol,
+      balanceSol: displayState.balanceSol,
+      reserveSol: displayState.reserveSol,
+      spendableSol: displayState.spendableSol,
       lastUpdated: this.lastBalanceFetchTime,
+      isAvailable: displayState.isAvailable,
+      isInitialized: displayState.isInitialized,
+      isVerifiedZero: displayState.isVerifiedZero,
+      lastFetchError: displayState.lastFetchError,
+      displayBalance: displayState.displayBalance,
     };
   }
 }

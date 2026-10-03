@@ -83,19 +83,28 @@ export class LiveExecutionEngine {
 
     // Refresh balance and check reserve floor
     try {
-      const balanceLamports = await executionWalletManager.refreshBalance();
+      const balanceLamports = await executionWalletManager.refreshBalance(true);
+      if (!executionWalletManager.isBalanceAvailable()) {
+        this.isArmed = false;
+        this.disarmReason = `Execution wallet balance unavailable (last RPC error: ${executionWalletManager.getLastFetchError() || 'Unknown'}). Arming blocked.`;
+        console.warn(`[LIVE ENGINE DISARMED] ${this.disarmReason}`);
+        return { armed: false, reason: this.disarmReason };
+      }
+
       const minRequiredSol = config.MIN_SOL_RESERVE_SOL + config.FIXED_BUY_SOL;
       const minRequiredLamports = solToLamportsBigInt(minRequiredSol);
 
       if (balanceLamports < minRequiredLamports) {
         this.isArmed = false;
-        this.disarmReason = `Insufficient hot wallet balance (${executionWalletManager.getCachedBalanceSol().toFixed(4)} SOL). Minimum required for live operation is ${minRequiredSol.toFixed(4)} SOL`;
+        const displayBal = executionWalletManager.getBalanceDisplayState().displayBalance;
+        this.disarmReason = `Insufficient hot wallet balance (${displayBal}). Minimum required for live operation is ${minRequiredSol.toFixed(4)} SOL`;
         console.warn(`[LIVE ENGINE DISARMED] ${this.disarmReason}`);
         return { armed: false, reason: this.disarmReason };
       }
     } catch (err: any) {
       this.isArmed = false;
-      this.disarmReason = `RPC balance check failed: ${err.message}`;
+      this.disarmReason = `RPC balance check failed: ${err.message}. Arming blocked.`;
+      console.warn(`[LIVE ENGINE DISARMED] ${this.disarmReason}`);
       return { armed: false, reason: this.disarmReason };
     }
 
@@ -215,6 +224,9 @@ export class LiveExecutionEngine {
     );
 
     if (isBuy) {
+      if (!executionWalletManager.isBalanceAvailable(60000)) {
+        await executionWalletManager.refreshBalance(true).catch(() => {});
+      }
       const requestedLamports = BigInt(rawInAmount);
       const spendCheck = executionWalletManager.checkSpendable(
         requestedLamports,

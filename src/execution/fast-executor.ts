@@ -89,6 +89,9 @@ export class FastExecutionService {
     const totalReservationNeeded = requestedLamports + feeCalculation.totalEstimatedFeesLamports;
 
     // Check spendable balance: subtracts active pending reservations and MIN_SOL_RESERVE_SOL exactly once globally
+    if (!executionWalletManager.isBalanceAvailable(60000)) {
+      throw new Error('BALANCE_UNAVAILABLE: Execution wallet balance is uninitialized or stale. Failing closed.');
+    }
     const currentCachedBalance = executionWalletManager.getCachedBalanceLamports();
     const spendable = capitalReservationLedger.calculateSpendableLamports(
       currentCachedBalance,

@@ -34,6 +34,19 @@ async function bootstrap() {
   // STRICT: Do NOT auto-arm on startup/deploy. Keep paused/disarmed until operator explicitly turns it on.
   console.info('[LIVE ENGINE PAUSED] Bot initialized in safe PAUSED state. Operator can arm via Telegram (/arm) or Dashboard.');
 
+  // In LIVE mode, fetch fresh verified on-chain balance before banner or trading
+  if (config.EXECUTION_MODE === 'LIVE') {
+    try {
+      console.info('[Execution Wallet] Initializing verified on-chain balance from mainnet RPC...');
+      await executionWalletManager.refreshBalance(true);
+      const balState = executionWalletManager.getBalanceDisplayState();
+      console.info(`[Execution Wallet] Verified on-chain balance: ${balState.displayBalance}`);
+    } catch (err: any) {
+      console.error(`[Execution Wallet] WARNING: Startup balance query failed: ${err.message}. Live trading will fail closed until RPC syncs.`);
+    }
+    executionWalletManager.startBackgroundPolling(30000);
+  }
+
   // Restore and reconcile live positions with on-chain wallet tokens & accurate cost basis
   await positionSyncService.initializeOnStartup();
 
@@ -44,8 +57,12 @@ async function bootstrap() {
   const liveStatus = liveEngine.getStatus();
 
   const walletPubkey = executionWalletManager.getPublicKeyBase58();
-  const walletBalSol = executionWalletManager.getCachedBalanceSol();
-  const spendableSol = Math.max(0, walletBalSol - config.MIN_SOL_RESERVE_SOL);
+  const balState = executionWalletManager.getBalanceDisplayState();
+  const walletBalDisplay = config.EXECUTION_MODE === 'LIVE'
+    ? (balState.isAvailable
+        ? `${balState.displayBalance} (Reserve: ${config.MIN_SOL_RESERVE_SOL} SOL | Spendable: ${balState.spendableSol.toFixed(4)} SOL)`
+        : `Balance unavailable / RPC syncing (Reserve: ${config.MIN_SOL_RESERVE_SOL} SOL)`)
+    : '10.0000 SOL (Paper Simulation)';
   const dbWallets = db.getWatchedWallets();
   const allWallets = Array.from(new Set([...config.WATCHED_WALLETS, ...dbWallets.map(w => w.wallet)]));
   const watchedSummary = allWallets.length > 0
@@ -58,7 +75,7 @@ async function bootstrap() {
   =============================================================
   - Mode:               [${config.EXECUTION_MODE}] ${config.EXECUTION_MODE === 'LIVE' ? (liveStatus.isArmed ? '● BOT ACTIVATED' : '○ BOT DEACTIVATED') : '(Paper Simulation)'}
   - Execution Wallet:   ${walletPubkey || 'None (PAPER mode)'}
-  - Wallet Balance:     ${walletBalSol.toFixed(4)} SOL (Reserve: ${config.MIN_SOL_RESERVE_SOL} SOL | Spendable: ${spendableSol.toFixed(4)} SOL)
+  - Wallet Balance:     ${walletBalDisplay}
   - Jupiter Engine:     Swap API V2 (/order + /execute)
   - Pump.fun Engine:    Adaptive (On-Chain Reserves + Jupiter V2 Graduation Router)
   - Preflight Sim:      ${config.LIVE_REQUIRE_SIMULATION ? 'ENABLED (Safety Enforced)' : 'DISABLED'}
@@ -146,6 +163,7 @@ async function bootstrap() {
   // Graceful shutdown
   const shutdown = () => {
     console.info('\n[Shutdown] Stopping bot cleanly...');
+    executionWalletManager.stopBackgroundPolling();
     autoExitManager.stop();
     blockhashService.stop();
     feedStream.stop();
