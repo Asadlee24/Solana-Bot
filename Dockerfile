@@ -43,7 +43,6 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/src ./src
 
 RUN mkdir -p /app/data
-VOLUME ["/app/data"]
 
 EXPOSE 3000 3001
 
