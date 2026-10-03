@@ -101,7 +101,7 @@ A `render.yaml` specification is included. It attaches a persistent SSD disk (`/
 ### Option C: Railway Deployment
 Railway uses the root `Dockerfile` and `railway.json`:
 1. Create a project on Railway and connect your repository.
-2. In Railway Service Settings, add a **Persistent Volume** mounted at `/app/data`.
+2. **Critical Step:** In Railway Service Settings, manually add a **Persistent Volume** mounted at `/app/data` (Railway's config schema does not support automated volume creation; without this volume, SQLite state is lost on redeployment).
 3. Set your environment variables in the Railway dashboard.
 
 ---

@@ -134,12 +134,14 @@ export class PositionEngine {
     tokensTransactedRaw: bigint,
     solTransactedLamports: bigint,
     effectivePriceSol: number,
-    orderSignature: string
+    orderSignature: string,
+    feeLamports: bigint = 0n
   ): FollowerPosition {
     let position = db.getPosition(targetWallet, tokenMint);
     const now = Date.now();
 
     if (side === 'BUY') {
+      const totalCostLamports = solTransactedLamports + feeLamports;
       if (!position) {
         // Open new position
         position = {
@@ -147,7 +149,7 @@ export class PositionEngine {
           targetWallet,
           tokenMint,
           qtyRaw: tokensTransactedRaw.toString(),
-          costBasisLamports: solTransactedLamports.toString(),
+          costBasisLamports: totalCostLamports.toString(),
           avgEntryPriceSol: effectivePriceSol,
           realizedPnlLamports: '0',
           unrealizedPnlLamports: '0',
@@ -160,7 +162,7 @@ export class PositionEngine {
         const oldQty = BigInt(position.qtyRaw);
         const newQty = oldQty + tokensTransactedRaw;
         const oldCost = BigInt(position.costBasisLamports);
-        const newCost = oldCost + solTransactedLamports;
+        const newCost = oldCost + totalCostLamports;
 
         const oldTokensFloat = Number(oldQty) / 1e6;
         const newTokensFloat = Number(tokensTransactedRaw) / 1e6;
@@ -187,12 +189,15 @@ export class PositionEngine {
         sourceSignature: orderSignature,
         side: 'BUY',
         qtyRaw: tokensTransactedRaw.toString(),
-        costRaw: solTransactedLamports.toString(),
+        costRaw: totalCostLamports.toString(),
         price: effectivePriceSol,
         openedAt: now,
       });
     } else {
       // SELL: Proportional or full exit
+      const netSolReceivedLamports =
+        solTransactedLamports > feeLamports ? solTransactedLamports - feeLamports : 0n;
+
       if (!position) {
         // No position found; create closed record
         position = {
@@ -202,7 +207,7 @@ export class PositionEngine {
           qtyRaw: '0',
           costBasisLamports: '0',
           avgEntryPriceSol: effectivePriceSol,
-          realizedPnlLamports: solTransactedLamports.toString(),
+          realizedPnlLamports: netSolReceivedLamports.toString(),
           unrealizedPnlLamports: '0',
           state: 'CLOSED',
           openedAt: now,
@@ -214,14 +219,14 @@ export class PositionEngine {
         const sellQty = tokensTransactedRaw > currentQty ? currentQty : tokensTransactedRaw;
         const remainingQty = currentQty - sellQty;
 
-        // Cost basis of the sold portion
+        // Cost basis of the sold portion (in SOL Lamports)
         const costBasisSoldLamports =
           currentQty > 0n
             ? (BigInt(position.costBasisLamports) * sellQty) / currentQty
             : 0n;
 
-        // Realized PnL = Sol received - Cost basis of sold tokens
-        const pnlDeltaLamports = solTransactedLamports - costBasisSoldLamports;
+        // Realized PnL = Net SOL received (after fees) - Cost basis of sold tokens (both in SOL Lamports)
+        const pnlDeltaLamports = netSolReceivedLamports - costBasisSoldLamports;
         const currentRealizedPnl = BigInt(position.realizedPnlLamports);
         const newRealizedPnl = currentRealizedPnl + pnlDeltaLamports;
 
@@ -247,7 +252,7 @@ export class PositionEngine {
         sourceSignature: orderSignature,
         side: 'SELL',
         qtyRaw: tokensTransactedRaw.toString(),
-        costRaw: solTransactedLamports.toString(),
+        costRaw: netSolReceivedLamports.toString(),
         price: effectivePriceSol,
         openedAt: now,
       });

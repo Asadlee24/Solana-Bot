@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
-import { config } from '../config/index.js';
+import { CANONICAL_LIVE_TRADING_ACK, config } from '../config/index.js';
 import { db } from '../db/database.js';
 import { riskEngine } from '../engine/risk-engine.js';
 import { liveEngine } from '../execution/live-engine.js';
@@ -647,7 +647,7 @@ export function createApiServer() {
       executionMode: config.EXECUTION_MODE,
       isArmed: liveStatus.isArmed,
       disarmReason: liveStatus.disarmReason,
-      liveTradingAckConfigured: config.LIVE_TRADING_ACK === 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK',
+      liveTradingAckConfigured: config.LIVE_TRADING_ACK === CANONICAL_LIVE_TRADING_ACK,
       wallet: {
         isConfigured: walletStatus.isConfigured,
         publicKey: walletStatus.publicKey,

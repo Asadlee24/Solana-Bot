@@ -66,9 +66,9 @@ This checklist must be strictly completed and signed off prior to deploying or s
 - [ ] **SQLite WAL Mode:** Confirm `PRAGMA journal_mode = WAL` and `busy_timeout = 5000` are active.
 - [ ] **Schema Migrations:** Confirm `schema_migrations` table is applied without schema errors.
 - [ ] **Container Volume Mounts:**
-  - [ ] Docker: `VOLUME ["/app/data"]` declared and volume mounted (`-v bot-data:/app/data`).
-  - [ ] Render: Persistent disk attached and mounted at `/app/data`.
-  - [ ] Railway: Volume attached to `/app/data`.
+  - [ ] Docker: `VOLUME ["/app/data"]` declared and volume mounted (`-v bot-data:/app/data` or via `docker-compose.yml`).
+  - [ ] Render: Persistent disk attached and mounted at `/app/data` via `render.yaml`.
+  - [ ] Railway: **CRITICAL MANUAL STEP:** A persistent volume MUST be manually created and attached in the Railway web dashboard under `Service Settings -> Volumes`, mounted at `/app/data`. (`railway.json` schema does NOT support automated volume creation; without this manual volume, SQLite databases are destroyed on redeploy).
 - [ ] **Backup Verification:**
   - [ ] Run `npm run db:backup` and verify backup file is generated in `backups/`.
   - [ ] Verify `npm run db:restore` documentation is accessible to operators.

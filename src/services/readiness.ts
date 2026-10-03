@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Keypair } from '@solana/web3.js';
 import bs58Module from 'bs58';
-import { config } from '../config/index.js';
+import { CANONICAL_LIVE_TRADING_ACK, config } from '../config/index.js';
 import { db } from '../db/database.js';
 
 const bs58Decode = (
@@ -123,7 +123,7 @@ export class ReadinessValidator {
 
     // 3. Live Trading Safety Acknowledgement
     if (isLive) {
-      if (config.LIVE_TRADING_ACK === 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK') {
+      if (config.LIVE_TRADING_ACK === CANONICAL_LIVE_TRADING_ACK) {
         checks.push({
           category: 'EXECUTION',
           name: 'Live Trading Acknowledgement',
@@ -137,7 +137,7 @@ export class ReadinessValidator {
           name: 'Live Trading Acknowledgement',
           status: 'FAIL',
           message:
-            'Missing or incorrect LIVE_TRADING_ACK. Must equal "I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK"',
+            `Missing or incorrect LIVE_TRADING_ACK. Must equal "${CANONICAL_LIVE_TRADING_ACK}"`,
           criticalForLive: true,
         });
       }

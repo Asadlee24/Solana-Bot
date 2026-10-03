@@ -10,6 +10,8 @@ import { tokenMetadataService } from '../src/services/token-metadata.js';
 import { pumpFunSwapAdapter, OnChainBondingCurveState } from '../src/execution/pump-fun-swap.js';
 import { WebhookReceiver } from '../src/streams/webhook-server.js';
 import { riskEngine } from '../src/engine/risk-engine.js';
+import { positionEngine } from '../src/engine/position-engine.js';
+import { executionWalletManager } from '../src/execution/wallet-manager.js';
 
 describe('Security Hardening & Audit Verification Suite', () => {
   beforeEach(() => {
@@ -759,7 +761,6 @@ describe('Security Hardening & Audit Verification Suite', () => {
 
   describe('13. Settlement-Based Real Accounting & PnL Integrity', () => {
     it('calculates realized PnL and win-rate strictly from settled positions ledger', () => {
-      // Clear or record test positions
       const testPos1 = {
         id: `acc_test_${Date.now()}_1`,
         targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
@@ -797,10 +798,181 @@ describe('Security Hardening & Audit Verification Suite', () => {
       expect(summary.totalTradesClosed).toBeGreaterThanOrEqual(2);
       expect(summary.winningTrades).toBeGreaterThanOrEqual(1);
       expect(summary.losingTrades).toBeGreaterThanOrEqual(1);
-      // Net PnL must reflect settlements (+0.05 - 0.02 = +0.03)
       expect(typeof summary.realizedPnlSol).toBe('number');
       expect(summary.winRatePct).toBeGreaterThan(0);
       expect(summary.winRatePct).toBeLessThanOrEqual(100);
+    });
+
+    it('proves profitable round-trip BUY -> SELL calculates exact SOL lamports PnL', () => {
+      const targetWallet = 'TargetProfitWallet11111111111111111111111111';
+      const tokenMint = `ProfitMint_${Date.now()}`;
+
+      // 1. BUY: 1,000,000 raw tokens bought for 10,000,000 lamports (0.01 SOL)
+      const buyPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'BUY',
+        1_000_000n,
+        10_000_000n,
+        0.00001,
+        'sig_buy_profitable_roundtrip'
+      );
+      expect(buyPos.state).toBe('OPEN');
+      expect(buyPos.qtyRaw).toBe('1000000');
+      expect(buyPos.costBasisLamports).toBe('10000000');
+      expect(buyPos.realizedPnlLamports).toBe('0');
+
+      // 2. SELL: 1,000,000 raw tokens sold for 15,000,000 lamports (0.015 SOL) -> +0.005 SOL gain
+      const sellPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'SELL',
+        1_000_000n,
+        15_000_000n,
+        0.000015,
+        'sig_sell_profitable_roundtrip'
+      );
+      expect(sellPos.state).toBe('CLOSED');
+      expect(sellPos.qtyRaw).toBe('0');
+      expect(sellPos.realizedPnlLamports).toBe('5000000'); // Exactly +5,000,000 lamports (+0.005 SOL)
+    });
+
+    it('proves losing round-trip BUY -> SELL calculates exact negative SOL lamports PnL', () => {
+      const targetWallet = 'TargetLossWallet111111111111111111111111111';
+      const tokenMint = `LossMint_${Date.now()}`;
+
+      // 1. BUY: 1,000,000 raw tokens bought for 10,000,000 lamports (0.01 SOL)
+      positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'BUY',
+        1_000_000n,
+        10_000_000n,
+        0.00001,
+        'sig_buy_loss_roundtrip'
+      );
+
+      // 2. SELL: 1,000,000 raw tokens sold for 6,000,000 lamports (0.006 SOL) -> -0.004 SOL loss
+      const sellPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'SELL',
+        1_000_000n,
+        6_000_000n,
+        0.000006,
+        'sig_sell_loss_roundtrip'
+      );
+      expect(sellPos.state).toBe('CLOSED');
+      expect(sellPos.qtyRaw).toBe('0');
+      expect(sellPos.realizedPnlLamports).toBe('-4000000'); // Exactly -4,000,000 lamports (-0.004 SOL)
+    });
+
+    it('proves partial sell retains proportional cost basis on remaining position and realizes proportional PnL', () => {
+      const targetWallet = 'TargetPartialWallet11111111111111111111111';
+      const tokenMint = `PartialMint_${Date.now()}`;
+
+      // 1. BUY: 1,000,000 tokens for 10,000,000 lamports (cost basis = 10,000,000 lamports)
+      positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'BUY',
+        1_000_000n,
+        10_000_000n,
+        0.00001,
+        'sig_buy_partial'
+      );
+
+      // 2. PARTIAL SELL: Sell 500,000 tokens (50%) for 8,000,000 lamports
+      // Cost basis of sold portion = 5,000,000 lamports. Realized PnL = 8,000,000 - 5,000,000 = +3,000,000 lamports
+      const partialSellPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'SELL',
+        500_000n,
+        8_000_000n,
+        0.000016,
+        'sig_sell_partial_1'
+      );
+      expect(partialSellPos.state).toBe('OPEN');
+      expect(partialSellPos.qtyRaw).toBe('500000');
+      expect(partialSellPos.costBasisLamports).toBe('5000000'); // Remaining 50% cost basis
+      expect(partialSellPos.realizedPnlLamports).toBe('3000000'); // +0.003 SOL realized gain
+
+      // 3. FULL SELL: Sell remaining 500,000 tokens for 7,000,000 lamports
+      // Cost basis sold = 5,000,000. PnL delta = 7,000,000 - 5,000,000 = +2,000,000.
+      // Cumulative realized PnL = 3,000,000 + 2,000,000 = +5,000,000 lamports.
+      const finalSellPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'SELL',
+        500_000n,
+        7_000_000n,
+        0.000014,
+        'sig_sell_partial_2'
+      );
+      expect(finalSellPos.state).toBe('CLOSED');
+      expect(finalSellPos.qtyRaw).toBe('0');
+      expect(finalSellPos.realizedPnlLamports).toBe('5000000');
+    });
+
+    it('proves network fees/tips are properly incorporated into cost basis and net sell proceeds', () => {
+      const targetWallet = 'TargetFeeWallet1111111111111111111111111111';
+      const tokenMint = `FeeMint_${Date.now()}`;
+
+      // 1. BUY: 1,000,000 tokens with 10,000,000 lamports + 150,000 lamports network fee
+      const buyFee = 150_000n;
+      const buyPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'BUY',
+        1_000_000n,
+        10_000_000n,
+        0.00001,
+        'sig_buy_with_fees',
+        buyFee
+      );
+      expect(buyPos.costBasisLamports).toBe('10150000'); // Includes buy fee
+
+      // 2. SELL: 1,000,000 tokens for 12,000,000 lamports gross - 150,000 lamports sell fee
+      const sellFee = 150_000n;
+      const sellPos = positionEngine.recordFill(
+        targetWallet,
+        tokenMint,
+        'SELL',
+        1_000_000n,
+        12_000_000n,
+        0.000012,
+        'sig_sell_with_fees',
+        sellFee
+      );
+      // Net proceeds = 12,000,000 - 150,000 = 11,850,000
+      // Cost basis = 10,150,000
+      // Realized PnL = 11,850,000 - 10,150,000 = +1,700,000 lamports
+      expect(sellPos.realizedPnlLamports).toBe('1700000');
+    });
+
+    it('proves wallet deposit/withdrawal has zero effect on trading PnL', () => {
+      const beforeSummary = db.getAccountingSummary();
+
+      // Simulate external deposit of 50 SOL into execution wallet cache
+      const origCachedBal = (executionWalletManager as any).cachedBalanceLamports;
+      (executionWalletManager as any).cachedBalanceLamports = 50_000_000_000n;
+
+      const afterDepositSummary = db.getAccountingSummary();
+      expect(afterDepositSummary.realizedPnlSol).toBe(beforeSummary.realizedPnlSol);
+      expect(afterDepositSummary.totalTradesClosed).toBe(beforeSummary.totalTradesClosed);
+      expect(afterDepositSummary.winRatePct).toBe(beforeSummary.winRatePct);
+
+      // Simulate external withdrawal down to 0.05 SOL
+      (executionWalletManager as any).cachedBalanceLamports = 50_000_000n;
+
+      const afterWithdrawSummary = db.getAccountingSummary();
+      expect(afterWithdrawSummary.realizedPnlSol).toBe(beforeSummary.realizedPnlSol);
+      expect(afterWithdrawSummary.totalTradesClosed).toBe(beforeSummary.totalTradesClosed);
+      expect(afterWithdrawSummary.winRatePct).toBe(beforeSummary.winRatePct);
+
+      // Restore original
+      (executionWalletManager as any).cachedBalanceLamports = origCachedBal;
     });
   });
 

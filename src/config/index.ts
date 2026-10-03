@@ -5,6 +5,9 @@ if (process.env.NODE_ENV !== 'test') {
   dotenv.config();
 }
 
+// Live Safety Acknowledgement (MUST match exactly to arm LIVE mode)
+export const CANONICAL_LIVE_TRADING_ACK = 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK';
+
 const ConfigSchema = z.object({
   // Environment & Execution
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

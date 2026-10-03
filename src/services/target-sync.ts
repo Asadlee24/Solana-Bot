@@ -101,10 +101,10 @@ export class TargetSyncService {
    * Sync active wallets back to Railway environment variables so Railway redeploys never lose them
    */
   private async syncToRailway(wallets: WatchedWallet[]): Promise<void> {
-    const token = process.env.RAILWAY_API_TOKEN || 'fc01bb79-cfa5-4ff8-b597-62e1f55307bb';
-    const projectId = process.env.RAILWAY_PROJECT_ID || '6a30d60a-bf9c-46ee-8f6a-d2c9ee897457';
-    const serviceId = process.env.RAILWAY_SERVICE_ID || 'dd7ab1a3-0f33-44cd-99f6-6f9ee2d0a1b6';
-    const environmentId = process.env.RAILWAY_ENVIRONMENT_ID || 'ef2777b3-ea35-48f8-adbc-471f0240db82';
+    const token = process.env.RAILWAY_API_TOKEN;
+    const projectId = process.env.RAILWAY_PROJECT_ID;
+    const serviceId = process.env.RAILWAY_SERVICE_ID;
+    const environmentId = process.env.RAILWAY_ENVIRONMENT_ID;
 
     if (!token || !projectId || !serviceId) return;
 

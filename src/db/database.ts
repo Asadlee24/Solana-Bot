@@ -1332,23 +1332,32 @@ export class DBManager {
     winRatePct: number;
   } {
     try {
-      const closedStmt = this.db.prepare(`
-        SELECT realized_pnl_raw
+      const pnlStmt = this.db.prepare(`
+        SELECT realized_pnl_raw, state
         FROM positions
-        WHERE state != 'OPEN'
+        WHERE realized_pnl_raw != '0' OR state != 'OPEN'
       `);
-      const closedRows = closedStmt.all() as { realized_pnl_raw: string }[];
+      const rows = pnlStmt.all() as { realized_pnl_raw: string; state: string }[];
 
       let totalRealizedLamports = 0n;
       let winningTrades = 0;
       let losingTrades = 0;
+      let totalTradesClosed = 0;
 
-      for (const row of closedRows) {
+      for (const row of rows) {
         try {
           const val = BigInt(row.realized_pnl_raw || '0');
           totalRealizedLamports += val;
-          if (val > 0n) winningTrades++;
-          else if (val < 0n) losingTrades++;
+          if (row.state !== 'OPEN') {
+            totalTradesClosed++;
+            if (val > 0n) winningTrades++;
+            else if (val < 0n) losingTrades++;
+          } else if (val !== 0n) {
+            // Partial exits on open positions count in settled trade count
+            totalTradesClosed++;
+            if (val > 0n) winningTrades++;
+            else if (val < 0n) losingTrades++;
+          }
         } catch {}
       }
 
@@ -1365,7 +1374,6 @@ export class DBManager {
         } catch {}
       }
 
-      const totalTradesClosed = closedRows.length;
       const winRatePct = totalTradesClosed > 0 ? (winningTrades / totalTradesClosed) * 100 : 0;
 
       return {

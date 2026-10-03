@@ -845,9 +845,9 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const minToArmUsd = minToArm * solPriceUsd;
 
       const accounting = db.getAccountingSummary();
-      const realizedSol = accounting.totalRealizedPnlSol;
+      const realizedSol = accounting.realizedPnlSol;
       const realizedUsd = realizedSol * solPriceUsd;
-      const closedTrades = accounting.totalClosedTrades;
+      const closedTrades = accounting.totalTradesClosed;
       const winRate = accounting.winRatePct;
 
       const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
@@ -1345,7 +1345,7 @@ ${divider}
       ? (config.LIVE_INITIAL_BALANCE_SOL || 0.2610)
       : (telemetry.initialPaperBalanceSol || 10.0);
     const accounting = db.getAccountingSummary();
-    const realizedSol = accounting.totalRealizedPnlSol;
+    const realizedSol = accounting.realizedPnlSol;
     const realizedUsd = realizedSol * solPrice;
     const unrealizedSol = telemetry.totalUnrealizedPnlSol || 0;
     const unrealizedUsd = unrealizedSol * solPrice;
@@ -1355,7 +1355,7 @@ ${divider}
     const roiPercent = initialCapital > 0 ? ((totalPnlSol / initialCapital) * 100) : 0;
 
     const winRate = accounting.winRatePct;
-    const closedCount = accounting.totalClosedTrades;
+    const closedCount = accounting.totalTradesClosed;
 
     const pnlSign = isOverallProfit ? '+' : '';
     const pnlBadge = isOverallProfit ? '🟢' : '🔴';
