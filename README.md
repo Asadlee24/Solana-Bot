@@ -1,4 +1,4 @@
-# Low-Latency Solana Copy-Trading Bot & Copyability Evaluation Suite (MVP 2026)
+# Low Latency Solana Copy-Trading Bot & Copyability Evaluation Suite (MVP 2026)
 
 A production-grade, low-latency Solana copy-trading bot and evaluation suite designed around a **dual-path architecture**:
 1. **Sub-millisecond Hot Path:** Detects target transactions via Helius Preconfirmations / Preprocessed feeds, decodes swap intent across Pump.fun, PumpSwap, Raydium, and Jupiter, calculates proportional sizing, applies risk checks, and submits transactions via Paper or Live execution gateways.
