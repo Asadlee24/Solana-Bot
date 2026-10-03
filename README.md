@@ -1,4 +1,4 @@
-# Low-Latency Solana Copy-Trading Bot & Evaluation Suite
+# Low Latency Solana Copy-Trading Bot & Copyability Evaluation Suite (MVP 2026)
 
 A production-ready, low-latency Solana copy-trading bot and telemetry platform. Built for high-frequency signal ingestion, deterministic pre-trade risk controls, automated profit/loss exits, and real-time observability.
 
