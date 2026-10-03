@@ -59,6 +59,15 @@ const ConfigSchema = z.object({
   SMOKE_TEST_ALLOWED_SIDE: z.enum(['BUY', 'SELL', 'BOTH']).default('BUY'),
   SMOKE_TEST_FORCE_JUPITER: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(true),
 
+  // Fast-Path Latency Engine (Defaults to FALSE for safe, hardened baseline)
+  FAST_COPY_MODE: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(false),
+  FAST_COPY_SKIP_SIMULATION: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(false),
+  HELIUS_TRANSACTION_FEED_MODE: z.enum(['AUTO', 'TRANSACTION_SUBSCRIBE', 'LOGS_FALLBACK']).default('AUTO'),
+  FAST_PATH_FALLBACK_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
+  FAST_MAX_CONCURRENT_PENDING: z.coerce.number().default(3),
+  FAST_RECENT_BLOCKHASH_REFRESH_MS: z.coerce.number().default(1000),
+  FAST_CURVE_CACHE_TTL_MS: z.coerce.number().default(3000),
+
   // Helius Sender Configuration & Tip Validation
   HELIUS_SENDER_MODE: z.enum(['SWQOS', 'MAX']).default('SWQOS'),
   HELIUS_SENDER_TIP_LAMPORTS: z.coerce.number().default(100_000),

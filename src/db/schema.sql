@@ -178,3 +178,22 @@ CREATE TABLE IF NOT EXISTS latency_samples (
     entry_gap_bps REAL
 );
 CREATE INDEX IF NOT EXISTS idx_latency_sig ON latency_samples (target_signature);
+
+-- Fast-Path Pending Orders (In-Flight Idempotency & Crash Recovery)
+CREATE TABLE IF NOT EXISTS pending_orders (
+    idempotency_key TEXT PRIMARY KEY,
+    target_signature TEXT NOT NULL,
+    follower_signature TEXT,
+    token_mint TEXT NOT NULL,
+    side TEXT NOT NULL,
+    amount_in_lamports TEXT NOT NULL,
+    reserved_lamports TEXT NOT NULL,
+    state TEXT NOT NULL, -- PREPARED, SUBMITTING, SUBMITTED, SUBMISSION_UNKNOWN, CONFIRMED, FAILED, EXPIRED
+    recent_blockhash TEXT NOT NULL,
+    last_valid_block_height INTEGER,
+    error_message TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pending_orders_state ON pending_orders (state);
+CREATE INDEX IF NOT EXISTS idx_pending_orders_target_sig ON pending_orders (target_signature);
