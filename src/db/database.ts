@@ -33,6 +33,15 @@ export class DBManager {
   private runMigrations() {
     // Safe incremental migrations — IF NOT EXISTS / column check pattern
     try {
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS bot_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+    } catch { /* table already exists */ }
+    try {
       this.db.exec(`ALTER TABLE positions ADD COLUMN alerted_milestones TEXT DEFAULT '[]'`);
     } catch { /* column already exists */ }
     try {
@@ -44,6 +53,7 @@ export class DBManager {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.pragma('foreign_keys = ON');
+    this.db.pragma('busy_timeout = 5000');
   }
 
   private initSchema() {
@@ -1098,6 +1108,56 @@ export class DBManager {
     } catch (err: any) {
       console.warn('[DB] Failed seeding historical trades:', err.message || err);
     }
+  }
+
+  // Bot Operational Settings & Telegram Pairing Persistence
+  public getSetting(key: string): string | null {
+    try {
+      const stmt = this.db.prepare('SELECT value FROM bot_settings WHERE key = ?');
+      const row = stmt.get(key) as { value: string } | undefined;
+      return row ? row.value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  public setSetting(key: string, value: string): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO bot_settings (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `);
+    stmt.run(key, value, Date.now());
+  }
+
+  public getAuthorizedTelegramChats(): string[] {
+    const raw = this.getSetting('telegram_authorized_chat_ids');
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return raw ? [raw] : [];
+    }
+  }
+
+  public addAuthorizedTelegramChat(chatId: string): void {
+    const current = new Set(this.getAuthorizedTelegramChats());
+    current.add(String(chatId).trim());
+    this.setSetting('telegram_authorized_chat_ids', JSON.stringify(Array.from(current)));
+  }
+
+  public isTelegramPairingCompleted(): boolean {
+    return this.getSetting('telegram_pairing_completed') === 'true';
+  }
+
+  public setTelegramPairingCompleted(completed: boolean): void {
+    this.setSetting('telegram_pairing_completed', completed ? 'true' : 'false');
+  }
+
+  public resetTelegramPairing(): void {
+    this.setSetting('telegram_authorized_chat_ids', JSON.stringify([]));
+    this.setSetting('telegram_pairing_completed', 'false');
   }
 
   public close() {

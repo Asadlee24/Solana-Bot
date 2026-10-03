@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { formatClockTime, formatShortAddress, formatUptime } from '../../lib/format';
+import { armLiveEngine, fetchLiveStatus as apiFetchLiveStatus, killLiveEngine } from '../../lib/api';
 import { LiveEngineStatus, NavigationTab, StreamStatus, Telemetry } from '../../types/dashboard';
 import { ApiConfigModal } from '../common/ApiConfigModal';
 import { Badge } from '../common/Badge';
@@ -70,11 +71,8 @@ export const Topbar: React.FC<TopbarProps> = ({
 
   const fetchLiveStatus = async () => {
     try {
-      const res = await fetch('/api/live/status');
-      if (res.ok) {
-        const data = await res.json();
-        setLiveStatus(data);
-      }
+      const data = await apiFetchLiveStatus();
+      setLiveStatus(data as any);
     } catch {}
   };
 
@@ -92,13 +90,11 @@ export const Topbar: React.FC<TopbarProps> = ({
 
     try {
       setIsArmingOrKilling(true);
-      const res = await fetch('/api/live/kill', { method: 'POST' });
-      if (res.ok) {
-        await fetchLiveStatus();
-        onRefresh();
-      }
-    } catch (err) {
-      alert('Failed to deactivate bot: ' + String(err));
+      await killLiveEngine();
+      await fetchLiveStatus();
+      onRefresh();
+    } catch (err: any) {
+      alert('Failed to deactivate bot: ' + (err.message || String(err)));
     } finally {
       setIsArmingOrKilling(false);
     }
@@ -112,15 +108,14 @@ export const Topbar: React.FC<TopbarProps> = ({
 
     try {
       setIsArmingOrKilling(true);
-      const res = await fetch('/api/live/arm', { method: 'POST' });
-      const data = await res.json();
+      const data = await armLiveEngine();
       if (!data.success) {
-        alert('Cannot Activate Bot:\n\n' + data.reason);
+        alert('Cannot Activate Bot:\n\n' + (data.reason || 'Arming failed'));
       }
       await fetchLiveStatus();
       onRefresh();
-    } catch (err) {
-      alert('Failed to activate bot: ' + String(err));
+    } catch (err: any) {
+      alert('Failed to activate bot: ' + (err.message || String(err)));
     } finally {
       setIsArmingOrKilling(false);
     }

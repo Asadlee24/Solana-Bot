@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import cors from 'cors';
 import express, { Request, Response } from 'express';
 import fs from 'fs';
@@ -14,20 +15,59 @@ import { traderNamingService } from '../services/trader-naming.js';
 import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
 import { SystemTelemetry, FollowerPosition } from '../types/index.js';
+import {
+  authFailureLimiter,
+  mutatingControlLimiter,
+  tradingExitLimiter,
+  walletMutationLimiter,
+  webhookRateLimiter,
+} from './rate-limiter.js';
 
 // Authentication middleware for state-modifying actions
 export const requireControlAuth = (req: Request, res: Response, next: express.NextFunction) => {
-  if (!config.CONTROL_API_TOKEN || config.CONTROL_API_TOKEN.trim() === '') {
-    return next();
-  }
-  const tokenHeader = req.headers['x-api-token'] as string;
-  const authHeader = req.headers.authorization;
-  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const clientIp = typeof req.headers['x-forwarded-for'] === 'string'
+    ? req.headers['x-forwarded-for'].split(',')[0].trim()
+    : req.ip || req.socket?.remoteAddress || 'unknown';
 
-  if (tokenHeader === config.CONTROL_API_TOKEN || bearerToken === config.CONTROL_API_TOKEN) {
-    return next();
+  if (authFailureLimiter.isRateLimited(clientIp)) {
+    return res.status(429).json({
+      error: 'Too many failed authentication attempts. Please wait a minute before retrying.',
+    });
   }
-  return res.status(401).json({ error: 'Unauthorized: Invalid or missing CONTROL_API_TOKEN' });
+
+  const configuredToken = config.CONTROL_API_TOKEN ? config.CONTROL_API_TOKEN.trim() : '';
+
+  // Fail-closed rule: Missing CONTROL_API_TOKEN must never silently make privileged routes public.
+  if (!configuredToken) {
+    if (config.ALLOW_UNAUTHENTICATED_CONTROL && config.NODE_ENV !== 'production') {
+      return next();
+    }
+    return res.status(401).json({
+      error: 'Unauthorized: CONTROL_API_TOKEN is not configured on this server. State-modifying controls fail-closed.',
+    });
+  }
+
+  const tokenHeader = req.headers['x-api-token'];
+  const authHeader = req.headers.authorization;
+  const provided = typeof tokenHeader === 'string' && tokenHeader.trim()
+    ? tokenHeader.trim()
+    : (authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null);
+
+  if (!provided) {
+    authFailureLimiter.recordHit(clientIp);
+    return res.status(401).json({ error: 'Unauthorized: Missing CONTROL_API_TOKEN' });
+  }
+
+  const expectedBuf = Buffer.from(configuredToken);
+  const actualBuf = Buffer.from(provided);
+  const isValid = expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+
+  if (!isValid) {
+    authFailureLimiter.recordHit(clientIp);
+    return res.status(401).json({ error: 'Unauthorized: Invalid CONTROL_API_TOKEN' });
+  }
+
+  return next();
 };
 
 export function createApiServer() {
@@ -40,15 +80,36 @@ export function createApiServer() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Blocked by CORS policy'));
+        // 1. Same-origin or direct server-to-server/curl without Origin header
+        if (!origin) {
+          return callback(null, true);
         }
+
+        // 2. Explicitly allowed configured origins
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+
+        // 3. Local development relaxed logic (only when NOT in production)
+        const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        if (config.NODE_ENV !== 'production' && isLocalhost) {
+          return callback(null, true);
+        }
+
+        // 4. In production or unapproved cross-origin: reject
+        callback(new Error('Blocked by CORS policy'));
       },
+      credentials: true,
     })
   );
-  app.use(express.json());
+
+  app.use(express.json({ limit: '1mb' }));
+  app.use((err: any, _req: Request, res: Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      return res.status(400).json({ error: 'Malformed JSON payload' });
+    }
+    next(err);
+  });
 
   // Serve static web dashboard build if available
   const distPath = path.resolve('dashboard/dist');
@@ -56,13 +117,13 @@ export function createApiServer() {
     app.use(express.static(distPath));
   }
 
-  // Webhook Receiver
+  // Webhook Receiver with rate limiter
   const webhookReceiver = new WebhookReceiver({
     onTransaction: (tx) => {
       signalManager.handleIncomingTransaction(tx, 'WEBHOOK', 'PROCESSED_SUCCESS');
     },
   });
-  app.post('/webhook/helius', webhookReceiver.handleHeliusWebhook);
+  app.post('/webhook/helius', webhookRateLimiter.middleware, webhookReceiver.handleHeliusWebhook);
 
   const getEnrichedPositions = async () => {
     const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
@@ -279,7 +340,7 @@ export function createApiServer() {
     res.json(enriched);
   });
 
-  app.post('/api/positions/:id/sell', async (req: Request, res: Response) => {
+  app.post('/api/positions/:id/sell', requireControlAuth, tradingExitLimiter.middleware, async (req: Request, res: Response) => {
     try {
       const positionId = req.params.id;
       const fraction = typeof req.body?.fraction === 'number' ? req.body.fraction : 1.0;
@@ -293,7 +354,7 @@ export function createApiServer() {
     }
   });
 
-  app.post('/api/positions/:id/close', async (req: Request, res: Response) => {
+  app.post('/api/positions/:id/close', requireControlAuth, tradingExitLimiter.middleware, async (req: Request, res: Response) => {
     try {
       const positionId = req.params.id;
       const result = await signalManager.executeManualExit(positionId, 1.0);
@@ -387,7 +448,7 @@ export function createApiServer() {
     res.json(wallets);
   });
 
-  app.post('/api/wallets', requireControlAuth, (req: Request, res: Response) => {
+  app.post('/api/wallets', requireControlAuth, walletMutationLimiter.middleware, (req: Request, res: Response) => {
     const wallet = req.body;
     if (!wallet || !wallet.wallet) {
       return res.status(400).json({ error: 'Missing wallet public key' });
@@ -395,6 +456,16 @@ export function createApiServer() {
     db.upsertWatchedWallet(wallet);
     signalManager.refreshWallets();
     res.json({ success: true });
+  });
+
+  app.delete('/api/wallets/:wallet', requireControlAuth, walletMutationLimiter.middleware, (req: Request, res: Response) => {
+    const wallet = req.params.wallet;
+    if (!wallet) {
+      return res.status(400).json({ error: 'Missing wallet public key' });
+    }
+    const deleted = db.deleteWatchedWallet(wallet);
+    signalManager.refreshWallets();
+    res.json({ success: true, deleted });
   });
 
   app.get('/api/risk', (_req: Request, res: Response) => {
@@ -417,7 +488,12 @@ export function createApiServer() {
     });
   });
 
-  app.post('/api/risk/reset', (_req: Request, res: Response) => {
+  app.post('/api/risk/reset', requireControlAuth, mutatingControlLimiter.middleware, (_req: Request, res: Response) => {
+    riskEngine.resetCircuitBreaker();
+    res.json({ success: true, message: 'Circuit breaker reset. Normal trading resumed.' });
+  });
+
+  app.post('/api/circuit-breaker/reset', requireControlAuth, mutatingControlLimiter.middleware, (_req: Request, res: Response) => {
     riskEngine.resetCircuitBreaker();
     res.json({ success: true, message: 'Circuit breaker reset. Normal trading resumed.' });
   });
@@ -452,12 +528,12 @@ export function createApiServer() {
     });
   });
 
-  app.post('/api/live/kill', requireControlAuth, (_req: Request, res: Response) => {
+  app.post('/api/live/kill', requireControlAuth, mutatingControlLimiter.middleware, (_req: Request, res: Response) => {
     liveEngine.kill('Operator triggered Emergency Kill Switch via Dashboard/API');
     res.json({ success: true, isArmed: false, message: 'Live execution DISARMED immediately.' });
   });
 
-  app.post('/api/live/arm', requireControlAuth, async (_req: Request, res: Response) => {
+  app.post('/api/live/arm', requireControlAuth, mutatingControlLimiter.middleware, async (_req: Request, res: Response) => {
     const result = await liveEngine.arm();
     res.json({
       success: result.armed,

@@ -67,12 +67,15 @@ const ConfigSchema = z.object({
   API_PORT: z.coerce.number().default(process.env.PORT ? Number(process.env.PORT) : 3001),
   DASHBOARD_PORT: z.coerce.number().default(3000),
   CONTROL_API_TOKEN: z.string().default(''), // Secret token required for mutating API actions (arm, kill, add wallet)
+  ALLOW_UNAUTHENTICATED_CONTROL: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(false),
   HELIUS_WEBHOOK_SECRET: z.string().default(''), // Secret token to verify Helius webhook requests
-  CORS_ALLOWED_ORIGINS: z.string().default(''), // Comma-separated allowed CORS origins (empty allows localhost/same-origin)
+  ALLOW_UNAUTHENTICATED_WEBHOOK: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(false),
+  CORS_ALLOWED_ORIGINS: z.string().default(''), // Comma-separated allowed CORS origins (empty allows localhost/same-origin in dev, strict in prod)
 
   // Telegram Notifications (Async off hot path)
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_CHAT_ID: z.string().default(''),
+  TELEGRAM_PAIRING_CODE: z.string().default(''), // Setup secret to pair authorized chat via /pair <code>
   TELEGRAM_API_ROOT: z.string().default('https://api.telegram.org'),
 
   // SQLite Database path

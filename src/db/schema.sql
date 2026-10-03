@@ -4,6 +4,13 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
 
+-- Bot Operational Settings & Pairing
+CREATE TABLE IF NOT EXISTS bot_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
 -- Watched Target Wallets
 CREATE TABLE IF NOT EXISTS watched_wallets (
     wallet TEXT PRIMARY KEY,

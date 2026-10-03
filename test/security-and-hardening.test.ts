@@ -1,14 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import http from 'http';
+import { AddressInfo } from 'net';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { config } from '../src/config/index.js';
-import { requireControlAuth } from '../src/api/server.js';
+import { createApiServer, requireControlAuth } from '../src/api/server.js';
+import { authFailureLimiter, resetAllRateLimits } from '../src/api/rate-limiter.js';
 import { telegramNotifier } from '../src/notifications/telegram.js';
+import { db } from '../src/db/database.js';
 import { tokenMetadataService } from '../src/services/token-metadata.js';
 import { pumpFunSwapAdapter, OnChainBondingCurveState } from '../src/execution/pump-fun-swap.js';
 import { WebhookReceiver } from '../src/streams/webhook-server.js';
 import { riskEngine } from '../src/engine/risk-engine.js';
 
 describe('Security Hardening & Audit Verification Suite', () => {
-  describe('1. Telegram Chat Authorization Guard', () => {
+  beforeEach(() => {
+    resetAllRateLimits();
+  });
+
+  describe('1. Telegram Chat Authorization Guard & Secure Pairing', () => {
     it('strictly blocks unauthorized chat IDs and preserves operator chatId', () => {
       const authorizedChat = '123456789';
       const unauthorizedChat = '999999999';
@@ -25,65 +33,315 @@ describe('Security Hardening & Audit Verification Suite', () => {
       (telegramNotifier as any).chatId = authorizedChat;
       expect((telegramNotifier as any).chatId).toBe(authorizedChat);
     });
+
+    it('hardcoded developer Telegram ID 7080909965 no longer grants access', () => {
+      (config as any).TELEGRAM_CHAT_ID = '987654321';
+      db.resetTelegramPairing();
+
+      const developerId = '7080909965';
+      expect(telegramNotifier.isAuthorizedChat(developerId)).toBe(false);
+      expect(telegramNotifier.getAuthorizedChatIds()).not.toContain(developerId);
+    });
+
+    it('successfully pairs via /pair <code>, persists in SQLite, and survives reload', async () => {
+      const originalChatId = config.TELEGRAM_CHAT_ID;
+      const originalCode = config.TELEGRAM_PAIRING_CODE;
+      const origSend = telegramNotifier.sendCustomMessage;
+      let rejectMsg = '';
+
+      (telegramNotifier as any).sendCustomMessage = async (_chat: any, text: string) => {
+        rejectMsg = text;
+      };
+
+      try {
+        (config as any).TELEGRAM_CHAT_ID = '';
+        (config as any).TELEGRAM_PAIRING_CODE = 'test-pairing-secret-777';
+        db.resetTelegramPairing();
+
+        const strangerChat = '5551234';
+        expect(telegramNotifier.isAuthorizedChat(strangerChat)).toBe(false);
+        expect(db.isTelegramPairingCompleted()).toBe(false);
+
+        // Send correct pairing command
+        await telegramNotifier.handlePairCommand(strangerChat, 'test-pairing-secret-777');
+
+        // Verification: chat is now authorized and persisted in SQLite
+        expect(db.isTelegramPairingCompleted()).toBe(true);
+        expect(db.getAuthorizedTelegramChats()).toContain(strangerChat);
+        expect(telegramNotifier.isAuthorizedChat(strangerChat)).toBe(true);
+
+        // Verification: pairing survives (new query to DB still contains it)
+        const reloaded = db.getAuthorizedTelegramChats();
+        expect(reloaded).toContain(strangerChat);
+
+        // Verification: re-pairing from another stranger is rejected
+        const anotherStranger = '8889990';
+        await telegramNotifier.handlePairCommand(anotherStranger, 'test-pairing-secret-777');
+        expect(rejectMsg).toContain('ALREADY PAIRED');
+        expect(telegramNotifier.isAuthorizedChat(anotherStranger)).toBe(false);
+
+        // Verification: local admin reset mechanism
+        telegramNotifier.resetPairing();
+        expect(db.isTelegramPairingCompleted()).toBe(false);
+        expect(telegramNotifier.isAuthorizedChat(strangerChat)).toBe(false);
+      } finally {
+        (config as any).TELEGRAM_CHAT_ID = originalChatId;
+        (config as any).TELEGRAM_PAIRING_CODE = originalCode;
+        telegramNotifier.sendCustomMessage = origSend;
+        db.resetTelegramPairing();
+      }
+    });
+
+    it('rejects invalid pairing code and does not authorize', async () => {
+      const originalCode = config.TELEGRAM_PAIRING_CODE;
+      try {
+        (config as any).TELEGRAM_PAIRING_CODE = 'super-secret-code';
+        db.resetTelegramPairing();
+
+        const hackerChat = '666666';
+        let errorMsg = '';
+        const origSend = telegramNotifier.sendCustomMessage;
+        (telegramNotifier as any).sendCustomMessage = async (_chat: any, text: string) => {
+          errorMsg = text;
+        };
+
+        await telegramNotifier.handlePairCommand(hackerChat, 'wrong-guess');
+        expect(errorMsg).toContain('INVALID PAIRING CODE');
+        expect(telegramNotifier.isAuthorizedChat(hackerChat)).toBe(false);
+        expect(db.isTelegramPairingCompleted()).toBe(false);
+
+        telegramNotifier.sendCustomMessage = origSend;
+      } finally {
+        (config as any).TELEGRAM_PAIRING_CODE = originalCode;
+        db.resetTelegramPairing();
+      }
+    });
   });
 
-  describe('2. API CONTROL_API_TOKEN Middleware', () => {
+  describe('2. Fail-Closed API CONTROL_API_TOKEN Middleware', () => {
+    const createMockContext = (headers: Record<string, string>, ip = '127.0.0.1') => {
+      let status = 200;
+      let jsonBody: any = null;
+      let nextCalled = false;
+
+      const req = { headers, ip, socket: { remoteAddress: ip } } as any;
+      const res = {
+        status: (code: number) => {
+          status = code;
+          return {
+            json: (body: any) => {
+              jsonBody = body;
+            },
+          };
+        },
+      } as any;
+      const next = () => {
+        nextCalled = true;
+      };
+
+      return { req, res, next, getResult: () => ({ status, jsonBody, nextCalled }) };
+    };
+
+    it('fails closed with 401 when CONTROL_API_TOKEN is unset in environment', () => {
+      const origToken = config.CONTROL_API_TOKEN;
+      const origAllow = config.ALLOW_UNAUTHENTICATED_CONTROL;
+
+      try {
+        (config as any).CONTROL_API_TOKEN = '';
+        (config as any).ALLOW_UNAUTHENTICATED_CONTROL = false;
+
+        const ctx = createMockContext({ 'x-api-token': 'any-token' });
+        requireControlAuth(ctx.req, ctx.res, ctx.next);
+
+        expect(ctx.getResult().status).toBe(401);
+        expect(ctx.getResult().nextCalled).toBe(false);
+        expect(ctx.getResult().jsonBody?.error).toContain('CONTROL_API_TOKEN is not configured');
+      } finally {
+        (config as any).CONTROL_API_TOKEN = origToken;
+        (config as any).ALLOW_UNAUTHENTICATED_CONTROL = origAllow;
+      }
+    });
+
     it('blocks mutating API endpoints with 401 when CONTROL_API_TOKEN is missing or invalid', () => {
       const origToken = config.CONTROL_API_TOKEN;
       (config as any).CONTROL_API_TOKEN = 'secret-test-token-123';
 
-      const createMockContext = (headers: Record<string, string>) => {
-        let status = 200;
-        let jsonBody: any = null;
-        let nextCalled = false;
+      try {
+        // Missing token -> 401
+        const noTokenCtx = createMockContext({});
+        requireControlAuth(noTokenCtx.req, noTokenCtx.res, noTokenCtx.next);
+        expect(noTokenCtx.getResult().status).toBe(401);
+        expect(noTokenCtx.getResult().nextCalled).toBe(false);
 
-        const req = { headers } as any;
-        const res = {
-          status: (code: number) => {
-            status = code;
-            return {
-              json: (body: any) => {
-                jsonBody = body;
-              },
-            };
-          },
-        } as any;
-        const next = () => {
-          nextCalled = true;
-        };
+        // Invalid token -> 401
+        const badTokenCtx = createMockContext({ 'x-api-token': 'wrong-token' });
+        requireControlAuth(badTokenCtx.req, badTokenCtx.res, badTokenCtx.next);
+        expect(badTokenCtx.getResult().status).toBe(401);
+        expect(badTokenCtx.getResult().nextCalled).toBe(false);
 
-        return { req, res, next, getResult: () => ({ status, jsonBody, nextCalled }) };
-      };
+        // Valid token via x-api-token -> 200 / next() called
+        const validHeaderCtx = createMockContext({ 'x-api-token': 'secret-test-token-123' });
+        requireControlAuth(validHeaderCtx.req, validHeaderCtx.res, validHeaderCtx.next);
+        expect(validHeaderCtx.getResult().status).toBe(200);
+        expect(validHeaderCtx.getResult().nextCalled).toBe(true);
 
-      // Missing token -> 401
-      const noTokenCtx = createMockContext({});
-      requireControlAuth(noTokenCtx.req, noTokenCtx.res, noTokenCtx.next);
-      expect(noTokenCtx.getResult().status).toBe(401);
-      expect(noTokenCtx.getResult().nextCalled).toBe(false);
+        // Valid token via Bearer -> 200 / next() called
+        const validBearerCtx = createMockContext({ authorization: 'Bearer secret-test-token-123' });
+        requireControlAuth(validBearerCtx.req, validBearerCtx.res, validBearerCtx.next);
+        expect(validBearerCtx.getResult().status).toBe(200);
+        expect(validBearerCtx.getResult().nextCalled).toBe(true);
+      } finally {
+        (config as any).CONTROL_API_TOKEN = origToken;
+      }
+    });
 
-      // Invalid token -> 401
-      const badTokenCtx = createMockContext({ 'x-api-token': 'wrong-token' });
-      requireControlAuth(badTokenCtx.req, badTokenCtx.res, badTokenCtx.next);
-      expect(badTokenCtx.getResult().status).toBe(401);
-      expect(badTokenCtx.getResult().nextCalled).toBe(false);
+    it('enforces auth failure rate limiting after consecutive invalid attempts', () => {
+      const origToken = config.CONTROL_API_TOKEN;
+      (config as any).CONTROL_API_TOKEN = 'correct-token';
 
-      // Valid token via x-api-token -> 200 / next() called
-      const validHeaderCtx = createMockContext({ 'x-api-token': 'secret-test-token-123' });
-      requireControlAuth(validHeaderCtx.req, validHeaderCtx.res, validHeaderCtx.next);
-      expect(validHeaderCtx.getResult().status).toBe(200);
-      expect(validHeaderCtx.getResult().nextCalled).toBe(true);
+      try {
+        const testIp = '198.51.100.42';
+        for (let i = 0; i < 10; i++) {
+          const ctx = createMockContext({ 'x-api-token': 'wrong' }, testIp);
+          requireControlAuth(ctx.req, ctx.res, ctx.next);
+          expect(ctx.getResult().status).toBe(401);
+        }
 
-      // Valid token via Bearer -> 200 / next() called
-      const validBearerCtx = createMockContext({ authorization: 'Bearer secret-test-token-123' });
-      requireControlAuth(validBearerCtx.req, validBearerCtx.res, validBearerCtx.next);
-      expect(validBearerCtx.getResult().status).toBe(200);
-      expect(validBearerCtx.getResult().nextCalled).toBe(true);
-
-      (config as any).CONTROL_API_TOKEN = origToken;
+        // 11th attempt should trigger 429 Too Many Requests
+        const blockedCtx = createMockContext({ 'x-api-token': 'correct-token' }, testIp);
+        requireControlAuth(blockedCtx.req, blockedCtx.res, blockedCtx.next);
+        expect(blockedCtx.getResult().status).toBe(429);
+        expect(blockedCtx.getResult().nextCalled).toBe(false);
+      } finally {
+        (config as any).CONTROL_API_TOKEN = origToken;
+        authFailureLimiter.reset();
+      }
     });
   });
 
-  describe('3. Helius Webhook Secret Validation', () => {
+  describe('3. HTTP Mutating Endpoints Real Integration Suite', () => {
+    let server: http.Server;
+    let baseUrl: string;
+    const testSecret = 'server-control-secret-xyz';
+
+    beforeEach(async () => {
+      (config as any).CONTROL_API_TOKEN = testSecret;
+      (config as any).ALLOW_UNAUTHENTICATED_CONTROL = false;
+      const app = createApiServer();
+      await new Promise<void>((resolve) => {
+        server = app.listen(0, () => {
+          const port = (server.address() as AddressInfo).port;
+          baseUrl = `http://127.0.0.1:${port}`;
+          resolve();
+        });
+      });
+    });
+
+    afterEach(async () => {
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    });
+
+    it('unauthorized manual sell is blocked with 401', async () => {
+      const res = await fetch(`${baseUrl}/api/positions/pos_1/sell`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fraction: 1.0 }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('unauthorized manual close is blocked with 401', async () => {
+      const res = await fetch(`${baseUrl}/api/positions/pos_1/close`, {
+        method: 'POST',
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it('unauthorized live arm is blocked with 401', async () => {
+      const res = await fetch(`${baseUrl}/api/live/arm`, { method: 'POST' });
+      expect(res.status).toBe(401);
+    });
+
+    it('unauthorized live kill is blocked with 401', async () => {
+      const res = await fetch(`${baseUrl}/api/live/kill`, { method: 'POST' });
+      expect(res.status).toBe(401);
+    });
+
+    it('unauthorized circuit breaker reset is blocked with 401', async () => {
+      const resRisk = await fetch(`${baseUrl}/api/risk/reset`, { method: 'POST' });
+      expect(resRisk.status).toBe(401);
+
+      const resCircuit = await fetch(`${baseUrl}/api/circuit-breaker/reset`, { method: 'POST' });
+      expect(resCircuit.status).toBe(401);
+    });
+
+    it('unauthorized wallet mutation is blocked with 401', async () => {
+      const resAdd = await fetch(`${baseUrl}/api/wallets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet: '11111111111111111111111111111111' }),
+      });
+      expect(resAdd.status).toBe(401);
+
+      const resDel = await fetch(`${baseUrl}/api/wallets/11111111111111111111111111111111`, {
+        method: 'DELETE',
+      });
+      expect(resDel.status).toBe(401);
+    });
+
+    it('authorized requests succeed when providing valid x-api-token or Bearer', async () => {
+      // Circuit breaker reset with valid x-api-token
+      const resReset = await fetch(`${baseUrl}/api/circuit-breaker/reset`, {
+        method: 'POST',
+        headers: { 'x-api-token': testSecret },
+      });
+      expect(resReset.status).toBe(200);
+
+      // Kill with Bearer token
+      const resKill = await fetch(`${baseUrl}/api/live/kill`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${testSecret}` },
+      });
+      expect(resKill.status).toBe(200);
+
+      // Read-only endpoint does not require auth
+      const resTelemetry = await fetch(`${baseUrl}/api/telemetry`);
+      expect(resTelemetry.status).toBe(200);
+    });
+  });
+
+  describe('4. Helius Webhook Fail-Closed Security', () => {
+    it('rejects with 503 when HELIUS_WEBHOOK_SECRET is not configured', () => {
+      const origSecret = config.HELIUS_WEBHOOK_SECRET;
+      const origBypass = config.ALLOW_UNAUTHENTICATED_WEBHOOK;
+
+      try {
+        (config as any).HELIUS_WEBHOOK_SECRET = '';
+        (config as any).ALLOW_UNAUTHENTICATED_WEBHOOK = false;
+
+        let statusCode = 200;
+        let responseBody: any = null;
+        const receiver = new WebhookReceiver({ onTransaction: () => {} });
+
+        const req = { headers: {}, body: [{ signature: 'sig_123' }] } as any;
+        const res = {
+          status: (code: number) => {
+            statusCode = code;
+            return { json: (b: any) => { responseBody = b; } };
+          },
+        } as any;
+
+        receiver.handleHeliusWebhook(req, res);
+        expect(statusCode).toBe(503);
+        expect(responseBody?.error).toContain('HELIUS_WEBHOOK_SECRET is not configured');
+      } finally {
+        (config as any).HELIUS_WEBHOOK_SECRET = origSecret;
+        (config as any).ALLOW_UNAUTHENTICATED_WEBHOOK = origBypass;
+      }
+    });
+
     it('rejects unauthenticated webhooks with 401 when HELIUS_WEBHOOK_SECRET is set', () => {
       const origSecret = config.HELIUS_WEBHOOK_SECRET;
       (config as any).HELIUS_WEBHOOK_SECRET = 'my-webhook-secret-xyz';
@@ -101,14 +359,12 @@ describe('Security Hardening & Audit Verification Suite', () => {
         body: [{ signature: 'sig_test' }],
       } as any;
       let statusCode = 200;
-      let responseBody = '';
       const resMissing = {
         status: (code: number) => {
           statusCode = code;
           return {
-            send: (body: string) => {
-              responseBody = body;
-            },
+            json: () => {},
+            send: () => {},
           };
         },
       } as any;
@@ -117,17 +373,26 @@ describe('Security Hardening & Audit Verification Suite', () => {
       expect(statusCode).toBe(401);
       expect(received).toBe(false);
 
-      // Valid Authorization header
+      // Invalid secret
+      const reqBad = {
+        headers: { authorization: 'wrong-secret' },
+        body: [{ signature: 'sig_test' }],
+      } as any;
+      receiver.handleHeliusWebhook(reqBad, resMissing);
+      expect(statusCode).toBe(401);
+      expect(received).toBe(false);
+
+      // Valid secret and valid structure
       const reqValid = {
         headers: { authorization: 'my-webhook-secret-xyz' },
-        body: [],
+        body: [{ signature: 'sig_valid_payload', slot: 100 }],
       } as any;
       let okCalled = false;
       const resValid = {
         status: (code: number) => {
           statusCode = code;
           return {
-            send: (body: string) => {
+            json: () => {
               okCalled = true;
             },
           };
@@ -137,12 +402,108 @@ describe('Security Hardening & Audit Verification Suite', () => {
       receiver.handleHeliusWebhook(reqValid, resValid);
       expect(statusCode).toBe(200);
       expect(okCalled).toBe(true);
+      expect(received).toBe(true);
+
+      (config as any).HELIUS_WEBHOOK_SECRET = origSecret;
+    });
+
+    it('rejects malformed payloads with 400 without triggering onTransaction', () => {
+      const origSecret = config.HELIUS_WEBHOOK_SECRET;
+      (config as any).HELIUS_WEBHOOK_SECRET = 'test-secret';
+
+      let received = false;
+      const receiver = new WebhookReceiver({
+        onTransaction: () => {
+          received = true;
+        },
+      });
+
+      const testPayload = (body: any, expectedStatus = 400) => {
+        let code = 200;
+        let responseBody: any = null;
+        receiver.handleHeliusWebhook(
+          { headers: { authorization: 'test-secret' }, body } as any,
+          {
+            status: (c: number) => {
+              code = c;
+              return { json: (b: any) => { responseBody = b; } };
+            },
+          } as any
+        );
+        return { code, responseBody };
+      };
+
+      // Non-array
+      expect(testPayload({ not: 'an array' }).code).toBe(400);
+      expect(received).toBe(false);
+
+      // Empty array
+      expect(testPayload([]).code).toBe(400);
+      expect(received).toBe(false);
+
+      // Over 50 items
+      const hugeArray = new Array(51).fill({ signature: 'sig' });
+      expect(testPayload(hugeArray).code).toBe(400);
+      expect(received).toBe(false);
+
+      // Missing signature on all items
+      expect(testPayload([{ foo: 'bar' }]).code).toBe(400);
+      expect(received).toBe(false);
 
       (config as any).HELIUS_WEBHOOK_SECRET = origSecret;
     });
   });
 
-  describe('4. Entry Gap Post-Quote Guard in Risk Engine', () => {
+  describe('5. Production CORS Hardening', () => {
+    let server: http.Server;
+    let baseUrl: string;
+
+    beforeEach(async () => {
+      (config as any).NODE_ENV = 'production';
+      (config as any).CORS_ALLOWED_ORIGINS = 'https://dashboard.approved.com,https://app.approved.com';
+      (config as any).CONTROL_API_TOKEN = 'cors-test-token';
+
+      const app = createApiServer();
+      await new Promise<void>((resolve) => {
+        server = app.listen(0, () => {
+          const port = (server.address() as AddressInfo).port;
+          baseUrl = `http://127.0.0.1:${port}`;
+          resolve();
+        });
+      });
+    });
+
+    afterEach(async () => {
+      (config as any).NODE_ENV = 'test';
+      await new Promise<void>((resolve) => {
+        server.close(() => resolve());
+      });
+    });
+
+    it('allows approved production origins', async () => {
+      const res = await fetch(`${baseUrl}/api/telemetry`, {
+        headers: { Origin: 'https://dashboard.approved.com' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBe('https://dashboard.approved.com');
+    });
+
+    it('rejects unapproved browser origins in production', async () => {
+      // In Express CORS, disallowed origin callbacks pass Error('Blocked by CORS policy')
+      const res = await fetch(`${baseUrl}/api/telemetry`, {
+        headers: { Origin: 'https://evil-attacker.com' },
+      });
+      // Should not have access-control-allow-origin header
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('allows direct server-to-server requests without Origin header', async () => {
+      const res = await fetch(`${baseUrl}/api/telemetry`);
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe('6. Entry Gap Post-Quote Guard in Risk Engine', () => {
     it('rejects orders where quote price is worse than MAX_ENTRY_GAP_BPS tolerance', () => {
       const targetPrice = 0.0001; // target entered at 0.0001 SOL
       // Config MAX_ENTRY_GAP_BPS is 200 bps (2.0%)
@@ -159,7 +520,7 @@ describe('Security Hardening & Audit Verification Suite', () => {
     });
   });
 
-  describe('5. Pump.fun Bonding-Curve 1.25% Fee Correctness', () => {
+  describe('7. Pump.fun Bonding-Curve 1.25% Fee Correctness', () => {
     it('calculates buy output using the official 1.25% bonding curve trading fee', () => {
       const mockState: OnChainBondingCurveState = {
         isInitialized: true,
@@ -184,9 +545,12 @@ describe('Security Hardening & Audit Verification Suite', () => {
     });
   });
 
-  describe('6. TokenMetadataService USDC vs SOL Pricing Conversion', () => {
+  describe('8. TokenMetadataService USDC vs SOL Pricing Conversion', () => {
     it('correctly calculates priceSol from priceUsd / solPriceUsd when paired with USDC', async () => {
       const origFetch = global.fetch;
+      (tokenMetadataService as any).lastSolPriceFetchTime = 0;
+      (tokenMetadataService as any).cachedSolPriceUsd = 0;
+      (tokenMetadataService as any).cache.clear();
       try {
         (global as any).fetch = async (url: string) => {
           if (url.includes('dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112')) {
@@ -233,7 +597,7 @@ describe('Security Hardening & Audit Verification Suite', () => {
     });
   });
 
-  describe('7. Unverified Settlement Reconciliation Status', () => {
+  describe('9. Unverified Settlement Reconciliation Status', () => {
     it('marks unverified RPC settlements as FALLBACK_PENDING without falsely asserting FILLED', async () => {
       const { settlementReconciler } = await import('../src/execution/settlement-reconciler.js');
       const { PublicKey } = await import('@solana/web3.js');
@@ -254,7 +618,7 @@ describe('Security Hardening & Audit Verification Suite', () => {
     });
   });
 
-  describe('8. Telemetry Precision (No Artificial Latency Injection)', () => {
+  describe('10. Telemetry Precision (No Artificial Latency Injection)', () => {
     it('records ground truth observed and decision timings without synthetic offsets', async () => {
       const { latencyTracker } = await import('../src/telemetry/latency-tracker.js');
 
@@ -282,7 +646,7 @@ describe('Security Hardening & Audit Verification Suite', () => {
     });
   });
 
-  describe('9. Activate & Deactivate Confirmation Guard Flow', () => {
+  describe('11. Activate & Deactivate Confirmation Guard Flow', () => {
     it('prompts confirmation when activate is triggered and provides confirm button', async () => {
       let promptSent = false;
       let promptKeyboard: any = null;
@@ -343,7 +707,53 @@ describe('Security Hardening & Audit Verification Suite', () => {
       }
     });
   });
+
+  describe('12. Dashboard API Auth Token Propagation', () => {
+    it('attaches x-api-token and Bearer headers for privileged calls from sessionStorage', async () => {
+      const storage: Record<string, string> = {};
+      const mockSessionStorage = {
+        getItem: (k: string) => storage[k] || null,
+        setItem: (k: string, v: string) => { storage[k] = v; },
+        removeItem: (k: string) => { delete storage[k]; },
+      };
+
+      (global as any).window = {
+        sessionStorage: mockSessionStorage,
+        localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+      };
+
+      const { getControlToken, setControlToken, addWallet, armLiveEngine } = await import('../dashboard/src/lib/api.js');
+
+      // Set operator token
+      setControlToken('operator-secret-dash-token');
+      expect(getControlToken()).toBe('operator-secret-dash-token');
+
+      // Mock fetch to inspect sent headers
+      let capturedHeaders: Headers | null = null;
+      const origFetch = global.fetch;
+
+      try {
+        (global as any).fetch = async (_url: string, init?: RequestInit) => {
+          capturedHeaders = new Headers(init?.headers);
+          return {
+            ok: true,
+            headers: new Headers({ 'content-type': 'application/json' }),
+            json: async () => ({ success: true, armed: true }),
+          };
+        };
+
+        await armLiveEngine();
+        expect(capturedHeaders).not.toBeNull();
+        expect(capturedHeaders!.get('x-api-token')).toBe('operator-secret-dash-token');
+        expect(capturedHeaders!.get('authorization')).toBe('Bearer operator-secret-dash-token');
+
+        capturedHeaders = null;
+        await addWallet({ wallet: '33333333333333333333333333333333', label: 'Test Trader' });
+        expect(capturedHeaders).not.toBeNull();
+        expect(capturedHeaders!.get('x-api-token')).toBe('operator-secret-dash-token');
+      } finally {
+        global.fetch = origFetch;
+      }
+    });
+  });
 });
-
-
-

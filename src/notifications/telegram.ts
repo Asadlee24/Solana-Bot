@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { PublicKey } from '@solana/web3.js';
 import { config } from '../config/index.js';
 import { db } from '../db/database.js';
@@ -76,6 +77,7 @@ export class TelegramNotifier {
             { command: 'restore', description: 'Restore Bottom Interactive Keypad' },
             { command: 'keypad', description: 'Restore Bottom Interactive Keypad' },
             { command: 'help', description: 'Terminal Usage Guide & Commands' },
+            { command: 'pair', description: 'Pair operator account: /pair <setup_code>' },
           ],
         }),
         signal: AbortSignal.timeout(8000),
@@ -110,8 +112,17 @@ export class TelegramNotifier {
         if (id.trim()) ids.add(id.trim());
       });
     }
-    // Whitelist operator's sole authorized account: @Asadaly2 (7080909965)
-    ids.add('7080909965');
+    // Load chat IDs authorized via secure pairing persisted in SQLite
+    try {
+      const persisted = db.getAuthorizedTelegramChats();
+      for (const id of persisted) {
+        if (id && id.trim()) ids.add(id.trim());
+      }
+    } catch {}
+
+    if (this.chatId && this.chatId.trim() && ids.has(this.chatId.trim())) {
+      ids.add(this.chatId.trim());
+    }
     return Array.from(ids);
   }
 
@@ -208,15 +219,7 @@ export class TelegramNotifier {
   public isAuthorizedChat(incomingChatId: string | number): boolean {
     const incomingStr = String(incomingChatId).trim();
     const authorized = this.getAuthorizedChatIds();
-    if (authorized.includes(incomingStr)) {
-      return true;
-    }
-    if (!config.TELEGRAM_CHAT_ID || config.TELEGRAM_CHAT_ID.trim() === '') {
-      this.chatId = incomingStr;
-      console.info(`[Telegram Security] Bound authorized operator chat ID: ${this.chatId}`);
-      return true;
-    }
-    return false;
+    return authorized.includes(incomingStr);
   }
 
   /**
@@ -224,20 +227,40 @@ export class TelegramNotifier {
    */
   private async handleTextMessage(msg: any): Promise<void> {
     const rawChatId = msg.chat?.id;
-    if (!rawChatId || !this.isAuthorizedChat(rawChatId)) {
+    if (!rawChatId) return;
+
+    const rawText = (msg.text || '').trim();
+
+    // Check for /pair <code> or pair <code> command before authorization check
+    const withoutPrefix = rawText.replace(/@\w+/g, '').trim();
+    if (withoutPrefix.startsWith('/pair') || withoutPrefix.toLowerCase().startsWith('pair')) {
+      const parts = withoutPrefix.split(/\s+/);
+      const codeAttempt = parts[1];
+      await this.handlePairCommand(rawChatId, codeAttempt);
+      return;
+    }
+
+    if (!this.isAuthorizedChat(rawChatId)) {
       console.warn(`[Telegram Security] Blocked unauthorized message from chat ID: ${rawChatId}`);
       try {
-        await this.sendCustomMessage(
-          rawChatId,
-          '⛔ <b>[ACCESS DENIED]</b> Unauthorized chat ID. You do not have permission to control this bot.'
-        );
+        const pairingConfigured = Boolean(config.TELEGRAM_PAIRING_CODE && config.TELEGRAM_PAIRING_CODE.trim() !== '');
+        const isPaired = db.isTelegramPairingCompleted();
+        if (pairingConfigured && !isPaired) {
+          await this.sendCustomMessage(
+            rawChatId,
+            '🔒 <b>[PAIRING REQUIRED]</b> This bot is protected.\nTo authenticate your Telegram account as the authorized operator, send:\n<code>/pair &lt;pairing_code&gt;</code>'
+          );
+        } else {
+          await this.sendCustomMessage(
+            rawChatId,
+            '⛔ <b>[ACCESS DENIED]</b> Unauthorized chat ID. You do not have permission to control this bot.'
+          );
+        }
       } catch {}
       return;
     }
     const chatId = String(rawChatId);
     this.chatId = chatId;
-
-    const rawText = (msg.text || '').trim();
 
     // Strip @botname suffix (e.g. /menu@mybot -> /menu)
     const withoutBotSuffix = rawText.replace(/@\w+/g, '');
@@ -414,6 +437,73 @@ export class TelegramNotifier {
         this.getPersistentReplyKeyboard()
       );
     }
+  }
+
+  /**
+   * Handle secure operator pairing via /pair <code>
+   */
+  public async handlePairCommand(chatId: string | number, codeAttempt?: string): Promise<void> {
+    const targetChat = String(chatId).trim();
+
+    if (!config.TELEGRAM_PAIRING_CODE || config.TELEGRAM_PAIRING_CODE.trim() === '') {
+      await this.sendCustomMessage(
+        targetChat,
+        '⛔ <b>[PAIRING DISABLED]</b> TELEGRAM_PAIRING_CODE is not configured on the server. Please set it in your .env file or define TELEGRAM_CHAT_ID.'
+      );
+      return;
+    }
+
+    if (db.isTelegramPairingCompleted()) {
+      await this.sendCustomMessage(
+        targetChat,
+        '⚠️ <b>[ALREADY PAIRED]</b> This bot has already been paired to an authorized operator account. Remote re-pairing is blocked.\nTo re-pair, an administrator must reset pairing locally on the host server.'
+      );
+      return;
+    }
+
+    if (!codeAttempt || codeAttempt.trim() === '') {
+      await this.sendCustomMessage(
+        targetChat,
+        '⚠️ <b>[CODE REQUIRED]</b> Please provide your setup pairing code:\n<code>/pair &lt;your_code&gt;</code>'
+      );
+      return;
+    }
+
+    const trimmedAttempt = codeAttempt.trim();
+    const expectedCode = config.TELEGRAM_PAIRING_CODE.trim();
+
+    const bufA = Buffer.from(trimmedAttempt);
+    const bufB = Buffer.from(expectedCode);
+    const isValid = bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+
+    if (!isValid) {
+      console.warn(`[Telegram Security] Invalid pairing code attempt from chat ID: ${targetChat}`);
+      await this.sendCustomMessage(
+        targetChat,
+        '⛔ <b>[INVALID PAIRING CODE]</b> Verification failed. Check your TELEGRAM_PAIRING_CODE in .env and try again.'
+      );
+      return;
+    }
+
+    // Persist pairing in SQLite (survives restarts)
+    db.addAuthorizedTelegramChat(targetChat);
+    db.setTelegramPairingCompleted(true);
+    this.chatId = targetChat;
+
+    console.info(`[Telegram Security] Successfully paired operator chat ID: ${targetChat}`);
+    await this.sendCustomMessage(
+      targetChat,
+      '✅ <b>[PAIRING SUCCESSFUL]</b>\nThis Telegram account is now the verified authorized operator for this trading bot!\nAll trade alerts, position notices, and administrative commands are now enabled.\n\nSend /menu to open the control terminal.'
+    );
+  }
+
+  /**
+   * Safe local-only reset for Telegram pairing
+   */
+  public resetPairing(): void {
+    db.resetTelegramPairing();
+    this.chatId = config.TELEGRAM_CHAT_ID || '';
+    console.info('[Telegram Security] Operator pairing reset locally.');
   }
 
   /**
@@ -1991,6 +2081,9 @@ ${lockedSummary}
     replyMarkup?: any,
     defaultKeyboard?: any
   ): Promise<void> {
+    if (!this.enabled || !this.botToken) {
+      return;
+    }
     try {
       const url = `${this.apiRoot}/bot${this.botToken}/sendMessage`;
       const payload: any = {
