@@ -284,6 +284,10 @@ export class LiveExecutionEngine {
       minOutAmountRaw: '0',
       effectivePrice: targetIntent.estimatedPrice,
       quotedAt,
+      targetWallet: targetIntent.targetWallet,
+      targetSlot: targetIntent.slot,
+      venue: targetIntent.venue,
+      isFastPath: false,
       priorityFeeLamports: feeCalculation.estimatedPriorityFeeLamports,
       tipLamports: feeCalculation.senderTipLamports,
       routeFeeLamports: feeCalculation.baseFeeLamports,
@@ -532,6 +536,10 @@ export class LiveExecutionEngine {
       if (receipt.status === 'CONFIRMED') {
         order.status = 'CONFIRMED';
         order.landedAt = receipt.confirmedAt || process.hrtime.bigint();
+        order.followerSlot = receipt.slot;
+        if (order.followerSlot !== undefined && order.targetSlot !== undefined) {
+          order.slotGap = order.followerSlot - order.targetSlot;
+        }
         db.saveMirrorOrder(order);
 
         // 8. Settlement Reconciliation: Extract ACTUAL received amounts and fees

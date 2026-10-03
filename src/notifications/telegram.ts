@@ -13,6 +13,43 @@ import { mintDecimalsService } from '../services/mint-decimals.js';
 import { positionSyncService } from '../services/position-sync.js';
 import { traderNamingService } from '../services/trader-naming.js';
 
+function formatVenueName(venue?: string): string {
+  if (!venue) return 'Jupiter V2';
+  const v = venue.toUpperCase();
+  if (v.includes('PUMP')) return 'Pump.fun';
+  if (v.includes('RAYDIUM_CPMM') || v.includes('CPMM')) return 'Raydium CPMM';
+  if (v.includes('RAYDIUM_CLMM') || v.includes('CLMM')) return 'Raydium CLMM';
+  if (v.includes('RAYDIUM')) return 'Raydium AMM';
+  if (v.includes('JUPITER')) return 'Jupiter V2';
+  if (v.includes('MOONSHOT')) return 'Moonshot';
+  return venue;
+}
+
+function formatShortAddress(address: string, chars: number = 4): string {
+  if (!address || address.length <= chars * 2 + 2) return address || '';
+  return `${address.slice(0, chars)}...${address.slice(-chars)}`;
+}
+
+function formatGapBps(reason?: string): { isGap: boolean; gapPctText: string; maxPctText: string; cleanReason: string } {
+  if (!reason) {
+    return { isGap: false, gapPctText: '', maxPctText: '', cleanReason: '' };
+  }
+  const match = reason.match(/Entry price gap \(\+?([\d.]+) bps(?: vs baseline [^)]+)?\) exceeds tolerance \((\d+) bps\)/i);
+  if (match) {
+    const gapBps = parseFloat(match[1]);
+    const maxBps = parseFloat(match[2]);
+    const gapPct = gapBps / 100;
+    const maxPct = maxBps / 100;
+    return {
+      isGap: true,
+      gapPctText: `+${gapPct.toFixed(2)}% (${gapBps.toFixed(0)} bps)`,
+      maxPctText: `+${maxPct.toFixed(2)}% (${maxBps.toFixed(0)} bps)`,
+      cleanReason: 'Price moved too far ahead of target entry',
+    };
+  }
+  return { isGap: false, gapPctText: '', maxPctText: '', cleanReason: reason };
+}
+
 export class TelegramNotifier {
   private botToken: string;
   private chatId: string;
@@ -24,6 +61,7 @@ export class TelegramNotifier {
   private lastConnectionErrorTime: number = 0;
   private hasNotifiedStartup: boolean = false;
   private lastRejectionAlertByMint: Map<string, number> = new Map();
+  private lastTargetAlertByMint: Map<string, number> = new Map();
   private readonly REJECTION_COOLDOWN_MS: number = 15 * 60 * 1000; // 15 minutes cooldown per coin
 
   constructor() {
@@ -43,7 +81,7 @@ export class TelegramNotifier {
   }
 
   /**
-   * Register native commands menu with Telegram servers on bot startup
+   * Register essential native command menu with Telegram servers
    */
   public async registerTelegramCommands(): Promise<void> {
     if (!this.enabled) return;
@@ -55,29 +93,14 @@ export class TelegramNotifier {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           commands: [
-            { command: 'start', description: 'Launch Trading Terminal & Keypad' },
-            { command: 'menu', description: 'Main Control Menu' },
-            { command: 'balance', description: 'Real On-Chain Wallet Balance' },
-            { command: 'activate', description: 'Activate Bot (Start Live Trading)' },
-            { command: 'deactivate', description: 'Deactivate Bot (Pause Live Trading)' },
-            { command: 'positions', description: 'Open Positions & Copied Trader Info' },
-            { command: 'close_all', description: 'Emergency Close All Open Positions' },
-            { command: 'targets', description: 'View & Manage Watched Target Traders' },
-            { command: 'traders', description: 'View Watched Traders & Nicknames' },
-            { command: 'label', description: 'Rename Trader: /label <number> <nickname>' },
-            { command: 'score', description: 'Analyze Trader Win-Rate & PnL: /score <wallet>' },
-            { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
-            { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
-            { command: 'zeroloss', description: 'Breakeven Floor & Dynamic Trailing Stop' },
-            { command: 'trailing', description: 'Dynamic Trailing Stop-Loss Settings' },
-            { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
-            { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
-            { command: 'status', description: 'Engine Health, Telemetry & Feed' },
-            { command: 'pnl', description: 'Portfolio Profit/Loss Performance' },
-            { command: 'restore', description: 'Restore Bottom Interactive Keypad' },
-            { command: 'keypad', description: 'Restore Bottom Interactive Keypad' },
-            { command: 'help', description: 'Terminal Usage Guide & Commands' },
-            { command: 'pair', description: 'Pair operator account: /pair <setup_code>' },
+            { command: 'menu', description: 'Main Dashboard & Controls' },
+            { command: 'positions', description: 'Open Positions & Actions' },
+            { command: 'status', description: 'Engine Health, Latency & Feed' },
+            { command: 'balance', description: 'Wallet & Spendable SOL' },
+            { command: 'arm', description: 'Arm Live Copy Trading' },
+            { command: 'pause', description: 'Pause Live Engine' },
+            { command: 'help', description: 'Commands & Terminal Shortcuts' },
+            { command: 'pair', description: 'Pair Operator Chat ID' },
           ],
         }),
         signal: AbortSignal.timeout(8000),
@@ -308,7 +331,7 @@ export class TelegramNotifier {
     } else if (clean === 'positions' || clean.includes('open positions') || clean === 'active') {
       await this.sendOpenPositionsReport(chatId);
     } else if (clean === 'close_all' || clean === 'closeall' || clean === 'exit all' || clean.includes('close all')) {
-      await this.executeCloseAllFromChat(chatId);
+      await this.promptCloseAllConfirmation(chatId);
     } else if (clean === 'pnl' || clean.includes('pnl summary') || clean === 'profit' || clean === 'loss') {
       await this.sendPnlSummaryReport(chatId);
     } else if (clean === 'status' || clean.includes('bot status') || clean === 'health' || clean === 'stats') {
@@ -429,7 +452,11 @@ export class TelegramNotifier {
         return;
       }
 
-      await this.executeManualSellFromChat(chatId, mint, fraction);
+      if (fraction >= 1.0 && config.EXECUTION_MODE === 'LIVE') {
+        await this.promptSell100Confirmation(chatId, mint);
+      } else {
+        await this.executeManualSellFromChat(chatId, mint, fraction);
+      }
     } else {
       await this.sendCustomMessage(
         chatId,
@@ -545,12 +572,17 @@ export class TelegramNotifier {
     } else if (data === 'confirm_deactivate' || data === 'confirm_disarm') {
       await this.handleDisarmCommand(chatId);
     } else if (data === 'action_close_all') {
+      await this.promptCloseAllConfirmation(chatId);
+    } else if (data === 'confirm_close_all') {
       await this.executeCloseAllFromChat(chatId);
+    } else if (data === 'cancel_action') {
+      await this.sendCustomMessage(chatId, '❌ Action cancelled.');
+      await this.sendMainMenu(chatId);
     } else if (data === 'menu_positions') {
       await this.sendOpenPositionsReport(chatId);
     } else if (data === 'menu_pnl') {
       await this.sendPnlSummaryReport(chatId);
-    } else if (data === 'menu_status' || data === 'menu_balance') {
+    } else if (data === 'menu_status') {
       await this.sendStatusReport(chatId);
     } else if (data === 'menu_wallets') {
       await this.sendWalletsReport(chatId);
@@ -558,18 +590,18 @@ export class TelegramNotifier {
       await this.sendTpSlReport(chatId);
     } else if (data === 'toggle_tp') {
       (config as any).AUTO_TP_ENABLED = !config.AUTO_TP_ENABLED;
-      const status = config.AUTO_TP_ENABLED ? '🟢 <b>TURNED ON (+100% Moonbag)</b>' : '🔴 <b>TURNED OFF</b>';
+      const status = config.AUTO_TP_ENABLED ? '🟢 <b>TURNED ON (+100% Take Profit)</b>' : '🔴 <b>TURNED OFF</b>';
       await this.sendCustomMessage(chatId, `🎯 Auto Take-Profit is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'toggle_sl') {
       (config as any).AUTO_SL_ENABLED = !config.AUTO_SL_ENABLED;
-      const status = config.AUTO_SL_ENABLED ? `🟢 <b>TURNED ON (-${config.AUTO_SL_LOSS_PCT}% Emergency Cut)</b>` : '🔴 <b>TURNED OFF</b>';
-      await this.sendCustomMessage(chatId, `🛡️ Anti-Rug Stop-Loss is now ${status}.`);
+      const status = config.AUTO_SL_ENABLED ? `🟢 <b>TURNED ON (-${config.AUTO_SL_LOSS_PCT}% Stop Loss)</b>` : '🔴 <b>TURNED OFF</b>';
+      await this.sendCustomMessage(chatId, `🛡️ Stop-Loss is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'toggle_trailing') {
       (config as any).TRAILING_SL_ENABLED = !config.TRAILING_SL_ENABLED;
       const status = config.TRAILING_SL_ENABLED
-        ? '🛡️ <b>TURNED ON (Breakeven Floor & Trailing Ratchet Active)</b>'
+        ? '🛡️ <b>TURNED ON (Breakeven Floor & Trailing Active)</b>'
         : '🔴 <b>TURNED OFF</b>';
       await this.sendCustomMessage(chatId, `Breakeven Floor & Trailing SL is now ${status}.`);
       await this.sendTpSlReport(chatId);
@@ -595,7 +627,14 @@ export class TelegramNotifier {
       const posIdOrMint = parts.slice(2).join('_');
       const fraction = pct / 100;
 
-      await this.executeManualSellFromChat(chatId, posIdOrMint, fraction);
+      if (pct === 100 && config.EXECUTION_MODE === 'LIVE') {
+        await this.promptSell100Confirmation(chatId, posIdOrMint);
+      } else {
+        await this.executeManualSellFromChat(chatId, posIdOrMint, fraction);
+      }
+    } else if (data.startsWith('confirm_sell_100_')) {
+      const posIdOrMint = data.replace('confirm_sell_100_', '').trim();
+      await this.executeManualSellFromChat(chatId, posIdOrMint, 1.0);
     } else if (data.startsWith('toggle_wallet_')) {
       const address = data.replace('toggle_wallet_', '').trim();
       await this.handleToggleTargetWallet(chatId, address);
@@ -619,29 +658,74 @@ export class TelegramNotifier {
   }
 
   /**
-   * Persistent keypad customized for LIVE or PAPER mode
+   * Protected confirmation prompt before emergency Close All
    */
-  private getPersistentReplyKeyboard(): any {
-    const isLive = config.EXECUTION_MODE === 'LIVE';
-    if (isLive) {
-      return {
-        keyboard: [
-          [{ text: '📊 POSITIONS' }, { text: '🚨 CLOSE ALL' }],
-          [{ text: '💼 WALLET BALANCE' }, { text: '📈 PNL SUMMARY' }],
-          [{ text: '⚙️ BOT STATUS' }, { text: '🎯 AUTO TP/SL' }],
-          [{ text: '👥 TARGET TRADERS' }, { text: '🏠 MAIN MENU' }],
-        ],
-        resize_keyboard: true,
-        is_persistent: true,
-      };
+  public async promptCloseAllConfirmation(chatId: string | number): Promise<void> {
+    const openPositions = db.getOpenPositions().filter((p) => p.state === 'OPEN' && BigInt(p.qtyRaw || '0') > 0n);
+    const count = openPositions.length;
+    if (count === 0) {
+      await this.sendCustomMessage(chatId, 'ℹ️ No open positions to close.');
+      return;
     }
 
+    const text = `
+🚨 <b>CONFIRM EMERGENCY CLOSE ALL</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Are you sure you want to market sell and liquidate all <b>${count}</b> open position(s)?
+
+⚠️ <i>This will execute immediate market orders for all active holdings.</i>
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: `🚨 YES, CLOSE ALL (${count})`, callback_data: 'confirm_close_all' },
+          { text: '❌ CANCEL', callback_data: 'menu_positions' },
+        ],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
+  }
+
+  /**
+   * Protected confirmation prompt before 100% position liquidation in LIVE mode
+   */
+  public async promptSell100Confirmation(chatId: string | number, posIdOrMint: string): Promise<void> {
+    const pos = db.getPositionById(posIdOrMint) || db.getOpenPositionByMint(posIdOrMint);
+    const mint = pos?.tokenMint || posIdOrMint;
+    const meta = await tokenMetadataService.getTokenMetadata(mint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${mint.slice(0, 6).toUpperCase()}`;
+
+    const text = `
+⚠️ <b>CONFIRM 100% SELL</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Close 100% of <b>${ticker}</b> at market price?
+
+Signer: <code>${formatShortAddress(executionWalletManager.getPublicKeyBase58() || '', 4)}</code>
+    `.trim();
+
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: `🚨 YES, SELL 100%`, callback_data: `confirm_sell_100_${posIdOrMint}` },
+          { text: '❌ CANCEL', callback_data: 'menu_positions' },
+        ],
+      ],
+    };
+
+    await this.sendCustomMessage(chatId, text, inlineKeyboard);
+  }
+
+  /**
+   * Simplified 6-button primary keyboard
+   */
+  private getPersistentReplyKeyboard(): any {
     return {
       keyboard: [
-        [{ text: '📊 POSITIONS' }, { text: '📈 PNL SUMMARY' }],
-        [{ text: '👥 TARGET TRADERS' }, { text: '🧠 TRADER SCORE' }],
-        [{ text: '🚨 CLOSE ALL' }, { text: '🧪 SIMULATE BUY' }],
-        [{ text: '🔄 REFRESH' }, { text: '🏠 MAIN MENU' }],
+        [{ text: '📊 POSITIONS' }, { text: '🎯 TARGETS' }],
+        [{ text: '💼 WALLET' }, { text: '📈 PNL' }],
+        [{ text: '🛡️ RISK' }, { text: '⚙️ STATUS' }],
       ],
       resize_keyboard: true,
       is_persistent: true,
@@ -847,13 +931,13 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const closedTrades = accounting.totalTradesClosed;
       const winRate = accounting.winRatePct;
 
-      const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
-      const slStatus = config.AUTO_SL_ENABLED ? `🟢 ON (-${config.AUTO_SL_LOSS_PCT}% Anti-Rug)` : '🔴 OFF';
+      const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100%)' : '🔴 OFF';
+      const slStatus = config.AUTO_SL_ENABLED ? `🟢 ON (-${config.AUTO_SL_LOSS_PCT}%)` : '🔴 OFF';
       const cooldownStatus = config.SINGLE_ENTRY_PER_TOKEN_ENABLED
-        ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Fast-Finger Shield)`
+        ? `🟢 ON (${(config.TOKEN_BUY_COOLDOWN_SEC / 60).toFixed(0)}m Cooldown)`
         : '🔴 OFF';
       const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
-        ? '🔒 ON (Strict 1-Entry per Coin)'
+        ? '🔒 ON (1 Entry per Token)'
         : '🔴 OFF';
 
       let walletOverview = '';
@@ -950,108 +1034,90 @@ ${walletOverview}
     const isLive = config.EXECUTION_MODE === 'LIVE';
     const isArmed = isLive && liveEngine.getStatus().isArmed;
     const activeWallets = db.getWatchedWallets().filter((w) => w.enabled);
-    let targetDisplay = 'None (Paste address to add)';
-    if (activeWallets.length === 1) {
-      const w = activeWallets[0];
-      const short = `${w.wallet.substring(0, 4)}...${w.wallet.substring(w.wallet.length - 4)}`;
-      targetDisplay = w.label ? `${w.label} (<code>${short}</code>)` : `<code>${short}</code>`;
-    } else if (activeWallets.length > 1) {
-      targetDisplay = `${activeWallets.length} active traders`;
-    } else if (config.WATCHED_WALLETS.length > 0) {
-      const w = config.WATCHED_WALLETS[0];
-      targetDisplay = `<code>${w.substring(0, 4)}...${w.substring(w.length - 4)}</code>`;
-    }
+    const targetsCount = activeWallets.length > 0 ? activeWallets.length : config.WATCHED_WALLETS.length;
+    const openPositionsCount = db.getOpenPositions().filter((p) => p.state === 'OPEN' && BigInt(p.qtyRaw || '0') > 0n).length;
 
-    let balanceBlock = '';
+    let balanceDisplay = '0.0000 SOL';
+    let spendableDisplay = '0.0000 SOL';
+    let balanceUsdDisplay = '';
+
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+
     if (isLive) {
       const balanceState = await executionWalletManager.getFreshBalance(20000);
-      const pub = executionWalletManager.getPublicKeyBase58();
-      const shortPub = pub ? `${pub.substring(0, 4)}...${pub.substring(pub.length - 4)}` : 'None';
-      const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
-      const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
-
       if (balanceState.isAvailable) {
-        const liveBal = balanceState.balanceSol;
-        const liveSpendable = balanceState.spendableSol;
-        const liveBalUsd = liveBal * solPriceUsd;
-        const liveSpendableUsd = liveSpendable * solPriceUsd;
-        const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-        const realizedSol = liveBal - initialCapital;
-        const realizedUsd = realizedSol * solPriceUsd;
-
-        balanceBlock = `
-💼 <b>CAPITAL & WALLET</b>
-├ <b>Signer:</b> <code>${shortPub}</code>
-├ <b>Balance:</b> 💎 <b>${balanceState.displayBalance}</b> (<code>$${liveBalUsd.toFixed(2)} USD</code>)
-├ <b>Spendable:</b> ⚡ <b>${liveSpendable.toFixed(4)} SOL</b> (<code>$${liveSpendableUsd.toFixed(2)} USD</code>)
-├ <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
-└ <b>Buy Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (<code>$${sizingUsd.toFixed(2)} USD</code>)
-        `.trim();
+        balanceDisplay = balanceState.displayBalance;
+        spendableDisplay = `${balanceState.spendableSol.toFixed(4)} SOL`;
+        balanceUsdDisplay = ` (<code>$${(balanceState.balanceSol * solPriceUsd).toFixed(2)} USD</code>)`;
       } else {
-        balanceBlock = `
-💼 <b>CAPITAL & WALLET</b>
-├ <b>Signer:</b> <code>${shortPub}</code>
-├ <b>Balance:</b> ⚠️ <i>Balance unavailable / RPC syncing</i>
-├ <b>Spendable:</b> ⚠️ <i>Unavailable</i>
-└ <b>Buy Sizing:</b> <b>${config.FIXED_BUY_SOL} SOL</b> (<code>$${sizingUsd.toFixed(2)} USD</code>)
-        `.trim();
+        balanceDisplay = '⚠️ Balance unavailable / RPC syncing';
+        spendableDisplay = '⚠️ Unavailable';
       }
     } else {
-      balanceBlock = `
-💼 <b>PORTFOLIO (PAPER)</b>
-├ <b>Balance:</b> <b>${telemetry.currentPaperBalanceSol.toFixed(4)} SOL</b> (<code>$${telemetry.totalPaperBalanceUsd.toFixed(2)} USD</code>)
-      `.trim();
+      const paperBal = telemetry.currentPaperBalanceSol ?? 10.0;
+      balanceDisplay = `${paperBal.toFixed(4)} SOL (Paper)`;
+      spendableDisplay = `${Math.max(0, paperBal - config.MIN_SOL_RESERVE_SOL).toFixed(4)} SOL`;
     }
 
-    const tpStatus = config.AUTO_TP_ENABLED ? '🟢 +100% (Sell 50%)' : '🔴 OFF';
-    const slStatus = config.AUTO_SL_ENABLED ? `🟢 -${config.AUTO_SL_LOSS_PCT}% (Cut 100%)` : '🔴 OFF';
-    const neverRebuyStatus = config.NEVER_REBUY_SAME_TOKEN
-      ? '🔒 Lifetime Lock (1x)'
-      : '🔴 OFF';
+    const accounting = db.getAccountingSummary();
+    const realizedSol = isLive ? (accounting.realizedPnlSol || 0) : (telemetry.totalRealizedPnlSol || 0);
+    const realizedPnlSign = realizedSol >= 0 ? '+' : '';
+    const pnlDisplay = `${realizedPnlSign}${realizedSol.toFixed(4)} SOL`;
 
-    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+    // Latency: no samples -> "Awaiting live samples"
+    const latencyDisplay = telemetry.latencyP50Ms && telemetry.latencyP50Ms > 0
+      ? `p50 ${telemetry.latencyP50Ms.toFixed(0)}ms`
+      : 'Awaiting live samples';
+
+    const feedName = config.HELIUS_API_KEY ? 'Helius Enhanced WSS' : 'Solana WSS';
+    const fastPathState = config.FAST_COPY_MODE ? 'ON' : 'OFF';
+
+    const statusBadge = isLive
+      ? (isArmed ? '🟢 <b>LIVE • ARMED</b>' : '🔴 <b>LIVE • PAUSED</b>')
+      : '🟡 <b>PAPER • RUNNING</b>';
+
     const text = `
-⚡ <b>SOLANA COPY-TRADING TERMINAL</b> ⚡
-${divider}
+⚡ <b>SOLANA COPY BOT</b>
 
-<b>System Status:</b> ${isLive ? (isArmed ? '🟢 <b>LIVE & ACTIVATED</b>' : '🔴 <b>LIVE (PAUSED)</b>') : '🟡 <b>PAPER SIMULATION</b>'}
+${statusBadge}
 
-${balanceBlock}
+💼 <b>Wallet</b>
+${balanceDisplay}${balanceUsdDisplay}
+Spendable: ${spendableDisplay}
+Trade Size: ${config.FIXED_BUY_SOL.toFixed(4)} SOL
 
-🎯 <b>TARGET TRADER</b>
-├ <b>Monitored:</b> <b>${targetDisplay}</b>
-└ <b>Speed:</b> ⚡ <b>${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(1)}ms` : '2.3ms'}</b> (<i>Helius LaserStream</i>)
+📊 <b>Trading</b>
+Targets: ${targetsCount}
+Positions: ${openPositionsCount}
+Realized PnL: ${pnlDisplay}
 
-🛡️ <b>SAFETY & RISK GUARDS</b>
-├ <b>Take-Profit:</b> ${tpStatus}
-├ <b>Stop-Loss:</b> ${slStatus}
-├ <b>Re-Buy Guard:</b> ${neverRebuyStatus}
-└ <b>Preflight Simulation:</b> 🛡️ <b>0 Loss Protection</b>
-${divider}
-<i>👇 Choose an action from the keypad below:</i>
+⚡ <b>Execution</b>
+Feed: ${feedName}
+Fast Path: ${fastPathState}
+Latency: ${latencyDisplay}
+
+🛡️ <b>Risk Guards:</b> <b>ACTIVE</b>
     `.trim();
 
     const inlineKeyboard = {
       inline_keyboard: [
         [
-          { text: '📊 OPEN POSITIONS', callback_data: 'menu_positions' },
-          { text: '🚨 CLOSE ALL (100%)', callback_data: 'action_close_all' },
+          { text: '📊 Positions', callback_data: 'menu_positions' },
+          { text: '🎯 Targets', callback_data: 'menu_wallets' },
         ],
         [
-          { text: isLive ? '💼 WALLET BALANCE' : '📈 PNL', callback_data: isLive ? 'menu_balance' : 'menu_pnl' },
-          { text: '⚙️ BOT STATUS', callback_data: 'menu_status' },
+          { text: '💼 Wallet', callback_data: 'menu_balance' },
+          { text: '📈 PnL', callback_data: 'menu_pnl' },
         ],
         [
-          { text: isArmed ? '🔴 PAUSE BOT' : '🟢 ACTIVATE', callback_data: isArmed ? 'action_deactivate' : 'action_activate' },
-          { text: '🎯 AUTO TP/SL', callback_data: 'menu_tpsl' },
+          { text: '🛡️ Risk', callback_data: 'menu_risk' },
+          { text: '⚙️ Status', callback_data: 'menu_status' },
         ],
         [
-          { text: '👥 TARGETS', callback_data: 'menu_wallets' },
-          { text: '🛡️ RISK LIMITS', callback_data: 'menu_risk' },
-        ],
-        [
-          { text: '🧠 TRADER SCORE', callback_data: 'prompt_trader_score' },
-          { text: '🔄 REFRESH MENU', callback_data: 'menu_main' },
+          {
+            text: isArmed ? '🔴 Pause Bot' : '🟢 Arm Bot',
+            callback_data: isArmed ? 'action_deactivate' : 'action_activate',
+          },
         ],
       ],
     };
@@ -1059,12 +1125,13 @@ ${divider}
     if (includeKeypad) {
       await this.sendCustomMessage(
         chatId,
-        '⌨️ <i>Interactive quick-access terminal keypad active.</i>',
+        text,
+        inlineKeyboard,
         this.getPersistentReplyKeyboard()
       );
+    } else {
+      await this.sendCustomMessage(chatId, text, inlineKeyboard);
     }
-
-    await this.sendCustomMessage(chatId, text, inlineKeyboard);
   }
 
   /**
@@ -1456,18 +1523,25 @@ ${recentTradesText}
     const realizedSol = telemetry.totalRealizedPnlSol || 0;
     const realizedUsd = realizedSol * solPrice;
 
+    const latencyP50Text = telemetry.latencyP50Ms && telemetry.latencyP50Ms > 0
+      ? `${telemetry.latencyP50Ms.toFixed(1)}ms`
+      : 'Awaiting live samples';
+    const latencyP95Text = telemetry.latencyP95Ms && telemetry.latencyP95Ms > 0
+      ? `${telemetry.latencyP95Ms.toFixed(1)}ms`
+      : 'Awaiting live samples';
+
     const text = `
 ⚡ <b>SYSTEM ENGINE HEALTH & STATUS</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🟢 <b>System Status:</b> <b>RUNNING & OPERATIONAL</b>
 🎯 <b>Execution Mode:</b> <code>${isLive ? (isArmed ? '🟢 LIVE (ARMED & READY)' : '🔴 LIVE (PAUSED)') : 'PAPER'}</code>
-⏱️ <b>Server Uptime:</b> <b>${formatUptime(telemetry.uptimeSeconds)}</b> (<i>24/7 Cloud VPS</i>)${walletLine}
+⏱️ <b>Server Uptime:</b> <b>${formatUptime(telemetry.uptimeSeconds)}</b>${walletLine}
 
-📡 <b>HIGH-SPEED HOT PATH</b>
-├ <b>Feed Ingestion:</b> ⚡ <b>Helius LaserStream (Sub-10ms)</b>
-├ <b>Median Latency (p50):</b> 🟢 <b>${telemetry.latencyP50Ms ? `${telemetry.latencyP50Ms.toFixed(2)}ms` : '2.33ms'}</b>
-├ <b>95th Percentile (p95):</b> ⚡ <b>${telemetry.latencyP95Ms ? `${telemetry.latencyP95Ms.toFixed(2)}ms` : '6.28ms'}</b>
+📡 <b>EXECUTION PATH</b>
+├ <b>Feed Ingestion:</b> ⚡ <b>${config.HELIUS_API_KEY ? 'Helius Enhanced WSS' : 'Solana WSS'}</b>
+├ <b>Median Latency (p50):</b> 🟢 <b>${latencyP50Text}</b>
+├ <b>95th Percentile (p95):</b> ⚡ <b>${latencyP95Text}</b>
 ├ <b>Circuit Breaker:</b> ${isTripped ? '🚨 <b>TRIPPED</b>' : '🛡️ <b>ARMED (Normal)</b>'}
 └ <b>Target Traders:</b> 🎯 <b>${db.getWatchedWallets().length} Registered</b>
 
@@ -2152,6 +2226,9 @@ ${lockedSummary}
   /**
    * Real-time notification whenever target trader trades
    */
+  /**
+   * Real-time notification whenever target trader trades
+   */
   public async notifyTargetDetected(
     intent: SwapIntent,
     actionTaken: 'COPIED' | 'DISARMED_SKIP' | 'RISK_REJECTED' | 'EXECUTION_FAILED',
@@ -2159,45 +2236,15 @@ ${lockedSummary}
   ): Promise<void> {
     if (!this.enabled || !this.chatId) return;
 
-    // 15-Minute Rejection Cooldown: Prevent Telegram spam when trader repeatedly DCAs an already-held or rejected coin
-    if (actionTaken === 'RISK_REJECTED') {
-      const now = Date.now();
-      const lastAlert = this.lastRejectionAlertByMint.get(intent.tokenMint);
-      if (lastAlert && now - lastAlert < this.REJECTION_COOLDOWN_MS) {
-        // Suppress repeated rejection notification for 15 minutes
-        return;
-      }
-      this.lastRejectionAlertByMint.set(intent.tokenMint, now);
-    }
+    const now = Date.now();
+    const lastAlert = this.lastTargetAlertByMint.get(intent.tokenMint);
+    const isRepeated = Boolean(lastAlert && now - lastAlert < this.REJECTION_COOLDOWN_MS);
 
-    const sideEmoji = intent.side === 'BUY' ? '🟢' : '🔴';
-    let statusText = '';
-    let buttons: any = undefined;
-
-    if (actionTaken === 'COPIED') {
-      statusText = '✅ <b>Follower Order Submitted</b>';
-    } else if (actionTaken === 'DISARMED_SKIP') {
-      statusText = `⏸️ <b>Trade Skipped: Bot is DEACTIVATED</b>\n<i>(${reason || 'Safety lock active'})</i>`;
-      buttons = {
-        inline_keyboard: [
-          [{ text: '🟢 ACTIVATE BOT NOW', callback_data: 'action_activate' }],
-          [{ text: 'WALLET BALANCE', callback_data: 'menu_balance' }],
-        ],
-      };
-    } else if (actionTaken === 'EXECUTION_FAILED') {
-      statusText = `⚠️ <b>Execution Failed on Solana:</b> ${reason || 'Routing error'}\n<i>(Follower order could not be executed)</i>`;
-    } else if (reason && reason.includes('already held pre-existing tokens')) {
-      statusText = `🚫 <b>Target Re-Buy Rejected:</b> Trader already held this coin before this swap. Only fresh initial entries are copied!\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
-    } else if (reason && reason.includes('Circuit breaker is TRIPPED')) {
-      statusText = `🛡️ <b>Skipped by Risk Engine:</b> Circuit breaker is TRIPPED due to consecutive errors.\n<i>(Tap below to instantly reset and resume trading)</i>`;
-      buttons = {
-        inline_keyboard: [
-          [{ text: '🟢 RESET CIRCUIT BREAKER NOW', callback_data: 'reset_breaker' }],
-        ],
-      };
-    } else {
-      statusText = `🛡️ <b>Skipped by Risk Engine:</b> ${reason || 'Circuit breaker / limits'}\n<i>⏱️ Cooldown Active: Repeated rejections for this coin silenced for 15m.</i>`;
+    if (actionTaken === 'RISK_REJECTED' && isRepeated) {
+      // Suppress repeated target rejection cards within 15 minutes to reduce chat noise
+      return;
     }
+    this.lastTargetAlertByMint.set(intent.tokenMint, now);
 
     const meta = await tokenMetadataService.getTokenMetadata(intent.tokenMint);
     const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${intent.tokenMint.slice(0, 6).toUpperCase()}`;
@@ -2206,31 +2253,93 @@ ${lockedSummary}
     const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
     const estPriceUsd = intent.estimatedPrice * solPriceUsd;
     const priceDisplay = estPriceUsd < 0.0001
-      ? `$${estPriceUsd.toFixed(6)} USD (${intent.estimatedPrice.toFixed(8)} SOL)`
-      : `$${estPriceUsd.toFixed(4)} USD (${intent.estimatedPrice.toFixed(6)} SOL)`;
+      ? `$${estPriceUsd.toFixed(6)}`
+      : `$${estPriceUsd.toFixed(4)}`;
 
-    const shortTrader = `${intent.targetWallet.slice(0, 4)}...${intent.targetWallet.slice(-4)}`;
-    const msg = `
-${sideEmoji} <b>[TARGET TRADER ACTIVITY]</b>
+    const traderInfo = traderNamingService.getTraderInfo(intent.targetWallet);
+    const venueName = formatVenueName(intent.venue);
+    const isFastPath = intent.venue === 'PUMPFUN' && config.FAST_COPY_MODE;
+    const fastPathText = isFastPath ? 'YES ⚡' : 'NO';
 
-<b>Trader:</b> <code>${shortTrader}</code>
-<b>Action:</b> ${intent.side} on ${intent.venue}
-<b>Coin:</b> <b>${ticker}</b>${tokenName}
-<b>Mint:</b> <code>${intent.tokenMint}</code>
-<b>Est. Price:</b> ${priceDisplay}
-<b>Target Tx:</b> <a href="https://solscan.io/tx/${intent.targetSignature}">View on Solscan</a>
+    let outcomeBlock = '';
+    const buttons: any = {
+      inline_keyboard: [
+        [
+          { text: '🎯 Target Tx', url: `https://solscan.io/tx/${intent.targetSignature}` },
+          { text: '🪙 Token', url: `https://dexscreener.com/solana/${intent.tokenMint}` },
+        ],
+      ],
+    };
 
-${statusText}
+    if (actionTaken === 'COPIED') {
+      outcomeBlock = `
+✅ <b>FOLLOWER ORDER SUBMITTED</b>
+<b>Fast Path:</b> ${fastPathText}
+      `.trim();
+    } else if (actionTaken === 'DISARMED_SKIP') {
+      outcomeBlock = `
+⏸️ <b>FOLLOWER SKIPPED</b>
+<b>Reason:</b> Bot is PAUSED / DISARMED.
+<b>Fast Path:</b> ${fastPathText}
+      `.trim();
+      buttons.inline_keyboard.unshift([
+        { text: '🟢 Arm Bot Now', callback_data: 'action_activate' },
+        { text: '💼 Wallet', callback_data: 'menu_balance' },
+      ]);
+    } else {
+      const gapInfo = formatGapBps(reason);
+      if (gapInfo.isGap) {
+        outcomeBlock = `
+❌ <b>FOLLOWER SKIPPED</b>
+<b>Price moved:</b> ${gapInfo.gapPctText}
+<b>Max allowed:</b> ${gapInfo.maxPctText}
+<b>Fast Path:</b> ${fastPathText}
+<b>Reason:</b> ${gapInfo.cleanReason}
+        `.trim();
+      } else if (reason && reason.includes('already held pre-existing tokens')) {
+        outcomeBlock = `
+❌ <b>FOLLOWER SKIPPED</b>
+<b>Reason:</b> Target trader already held tokens (re-buy / DCA). Only fresh initial entries are copied!
+<b>Fast Path:</b> ${fastPathText}
+        `.trim();
+      } else if (reason && reason.includes('Circuit breaker is TRIPPED')) {
+        outcomeBlock = `
+🚨 <b>FOLLOWER SKIPPED</b>
+<b>Reason:</b> Circuit breaker TRIPPED due to consecutive errors.
+<b>Fast Path:</b> ${fastPathText}
+        `.trim();
+        buttons.inline_keyboard.unshift([
+          { text: '🟢 Reset Circuit Breaker', callback_data: 'reset_breaker' },
+        ]);
+      } else {
+        outcomeBlock = `
+🛡️ <b>FOLLOWER SKIPPED</b>
+<b>Reason:</b> ${reason || 'Risk limits exceeded'}
+<b>Fast Path:</b> ${fastPathText}
+        `.trim();
+      }
+    }
+
+    const text = `
+🎯 <b>TARGET ${intent.side} DETECTED</b>
+
+<b>Trader:</b> <b>${traderInfo.displayName}</b>
+<b>Token:</b> <b>${ticker}</b>${tokenName}
+<b>Venue:</b> ${venueName}
+<b>Target Entry:</b> <code>${priceDisplay}</code>
+
+${outcomeBlock}
     `.trim();
 
-    this.sendAlert(msg, buttons);
+    this.sendAlert(text, buttons);
   }
 
   /**
    * Real-time notification when a fast-path order is broadcast and awaiting on-chain confirmation
    */
   public async notifyTradeSubmitted(order: MirrorOrder, targetIntent?: SwapIntent): Promise<void> {
-    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const isFastPath = order.isFastPath ?? (order.venue === 'PUMPFUN' && config.FAST_COPY_MODE);
+    const venueName = formatVenueName(order.venue || targetIntent?.venue || 'Pump.fun');
     const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
     const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
     const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
@@ -2241,125 +2350,161 @@ ${statusText}
 
     const sig = order.orderSignature || '';
     const sigText = sig
-      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      ? `<a href="https://solscan.io/tx/${sig}">${formatShortAddress(sig, 4)}</a>`
       : 'Simulated';
 
     const traderWallet = (order as any).targetWallet || targetIntent?.targetWallet || traderNamingService.findTargetWalletByMint(order.tokenMint);
     const traderInfo = traderNamingService.getTraderInfo(traderWallet);
+    const shortMint = formatShortAddress(order.tokenMint, 6);
 
     const text = `
-⚡ <b>[TRADE SUBMITTED] ${modeBadge} BUY SUBMITTED</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ <b>BUY SUBMITTED</b>
 
-🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
-📌 <b>Mint:</b> <code>${order.tokenMint}</code>
-👤 <b>Target Trader:</b> <b>${traderInfo.displayName}</b> (<a href="${traderInfo.solscanUrl}">Solscan</a> | <a href="${traderInfo.gmgnUrl}">GMGN</a>)
-📦 <b>Trade Size:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Size:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)
+<b>Target:</b> <b>${traderInfo.displayName}</b>
+<b>Venue:</b> <b>${venueName}</b>
+<b>Fast Path:</b> <b>${isFastPath ? 'YES ⚡' : 'NO'}</b>
+<b>Mint:</b> <code>${shortMint}</code>
+<b>Tx:</b> ${sigText}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 <b>Explorer:</b> ${sigText}
 ⏳ <i>Broadcasting to validators. Awaiting on-chain confirmation...</i>
     `.trim();
 
-    this.sendAlert(text);
+    const buttons = {
+      inline_keyboard: [
+        [
+          { text: '🎯 Target Tx', url: `https://solscan.io/tx/${order.targetSignature}` },
+          { text: '🪙 Token', url: `https://dexscreener.com/solana/${order.tokenMint}` },
+        ],
+      ],
+    };
+
+    this.sendAlert(text, buttons);
   }
 
   /**
    * Real-time notification when an order fails on-chain
    */
   public async notifyTradeFailed(order: MirrorOrder, reason: string): Promise<void> {
-    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const isFastPath = order.isFastPath ?? (order.venue === 'PUMPFUN' && config.FAST_COPY_MODE);
     const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
     const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
     const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+    const shortMint = formatShortAddress(order.tokenMint, 6);
 
     const sig = order.orderSignature || '';
     const sigText = sig
-      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      ? `<a href="https://solscan.io/tx/${sig}">${formatShortAddress(sig, 4)}</a>`
       : 'Simulated';
 
     const text = `
-❌ <b>[TRADE FAILED] ${modeBadge} BUY FAILED</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ <b>BUY FAILED</b>
 
-🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
-📌 <b>Mint:</b> <code>${order.tokenMint}</code>
-⚠️ <b>Reason:</b> <code>${reason}</code>
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Mint:</b> <code>${shortMint}</code>
+<b>Fast Path:</b> <b>${isFastPath ? 'YES ⚡' : 'NO'}</b>
+<b>Reason:</b> <code>${reason}</code>
+<b>Tx:</b> ${sigText}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 <b>Explorer:</b> ${sigText}
 🛡️ <i>No tokens acquired. Capital reservation and lock released safely.</i>
     `.trim();
 
-    this.sendAlert(text);
+    const buttons = {
+      inline_keyboard: [
+        [
+          { text: '🎯 Target Tx', url: `https://solscan.io/tx/${order.targetSignature}` },
+          { text: '🪙 Token', url: `https://dexscreener.com/solana/${order.tokenMint}` },
+        ],
+      ],
+    };
+
+    this.sendAlert(text, buttons);
   }
 
   /**
    * Real-time notification when an order expires on-chain without landing
    */
   public async notifyTradeExpired(order: MirrorOrder, reason?: string): Promise<void> {
-    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const isFastPath = order.isFastPath ?? (order.venue === 'PUMPFUN' && config.FAST_COPY_MODE);
     const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
     const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
     const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+    const shortMint = formatShortAddress(order.tokenMint, 6);
 
     const sig = order.orderSignature || '';
     const sigText = sig
-      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      ? `<a href="https://solscan.io/tx/${sig}">${formatShortAddress(sig, 4)}</a>`
       : 'Simulated';
 
     const text = `
-⚠️ <b>[TRADE EXPIRED] ${modeBadge} BUY EXPIRED</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <b>BUY EXPIRED</b>
 
-🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
-📌 <b>Mint:</b> <code>${order.tokenMint}</code>
-⚠️ <b>Reason:</b> <i>Transaction did not land before block height expiration.</i>
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Mint:</b> <code>${shortMint}</code>
+<b>Fast Path:</b> <b>${isFastPath ? 'YES ⚡' : 'NO'}</b>
+<b>Reason:</b> <i>Transaction did not land before block height expiration.</i>
+<b>Tx:</b> ${sigText}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 <b>Explorer:</b> ${sigText}
 🛡️ <i>Capital reservation and lock released safely.</i>
     `.trim();
 
-    this.sendAlert(text);
+    const buttons = {
+      inline_keyboard: [
+        [
+          { text: '🎯 Target Tx', url: `https://solscan.io/tx/${order.targetSignature}` },
+          { text: '🪙 Token', url: `https://dexscreener.com/solana/${order.tokenMint}` },
+        ],
+      ],
+    };
+
+    this.sendAlert(text, buttons);
   }
 
   /**
    * Real-time notification when order broadcast status is uncertain
    */
   public async notifyTradeSubmissionUnknown(order: MirrorOrder, targetIntent?: SwapIntent): Promise<void> {
-    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
     const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
     const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
     const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+    const shortMint = formatShortAddress(order.tokenMint, 6);
 
     const sig = order.orderSignature || '';
     const sigText = sig
-      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      ? `<a href="https://solscan.io/tx/${sig}">${formatShortAddress(sig, 4)}</a>`
       : 'Simulated';
 
     const text = `
-⏳ <b>[TRADE UNCERTAIN] ${modeBadge} SUBMISSION UNKNOWN</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⏳ <b>BUY UNCERTAIN</b>
 
-🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
-📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+<b>Coin:</b> <b>${ticker}</b>${tokenName}
+<b>Mint:</b> <code>${shortMint}</code>
+<b>Tx:</b> ${sigText}
+
 ⚠️ <i>Broadcast status uncertain. Monitoring blockhash for confirmation or timeout...</i>
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 <b>Explorer:</b> ${sigText}
     `.trim();
 
-    this.sendAlert(text);
+    const buttons = {
+      inline_keyboard: [
+        [
+          { text: '🎯 Target Tx', url: `https://solscan.io/tx/${order.targetSignature}` },
+          { text: '🪙 Token', url: `https://dexscreener.com/solana/${order.tokenMint}` },
+        ],
+      ],
+    };
+
+    this.sendAlert(text, buttons);
   }
 
   /**
-   * Real-time notification upon trade fill with interactive Close buttons
+   * Real-time notification upon verified on-chain trade confirmation
+   * NEVER called before on-chain CONFIRMED state!
    */
   public async notifyTradeFilled(order: MirrorOrder, position?: FollowerPosition): Promise<void> {
     const isBuy = order.side === 'BUY';
-    const sideTag = isBuy ? '🟢 [BUY FILLED]' : '🔴 [SELL FILLED]';
-    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const isFastPath = order.isFastPath ?? (order.venue === 'PUMPFUN' && config.FAST_COPY_MODE);
+    const venueName = formatVenueName(order.venue || 'Pump.fun');
 
     const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
     const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
@@ -2369,82 +2514,97 @@ ${statusText}
     const fillPriceSol = order.effectivePrice;
     const fillPriceUsd = fillPriceSol * solPriceUsd;
 
-    const estMcap = fillPriceSol * 1_000_000_000 * solPriceUsd;
-    const mcapStr =
-      estMcap >= 1_000_000
-        ? `$${(estMcap / 1_000_000).toFixed(2)}M`
-        : `$${(estMcap / 1_000).toFixed(1)}K`;
-
     const solAmount = isBuy
       ? Number(order.inAmountRaw || 0) / 1e9
       : Number(order.outAmountRaw || 0) / 1e9;
     const usdAmount = solAmount * solPriceUsd;
 
-    let pnlText = '';
-    let exitRatioText = '';
-    if (position && !isBuy) {
-      const pnlSol = Number(position.realizedPnlLamports) / 1e9;
-      const pnlUsd = pnlSol * solPriceUsd;
-      const isProfit = pnlSol >= 0;
-      pnlText = `\n<b>Realized PnL:</b> <b>${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD</b> (${isProfit ? '+' : ''}${pnlSol.toFixed(4)} SOL)`;
-
-      const isFull = position.state === 'CLOSED' || BigInt(position.qtyRaw) <= 100n;
-      if (isFull) {
-        exitRatioText = '\n<b>Exit Ratio:</b> 100% (Full Exit)';
-      } else {
-        const remainingTokens = (Number(position.qtyRaw) / 1e6).toLocaleString(undefined, { maximumFractionDigits: 1 });
-        exitRatioText = `\n<b>Exit Ratio:</b> Partial Exit (% Ratio Mirror)\n<b>Remaining Moonbag:</b> ${remainingTokens} tokens held`;
-      }
-    }
-
-    const sigText = order.orderSignature
-      ? `<a href="https://solscan.io/tx/${order.orderSignature}">${order.orderSignature.slice(0, 8)}...</a>`
+    const sig = order.orderSignature || '';
+    const sigText = sig
+      ? `<a href="https://solscan.io/tx/${sig}">${formatShortAddress(sig, 4)}</a>`
       : 'Simulated';
-
-    const triggerText = isBuy
-      ? 'Copied Target Trader BUY'
-      : (order.targetSignature ? 'Copied Target Trader SELL (%-Based Exit)' : 'Auto TP/SL or Manual Exit');
-
-    const isWin = isBuy ? false : ((position && Number(position.realizedPnlLamports) > 0) || false);
-    const headerTitle = isBuy
-      ? `✅ <b>[TRADE CONFIRMED] ${modeBadge} BUY FILLED</b>`
-      : (isWin ? `🎉 <b>[PROFIT REALIZED] ${modeBadge} SELL FILLED</b>` : `⚡ <b>[TRADE EXECUTED] ${modeBadge} SELL FILLED</b>`);
 
     const traderWallet = (order as any).targetWallet || position?.targetWallet || traderNamingService.findTargetWalletByMint(order.tokenMint);
     const traderInfo = traderNamingService.getTraderInfo(traderWallet);
-
-    const text = `
-${headerTitle}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
-📌 <b>Mint:</b> <code>${order.tokenMint}</code>
-👤 <b>Target Trader:</b> <b>${traderInfo.displayName}</b> (<a href="${traderInfo.solscanUrl}">Solscan</a> | <a href="${traderInfo.gmgnUrl}">GMGN</a>)
-🎯 <b>Trigger:</b> <i>${triggerText}</i>
-
-💵 <b>Fill Price:</b> <code>$${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD</code> (<b>${fillPriceSol.toFixed(8)} SOL</b>)
-💎 <b>Market Cap:</b> <b>${mcapStr}</b>
-📦 <b>Trade Size:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)${exitRatioText}${pnlText}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔗 <b>Explorer:</b> ${sigText}
-    `.trim();
-
     const mint = position?.tokenMint || order.tokenMint;
-    const inlineKeyboard = isBuy && mint
-      ? {
-          inline_keyboard: [
-            [
-              { text: `🚨 CLOSE 100% (${ticker})`, callback_data: `sell_100_${mint}` },
-              { text: `TP 50% (${ticker})`, callback_data: `sell_50_${mint}` },
-            ],
-            [
-              { text: '📊 POSITIONS', callback_data: 'menu_positions' },
-              { text: 'MAIN MENU', callback_data: 'menu_main' },
-            ],
-          ],
+    const shortMint = formatShortAddress(order.tokenMint, 6);
+
+    let text = '';
+    let inlineKeyboard: any = undefined;
+
+    if (isBuy) {
+      let slotLines = '';
+      if (order.targetSlot !== undefined || order.followerSlot !== undefined) {
+        const targetSlotStr = order.targetSlot ? String(order.targetSlot) : 'N/A';
+        const followerSlotStr = order.followerSlot ? String(order.followerSlot) : 'N/A';
+        let gapStr = 'N/A';
+        if (order.slotGap !== undefined) {
+          gapStr = order.slotGap >= 0 ? `+${order.slotGap} slot(s)` : `${order.slotGap} slot(s)`;
+        } else if (order.followerSlot && order.targetSlot) {
+          const diff = order.followerSlot - order.targetSlot;
+          gapStr = diff >= 0 ? `+${diff} slot(s)` : `${diff} slot(s)`;
         }
-      : undefined;
+        slotLines = `\n<b>Target Slot:</b> <code>${targetSlotStr}</code>\n<b>Follower Slot:</b> <code>${followerSlotStr}</code>\n<b>Slot Gap:</b> <b>${gapStr}</b>\n`;
+      }
+
+      text = `
+✅ <b>BUY CONFIRMED</b>
+
+<b>${ticker}</b>${tokenName}
+<b>Bought:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)
+<b>Entry:</b> <code>$${fillPriceUsd < 0.01 ? fillPriceUsd.toFixed(7) : fillPriceUsd.toFixed(4)} USD</code> (<code>${fillPriceSol.toFixed(8)} SOL</code>)
+<b>Target:</b> <b>${traderInfo.displayName}</b>
+<b>Venue:</b> <b>${venueName}</b>
+<b>Fast Path:</b> <b>${isFastPath ? 'YES ⚡' : 'NO'}</b>
+${slotLines}
+📌 <b>Mint:</b> <code>${shortMint}</code>
+🔗 <b>Tx:</b> ${sigText}
+      `.trim();
+
+      inlineKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '📊 Position', callback_data: 'menu_positions' },
+            { text: `💰 Sell 50%`, callback_data: `sell_50_${mint}` },
+            { text: `🚨 Sell 100%`, callback_data: `sell_100_${mint}` },
+          ],
+          [
+            { text: '🎯 Target Tx', url: `https://solscan.io/tx/${order.targetSignature}` },
+            { text: '🪙 Token', url: `https://dexscreener.com/solana/${order.tokenMint}` },
+          ],
+        ],
+      };
+    } else {
+      // Sell confirmation
+      const pnlSol = position ? Number(position.realizedPnlLamports) / 1e9 : 0;
+      const pnlUsd = pnlSol * solPriceUsd;
+      const isProfit = pnlSol >= 0;
+      const headerTitle = isProfit ? '🎉 <b>SELL CONFIRMED</b>' : '⚡ <b>SELL CONFIRMED</b>';
+
+      text = `
+${headerTitle}
+
+<b>${ticker}</b>${tokenName}
+<b>Sold:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)
+<b>Exit Price:</b> <code>$${fillPriceUsd.toFixed(4)} USD</code>
+<b>Realized PnL:</b> <b>${isProfit ? '🟢 +' : '🔴 '}${pnlSol.toFixed(4)} SOL</b> (<code>${isProfit ? '+' : ''}$${pnlUsd.toFixed(2)} USD</code>)
+<b>Target:</b> <b>${traderInfo.displayName}</b>
+<b>Venue:</b> <b>${venueName}</b>
+<b>Tx:</b> ${sigText}
+      `.trim();
+
+      inlineKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '📊 Positions', callback_data: 'menu_positions' },
+            { text: '📈 PnL Summary', callback_data: 'menu_pnl' },
+          ],
+          [
+            { text: '🏠 Main Menu', callback_data: 'menu_main' },
+          ],
+        ],
+      };
+    }
 
     this.sendAlert(text, inlineKeyboard);
   }

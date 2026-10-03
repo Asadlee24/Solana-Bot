@@ -271,6 +271,9 @@ export class FastExecutionService {
       quotedAt: timestamps.build_started || process.hrtime.bigint(),
       submittedAt: timestamps.broadcast_completed || process.hrtime.bigint(),
       targetWallet: targetIntent.targetWallet,
+      targetSlot: targetIntent.slot,
+      venue: targetIntent.venue,
+      isFastPath: true,
     };
 
     // 8. Launch Asynchronous Background Reconciliation Worker
@@ -342,6 +345,13 @@ export class FastExecutionService {
 
         order.status = 'FILLED';
         order.landedAt = timestamps.landed;
+        order.followerSlot = receipt.slot;
+        order.targetSlot = targetIntent.slot;
+        if (order.followerSlot !== undefined && order.targetSlot !== undefined) {
+          order.slotGap = order.followerSlot - order.targetSlot;
+        }
+        order.venue = targetIntent.venue;
+        order.isFastPath = true;
 
         // Reconcile on-chain balance & settlements
         try {

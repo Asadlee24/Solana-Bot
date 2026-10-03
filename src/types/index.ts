@@ -170,6 +170,11 @@ export interface MirrorOrder {
   orderSignature?: string;
   followerSignature?: string;
   targetWallet?: string;
+  targetSlot?: number;
+  followerSlot?: number;
+  slotGap?: number;
+  venue?: string;
+  isFastPath?: boolean;
   priorityFeeLamports: bigint;
   tipLamports: bigint;
   routeFeeLamports: bigint;
