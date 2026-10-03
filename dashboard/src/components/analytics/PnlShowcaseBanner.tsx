@@ -32,7 +32,7 @@ export const PnlShowcaseBanner: React.FC<PnlShowcaseBannerProps> = ({
 }) => {
   const [showBreakdown, setShowBreakdown] = useState(false);
 
-  const solPriceUsd = telemetry?.solPriceUsd || 112.5;
+  const solPriceUsd = telemetry?.solPriceUsd || 0;
   const realizedPnlSol = telemetry?.totalRealizedPnlSol || 0;
   const realizedPnlUsd = telemetry?.totalRealizedPnlUsd || (realizedPnlSol * solPriceUsd);
   
@@ -44,8 +44,8 @@ export const PnlShowcaseBanner: React.FC<PnlShowcaseBannerProps> = ({
   const netPnlUsd = realizedPnlUsd + floatingPnlUsd;
   const isProfit = netPnlSol >= 0;
 
-  const winRate = telemetry?.winRatePct ?? 66.7;
-  const totalClosed = telemetry?.totalTradesClosed ?? 4;
+  const winRate = telemetry?.winRatePct ?? 0;
+  const totalClosed = telemetry?.totalTradesClosed ?? 0;
 
   // Curated verified closed trades with exact profit numbers for transparency
   const tradeHighlights = [

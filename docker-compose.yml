@@ -1,0 +1,20 @@
+services:
+  solana-copy-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: solana-copy-bot
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DB_PATH=/app/data/copy_bot.db
+    env_file:
+      - .env
+    volumes:
+      - bot-data:/app/data
+
+volumes:
+  bot-data:
+    name: solana-copy-bot-data

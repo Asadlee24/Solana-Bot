@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from '../config/index.js';
 import {
+  AuditLogEntry,
   FollowerPosition,
   LatencyMetric,
   MirrorIntent,
@@ -27,26 +28,100 @@ export class DBManager {
     this.initPragmas();
     this.initSchema();
     this.runMigrations();
-    this.seedHistoricalTrades();
+    if (process.env.SEED_MOCK_TRADES === 'true') {
+      this.seedHistoricalTrades();
+    }
   }
 
   private runMigrations() {
-    // Safe incremental migrations — IF NOT EXISTS / column check pattern
-    try {
-      this.db.exec(`
-        CREATE TABLE IF NOT EXISTS bot_settings (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL,
-          updated_at INTEGER NOT NULL
-        )
-      `);
-    } catch { /* table already exists */ }
-    try {
-      this.db.exec(`ALTER TABLE positions ADD COLUMN alerted_milestones TEXT DEFAULT '[]'`);
-    } catch { /* column already exists */ }
-    try {
-      this.db.exec(`ALTER TABLE positions ADD COLUMN breakeven_alerted INTEGER DEFAULT 0`);
-    } catch { /* column already exists */ }
+    // 1. Ensure schema_migrations table exists
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        applied_at INTEGER NOT NULL
+      )
+    `);
+
+    const applied = new Set<number>(
+      (this.db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).map((r) => r.version)
+    );
+
+    const migrations: { version: number; name: string; up: () => void }[] = [
+      {
+        version: 1,
+        name: 'initial_schema_and_columns',
+        up: () => {
+          try {
+            this.db.exec(`ALTER TABLE positions ADD COLUMN alerted_milestones TEXT DEFAULT '[]'`);
+          } catch {}
+          try {
+            this.db.exec(`ALTER TABLE positions ADD COLUMN breakeven_alerted INTEGER DEFAULT 0`);
+          } catch {}
+          try {
+            this.db.exec(`ALTER TABLE positions ADD COLUMN tp1_triggered INTEGER DEFAULT 0`);
+          } catch {}
+          try {
+            this.db.exec(`ALTER TABLE positions ADD COLUMN peak_pnl_pct REAL DEFAULT 0`);
+          } catch {}
+          try {
+            this.db.exec(`ALTER TABLE mirror_orders ADD COLUMN actual_in_raw TEXT`);
+            this.db.exec(`ALTER TABLE mirror_orders ADD COLUMN actual_out_raw TEXT`);
+            this.db.exec(`ALTER TABLE mirror_orders ADD COLUMN actual_price REAL`);
+            this.db.exec(`ALTER TABLE mirror_orders ADD COLUMN actual_fee_raw TEXT`);
+            this.db.exec(`ALTER TABLE mirror_orders ADD COLUMN landing_provider TEXT`);
+            this.db.exec(`ALTER TABLE mirror_orders ADD COLUMN reconciliation_source TEXT`);
+          } catch {}
+        },
+      },
+      {
+        version: 2,
+        name: 'bot_settings_key_value',
+        up: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS bot_settings (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at INTEGER NOT NULL
+            )
+          `);
+        },
+      },
+      {
+        version: 3,
+        name: 'audit_logs_table',
+        up: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS audit_logs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              timestamp INTEGER NOT NULL,
+              actor TEXT NOT NULL,
+              action TEXT NOT NULL,
+              details TEXT,
+              ip_address TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs (timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action);
+          `);
+        },
+      },
+    ];
+
+    const recordMigration = this.db.prepare(
+      'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)'
+    );
+
+    for (const m of migrations) {
+      if (!applied.has(m.version)) {
+        try {
+          m.up();
+          recordMigration.run(m.version, m.name, Date.now());
+        } catch (err: any) {
+          console.warn(`[DB Migration] Migration v${m.version} (${m.name}) encountered note:`, err.message || err);
+          recordMigration.run(m.version, m.name, Date.now());
+        }
+      }
+    }
   }
 
   private initPragmas() {
@@ -1158,6 +1233,160 @@ export class DBManager {
   public resetTelegramPairing(): void {
     this.setSetting('telegram_authorized_chat_ids', JSON.stringify([]));
     this.setSetting('telegram_pairing_completed', 'false');
+  }
+
+  public getRawDb(): Database.Database {
+    return this.db;
+  }
+
+  public async backup(destinationPath?: string): Promise<string> {
+    const backupDir = destinationPath ? path.dirname(destinationPath) : path.resolve('backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const targetFile =
+      destinationPath ||
+      path.join(backupDir, `solana_bot_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.db`);
+    await this.db.backup(targetFile);
+    return targetFile;
+  }
+
+  public logAudit(entry: AuditLogEntry): void {
+    try {
+      const stmt = this.db.prepare(`
+        INSERT INTO audit_logs (timestamp, actor, action, details, ip_address)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const detailsStr =
+        typeof entry.details === 'object' ? JSON.stringify(entry.details) : entry.details || null;
+      stmt.run(
+        entry.timestamp || Date.now(),
+        entry.actor,
+        entry.action,
+        detailsStr,
+        entry.ipAddress || null
+      );
+    } catch (err: any) {
+      console.error('[DB] Failed writing audit log:', err.message || err);
+    }
+  }
+
+  public getAuditLogs(limit = 100): AuditLogEntry[] {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT id, timestamp, actor, action, details, ip_address as ipAddress
+        FROM audit_logs
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `);
+      const rows = stmt.all(limit) as any[];
+      return rows.map((r) => {
+        let details = r.details;
+        if (details && typeof details === 'string') {
+          try {
+            details = JSON.parse(details);
+          } catch {}
+        }
+        return {
+          id: r.id,
+          timestamp: r.timestamp,
+          actor: r.actor,
+          action: r.action,
+          details,
+          ipAddress: r.ipAddress,
+        };
+      });
+    } catch (err: any) {
+      console.warn('[DB] Failed reading audit logs:', err.message || err);
+      return [];
+    }
+  }
+
+  public getClosedPositions(limit = 50): FollowerPosition[] {
+    const stmt = this.db.prepare(`
+      SELECT id, target_wallet as targetWallet, token_mint as tokenMint,
+             qty_raw as qtyRaw, cost_basis_raw as costBasisLamports,
+             avg_entry_price as avgEntryPriceSol, realized_pnl_raw as realizedPnlLamports,
+             unrealized_pnl_raw as unrealizedPnlLamports, state,
+             opened_at as openedAt, updated_at as updatedAt, closed_at as closedAt,
+             tp1_triggered as tp1Triggered, peak_pnl_pct as peakPnlPct
+      FROM positions
+      WHERE state != 'OPEN'
+      ORDER BY COALESCE(closed_at, updated_at) DESC
+      LIMIT ?
+    `);
+    const rows = stmt.all(limit) as any[];
+    return rows.map((r) => ({
+      ...r,
+      tp1Triggered: Boolean(r.tp1Triggered),
+      peakPnlPct: Number(r.peakPnlPct || 0),
+    }));
+  }
+
+  public getAccountingSummary(): {
+    realizedPnlSol: number;
+    unrealizedPnlSol: number;
+    totalTradesClosed: number;
+    winningTrades: number;
+    losingTrades: number;
+    winRatePct: number;
+  } {
+    try {
+      const closedStmt = this.db.prepare(`
+        SELECT realized_pnl_raw
+        FROM positions
+        WHERE state != 'OPEN'
+      `);
+      const closedRows = closedStmt.all() as { realized_pnl_raw: string }[];
+
+      let totalRealizedLamports = 0n;
+      let winningTrades = 0;
+      let losingTrades = 0;
+
+      for (const row of closedRows) {
+        try {
+          const val = BigInt(row.realized_pnl_raw || '0');
+          totalRealizedLamports += val;
+          if (val > 0n) winningTrades++;
+          else if (val < 0n) losingTrades++;
+        } catch {}
+      }
+
+      const openStmt = this.db.prepare(`
+        SELECT unrealized_pnl_raw
+        FROM positions
+        WHERE state = 'OPEN'
+      `);
+      const openRows = openStmt.all() as { unrealized_pnl_raw: string }[];
+      let totalUnrealizedLamports = 0n;
+      for (const row of openRows) {
+        try {
+          totalUnrealizedLamports += BigInt(row.unrealized_pnl_raw || '0');
+        } catch {}
+      }
+
+      const totalTradesClosed = closedRows.length;
+      const winRatePct = totalTradesClosed > 0 ? (winningTrades / totalTradesClosed) * 100 : 0;
+
+      return {
+        realizedPnlSol: Number(totalRealizedLamports) / 1e9,
+        unrealizedPnlSol: Number(totalUnrealizedLamports) / 1e9,
+        totalTradesClosed,
+        winningTrades,
+        losingTrades,
+        winRatePct: Number(winRatePct.toFixed(1)),
+      };
+    } catch (err: any) {
+      console.warn('[DB] Failed calculating accounting summary:', err.message || err);
+      return {
+        realizedPnlSol: 0,
+        unrealizedPnlSol: 0,
+        totalTradesClosed: 0,
+        winningTrades: 0,
+        losingTrades: 0,
+        winRatePct: 0,
+      };
+    }
   }
 
   public close() {

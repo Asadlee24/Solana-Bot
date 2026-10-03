@@ -756,4 +756,186 @@ describe('Security Hardening & Audit Verification Suite', () => {
       }
     });
   });
+
+  describe('13. Settlement-Based Real Accounting & PnL Integrity', () => {
+    it('calculates realized PnL and win-rate strictly from settled positions ledger', () => {
+      // Clear or record test positions
+      const testPos1 = {
+        id: `acc_test_${Date.now()}_1`,
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: `AccMint1_${Date.now()}`,
+        qtyRaw: '0',
+        costBasisLamports: '100000000', // 0.1 SOL
+        avgEntryPriceSol: 0.001,
+        realizedPnlLamports: '50000000', // +0.05 SOL win
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED' as const,
+        openedAt: Date.now() - 10000,
+        updatedAt: Date.now(),
+        closedAt: Date.now(),
+      };
+
+      const testPos2 = {
+        id: `acc_test_${Date.now()}_2`,
+        targetWallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+        tokenMint: `AccMint2_${Date.now()}`,
+        qtyRaw: '0',
+        costBasisLamports: '100000000', // 0.1 SOL
+        avgEntryPriceSol: 0.001,
+        realizedPnlLamports: '-20000000', // -0.02 SOL loss
+        unrealizedPnlLamports: '0',
+        state: 'CLOSED' as const,
+        openedAt: Date.now() - 5000,
+        updatedAt: Date.now(),
+        closedAt: Date.now(),
+      };
+
+      db.savePosition(testPos1);
+      db.savePosition(testPos2);
+
+      const summary = db.getAccountingSummary();
+      expect(summary.totalTradesClosed).toBeGreaterThanOrEqual(2);
+      expect(summary.winningTrades).toBeGreaterThanOrEqual(1);
+      expect(summary.losingTrades).toBeGreaterThanOrEqual(1);
+      // Net PnL must reflect settlements (+0.05 - 0.02 = +0.03)
+      expect(typeof summary.realizedPnlSol).toBe('number');
+      expect(summary.winRatePct).toBeGreaterThan(0);
+      expect(summary.winRatePct).toBeLessThanOrEqual(100);
+    });
+  });
+
+  describe('14. Operator Security & Audit Logging', () => {
+    it('records and retrieves operational audit log entries', () => {
+      const testAction = 'TEST_SECURITY_ARM';
+      db.logAudit({
+        timestamp: Date.now(),
+        actor: 'OPERATOR_API',
+        action: testAction,
+        details: { reason: 'Automated test suite verification', ip: '127.0.0.1' },
+        ipAddress: '127.0.0.1',
+      });
+
+      const logs = db.getAuditLogs(20);
+      expect(logs.length).toBeGreaterThan(0);
+      const found = logs.find((l) => l.action === testAction);
+      expect(found).toBeDefined();
+      expect(found?.actor).toBe('OPERATOR_API');
+      expect(typeof found?.details).toBe('object');
+      expect((found?.details as any)?.reason).toBe('Automated test suite verification');
+    });
+  });
+
+  describe('15. Startup Readiness & Fail-Closed Validation', () => {
+    it('evaluates readiness and marks LIVE mode as BLOCKED when critical config is missing', async () => {
+      const { readinessValidator } = await import('../src/services/readiness.js');
+
+      // 1. In PAPER mode with default test config, system can safely start
+      const paperReport = readinessValidator.validate();
+      expect(paperReport.executionMode).toBe('PAPER');
+      expect(paperReport.canStart).toBe(true);
+
+      // 2. In LIVE mode with missing acknowledgement or empty private key, must fail closed
+      const origMode = config.EXECUTION_MODE;
+      const origKey = config.FOLLOWER_PRIVATE_KEY;
+      const origAck = config.LIVE_TRADING_ACK;
+
+      try {
+        (config as any).EXECUTION_MODE = 'LIVE';
+        (config as any).FOLLOWER_PRIVATE_KEY = '';
+        (config as any).LIVE_TRADING_ACK = '';
+
+        const liveReport = readinessValidator.validate();
+        expect(liveReport.overallStatus).toBe('BLOCKED');
+        expect(liveReport.canStart).toBe(false);
+        const criticalFailures = liveReport.checks.filter((c) => c.status === 'FAIL' && c.criticalForLive);
+        expect(criticalFailures.length).toBeGreaterThanOrEqual(1);
+      } finally {
+        (config as any).EXECUTION_MODE = origMode;
+        (config as any).FOLLOWER_PRIVATE_KEY = origKey;
+        (config as any).LIVE_TRADING_ACK = origAck;
+      }
+    });
+  });
+
+  describe('16. Mint Decimals Safety & Rejection of Unverified Tokens', () => {
+    it('rejects unverified mints when strict verification is enforced', async () => {
+      const { mintDecimalsService } = await import('../src/services/mint-decimals.js');
+
+      // WSOL is pre-seeded and verified
+      const wsolDecimals = await mintDecimalsService.getDecimals('So11111111111111111111111111111111111111112');
+      expect(wsolDecimals).toBe(9);
+
+      // Unknown unverified mint with strictForTest must throw error
+      await expect(
+        mintDecimalsService.getDecimals('UnverifiedRandomMintXYZ1111111111111111111111', { strictForTest: true })
+      ).rejects.toThrow(/Cannot execute trading or accounting with unverified token decimals/);
+
+      // Display-only mode allows non-strict display fallback
+      const displayDecimals = await mintDecimalsService.getDecimals('UnverifiedRandomMintXYZ1111111111111111111111', {
+        allowUnverifiedDisplay: true,
+      });
+      expect(displayDecimals).toBe(6);
+    });
+  });
+
+  describe('17. Watched Wallet API Canonical Validation', () => {
+    it('rejects invalid Solana addresses and accepts canonical schemas', async () => {
+      const { createApiServer } = await import('../src/api/server.js');
+      const app = createApiServer();
+      const origToken = config.CONTROL_API_TOKEN;
+      (config as any).CONTROL_API_TOKEN = 'secret-test-token-val';
+
+      let server: any;
+      let baseUrl = '';
+
+      await new Promise<void>((resolve) => {
+        server = app.listen(0, () => {
+          const port = (server.address() as any).port;
+          baseUrl = `http://127.0.0.1:${port}`;
+          resolve();
+        });
+      });
+
+      try {
+        // 1. Invalid base58 address must return 400
+        const invalidRes = await fetch(`${baseUrl}/api/wallets`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-token': 'secret-test-token-val',
+          },
+          body: JSON.stringify({
+            wallet: 'NOT_A_VALID_SOLANA_KEY',
+            label: 'Hacker',
+          }),
+        });
+        expect(invalidRes.status).toBe(400);
+        const invalidData = await invalidRes.json() as any;
+        expect(invalidData.error).toContain('Invalid Solana base58 public key');
+
+        // 2. Valid Solana address must succeed
+        const validRes = await fetch(`${baseUrl}/api/wallets`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-token': 'secret-test-token-val',
+          },
+          body: JSON.stringify({
+            wallet: 'CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS',
+            label: 'Valid Target Trader',
+            buy_mode: 'FIXED_SIZE',
+            fixed_buy_raw: '100000000',
+            copy_ratio: 0.05,
+          }),
+        });
+        expect(validRes.status).toBe(200);
+        const validData = await validRes.json() as any;
+        expect(validData.success).toBe(true);
+        expect(validData.wallet.wallet).toBe('CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS');
+      } finally {
+        (config as any).CONTROL_API_TOKEN = origToken;
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+  });
 });

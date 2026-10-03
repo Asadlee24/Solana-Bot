@@ -40,11 +40,12 @@ const ConfigSchema = z.object({
   MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(0.02),
   MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.02), // Floor reserved for rent and fees (0.02 SOL)
   MAX_SIGNAL_AGE_MS: z.coerce.number().default(1500), // Max ms before signal discarded as stale
-  MAX_ENTRY_GAP_BPS: z.coerce.number().default(1500), // 15.0% max price deterioration vs target
+  MAX_ENTRY_GAP_BPS: z.coerce.number().default(200), // 2.0% (200 bps) max price deterioration vs target
   MAX_SLIPPAGE_BPS: z.coerce.number().default(200), // 2.0% max AMM buy slippage
   MAX_SELL_SLIPPAGE_BPS: z.coerce.number().default(1500), // 15.0% max sell slippage to guarantee immediate exit without 15001 error
   DAILY_LOSS_LIMIT_SOL: z.coerce.number().default(0.03),
   CONSECUTIVE_ERROR_LIMIT: z.coerce.number().default(5),
+  SOL_PRICE_USD: z.coerce.number().optional(), // Optional operator fixed SOL/USD price fallback
 
   // Jupiter Swap API V2
   JUPITER_API_KEY: z.string().default(''), // Server-side only (never expose to frontend / VITE)
@@ -89,7 +90,7 @@ const ConfigSchema = z.object({
   AUTO_SL_LOSS_PCT: z.coerce.number().default(30), // -30% loss trigger (anti-rug base floor)
   AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(800), // 800ms high-frequency monitoring loop
 
-  // Zero-Loss Guarantee & Dynamic Trailing Stop-Loss
+  // Breakeven Floor & Dynamic Trailing Stop-Loss
   TRAILING_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
   BREAKEVEN_TRIGGER_PCT: z.coerce.number().default(20), // Lock stop-loss at entry (+2% cushion) when profit hits +20%
   BREAKEVEN_LOCK_PCT: z.coerce.number().default(2), // +2% profit floor once breakeven triggers (covers fees/slippage)

@@ -68,7 +68,7 @@ export class TelegramNotifier {
             { command: 'score', description: 'Analyze Trader Win-Rate & PnL: /score <wallet>' },
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
-            { command: 'zeroloss', description: 'Zero-Loss Guarantee & Breakeven Lock' },
+            { command: 'zeroloss', description: 'Breakeven Floor & Dynamic Trailing Stop' },
             { command: 'trailing', description: 'Dynamic Trailing Stop-Loss Settings' },
             { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
             { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
@@ -372,11 +372,11 @@ export class TelegramNotifier {
       await this.sendTpSlReport(chatId);
     } else if (clean === 'trailing_off' || clean === 'zeroloss_off' || clean === 'trailingoff' || clean === 'zerolossoff') {
       (config as any).TRAILING_SL_ENABLED = false;
-      await this.sendCustomMessage(chatId, '🔴 <b>Zero-Loss Guarantee & Trailing Stop-Loss have been TURNED OFF.</b>');
+      await this.sendCustomMessage(chatId, '🔴 <b>Breakeven Floor & Trailing Stop-Loss have been TURNED OFF.</b>');
       await this.sendTpSlReport(chatId);
     } else if (clean === 'trailing_on' || clean === 'zeroloss_on' || clean === 'trailingon' || clean === 'zerolosson') {
       (config as any).TRAILING_SL_ENABLED = true;
-      await this.sendCustomMessage(chatId, `🛡️ <b>Zero-Loss Guarantee & Trailing Stop-Loss have been TURNED ON!</b>\n• +${config.BREAKEVEN_TRIGGER_PCT}% profit par Stop-Loss Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion) par lock ho jayega.\n• +30%+ par Stop-Loss peak se ${config.TRAILING_SL_CUSHION_PCT}% peeche trail karega.`);
+      await this.sendCustomMessage(chatId, `🛡️ <b>Breakeven Floor & Trailing Stop-Loss have been TURNED ON!</b>\n• +${config.BREAKEVEN_TRIGGER_PCT}% profit par Stop-Loss Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion) par lock ho jayega.\n• +30%+ par Stop-Loss peak se ${config.TRAILING_SL_CUSHION_PCT}% peeche trail karega.`);
       await this.sendTpSlReport(chatId);
     } else if (clean === 'tp_off' || clean === 'tpoff' || clean === 'disable_tp') {
       (config as any).AUTO_TP_ENABLED = false;
@@ -569,9 +569,9 @@ export class TelegramNotifier {
     } else if (data === 'toggle_trailing') {
       (config as any).TRAILING_SL_ENABLED = !config.TRAILING_SL_ENABLED;
       const status = config.TRAILING_SL_ENABLED
-        ? '🛡️ <b>TURNED ON (Zero-Loss Guarantee & Trailing Ratchet Active)</b>'
+        ? '🛡️ <b>TURNED ON (Breakeven Floor & Trailing Ratchet Active)</b>'
         : '🔴 <b>TURNED OFF</b>';
-      await this.sendCustomMessage(chatId, `Zero-Loss Guarantee & Trailing SL is now ${status}.`);
+      await this.sendCustomMessage(chatId, `Breakeven Floor & Trailing SL is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
       await this.sendRiskReport(chatId);
@@ -844,12 +844,11 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
       const minToArmUsd = minToArm * solPriceUsd;
 
-      const telemetry = db.getSystemTelemetry();
-      const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-      const realizedSol = bal - initialCapital;
+      const accounting = db.getAccountingSummary();
+      const realizedSol = accounting.totalRealizedPnlSol;
       const realizedUsd = realizedSol * solPriceUsd;
-      const closedTrades = 4;
-      const winRate = 100.0;
+      const closedTrades = accounting.totalClosedTrades;
+      const winRate = accounting.winRatePct;
 
       const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
       const slStatus = config.AUTO_SL_ENABLED ? `🟢 ON (-${config.AUTO_SL_LOSS_PCT}% Anti-Rug)` : '🔴 OFF';
@@ -1066,11 +1065,11 @@ ${divider}
       const isArmed = isLive && liveEngine.getStatus().isArmed;
       const bal = executionWalletManager.getCachedBalanceSol();
       const balUsd = bal * solPriceUsd;
-      const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-      const realizedSol = isLive ? (bal - initialCapital) : (db.getSystemTelemetry().totalRealizedPnlSol || 0);
+      const accounting = db.getAccountingSummary();
+      const realizedSol = accounting.realizedPnlSol;
       const realizedUsd = realizedSol * solPriceUsd;
-      const winRate = isLive ? 100.0 : (db.getSystemTelemetry().winRatePct ?? 0);
-      const closedTrades = isLive ? 4 : (db.getSystemTelemetry().totalTradesClosed || 0);
+      const winRate = accounting.winRatePct;
+      const closedTrades = accounting.totalTradesClosed;
 
       const emptyMsg = `
 📂 <b>PORTFOLIO POSITIONS (0 ACTIVE)</b>
@@ -1345,7 +1344,8 @@ ${divider}
     const initialCapital = isLive
       ? (config.LIVE_INITIAL_BALANCE_SOL || 0.2610)
       : (telemetry.initialPaperBalanceSol || 10.0);
-    const realizedSol = isLive ? (balanceSol - initialCapital) : (telemetry.totalRealizedPnlSol || 0);
+    const accounting = db.getAccountingSummary();
+    const realizedSol = accounting.totalRealizedPnlSol;
     const realizedUsd = realizedSol * solPrice;
     const unrealizedSol = telemetry.totalUnrealizedPnlSol || 0;
     const unrealizedUsd = unrealizedSol * solPrice;
@@ -1354,11 +1354,23 @@ ${divider}
     const isOverallProfit = totalPnlSol >= 0;
     const roiPercent = initialCapital > 0 ? ((totalPnlSol / initialCapital) * 100) : 0;
 
-    const winRate = isLive ? 100.0 : (telemetry.winRatePct ?? 0);
-    const closedCount = isLive ? 4 : (telemetry.totalTradesClosed || 0);
+    const winRate = accounting.winRatePct;
+    const closedCount = accounting.totalClosedTrades;
 
     const pnlSign = isOverallProfit ? '+' : '';
     const pnlBadge = isOverallProfit ? '🟢' : '🔴';
+
+    const closedPositions = db.getClosedPositions(4);
+    const recentTradesText = closedPositions.length === 0
+      ? '    • <i>No settled trades recorded yet.</i>'
+      : closedPositions.map((c) => {
+          const pnlLamports = Number(BigInt(c.realizedPnlLamports || '0'));
+          const pnlInSol = pnlLamports / 1e9;
+          const sign = pnlInSol >= 0 ? '+' : '';
+          const badge = pnlInSol >= 0 ? '🟢' : '🔴';
+          const shortMint = `${c.tokenMint.substring(0, 4)}...${c.tokenMint.substring(c.tokenMint.length - 4)}`;
+          return `    • 🪙 <code>${shortMint}</code>: ${badge} <b>${sign}${pnlInSol.toFixed(4)} SOL</b>`;
+        }).join('\n');
 
     const text = `
 📊 <b>PORTFOLIO PnL & PERFORMANCE</b>
@@ -1377,12 +1389,9 @@ ${divider}
 🎯 <b>TRADING ACTIVITY & STATS</b>
 ├ <b>Open Positions:</b> <b>${telemetry.openPositionsCount} Coins</b> ${telemetry.openPositionsCount === 0 ? '(<i>100% Pure SOL Liquid</i>)' : ''}
 ├ <b>Closed Trades:</b> <b>${closedCount}</b>
-├ <b>Win Rate:</b> 🎯 <b>${winRate.toFixed(1)}%</b> (<i>100% Alpha Record Today</i>)
-└ <b>Today's Top Winners:</b>
-    • 🪙 <b>$URANIUMINU:</b> 🟢 <b>+94.1%</b> (<code>+0.0500 SOL</code> 2x Moonbag)
-    • 🪙 <b>$BGNLn:</b> 🟢 <b>+58.5%</b> (<code>+0.0319 SOL</code>)
-    • 🪙 <b>$INURANUS:</b> 🟢 <b>+26.4%</b> (<code>+0.0138 SOL</code>)
-    • 🪙 <b>$Scale:</b> 🟢 <b>+12.0%</b> (<code>+0.0062 SOL</code>)
+├ <b>Win Rate:</b> 🎯 <b>${winRate.toFixed(1)}%</b> (${closedCount > 0 ? `${closedCount} Settled Trades` : 'Baseline'})
+└ <b>Recent Settled Trades:</b>
+${recentTradesText}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <i>💡 Tap below to check positions, balance, or refresh real-time stats.</i>
@@ -2420,7 +2429,7 @@ Trading automatically paused for portfolio protection.
   }
 
   /**
-   * Real-Time Zero-Loss Guarantee Lock Alert (Fires when profit crosses +20%)
+   * Real-Time Breakeven Protection Lock Alert (Fires when profit crosses +20%)
    */
   public async notifyBreakevenLocked(
     position: FollowerPosition,
@@ -2439,7 +2448,7 @@ Trading automatically paused for portfolio protection.
     const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
 
     const text = `
-🛡️ <b>[ZERO-LOSS GUARANTEE LOCKED]</b> 🔒
+🛡️ <b>[BREAKEVEN PROTECTION LOCKED]</b> 🔒
 
 <b>Coin:</b> <b>$${sym}</b>${tokenName}
 <b>Mint:</b> <code>${position.tokenMint}</code>
@@ -2447,8 +2456,8 @@ Trading automatically paused for portfolio protection.
 <b>Trigger Gain:</b> <b>+${pnlPct.toFixed(1)}%</b> (Peak: +${peakPct.toFixed(1)}%) 🚀
 <b>Floating Gain:</b> +${floatingPnlSol.toFixed(4)} SOL (+$${floatingPnlUsd.toFixed(2)} USD)
 <b>Stop-Loss Floor:</b> <b>LOCKED AT +${config.BREAKEVEN_LOCK_PCT.toFixed(1)}%</b> (Entry Price + Fee Cushion)
-<b>Protection Status:</b> <b>ZERO CAPITAL RISK GUARANTEED</b> 🛡️
-<i>Agar coin yahan se dump hota hai, toh bot automatically Breakeven par nikal jayega. Ek rupay ka bhi nuqsan nahi hoga!</i>
+<b>Protection Status:</b> <b>BREAKEVEN FLOOR ACTIVE</b> 🛡️
+<i>Agar coin yahan se dump hota hai, toh bot automatically Breakeven par nikal jayega. Capital protection stop active!</i>
     `.trim();
 
     const inlineKeyboard = {
@@ -2468,7 +2477,7 @@ Trading automatically paused for portfolio protection.
   }
 
   /**
-   * Alert when Zero-Loss Breakeven Exit is executed
+   * Alert when Breakeven Exit is executed
    */
   public async notifyBreakevenExit(
     order: MirrorOrder,
@@ -2492,16 +2501,16 @@ Trading automatically paused for portfolio protection.
     const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
 
     const text = `
-🛡️ <b>[ZERO-LOSS BREAKEVEN EXIT FILLED]</b> 🛡️
+🛡️ <b>[BREAKEVEN PROTECTION EXIT FILLED]</b> 🛡️
 
 <b>Coin:</b> <b>$${sym}</b>${tokenName}
 <b>Mint:</b> <code>${position.tokenMint}</code>
 <b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
-<b>Strategy:</b> Zero-Loss Capital Protection (100% Exited)
+<b>Strategy:</b> Breakeven Capital Protection (100% Exited)
 <b>Highest Peak:</b> +${peakPct.toFixed(1)}% 🏔️
 <b>Exit Result:</b> <b>${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%</b> (${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL | ${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
-<b>Verdict:</b> <b>Pura capital mehfooz! Coin dump hone se pehle Zero-Loss par exit ho gaya.</b>${sigLink}
+<b>Verdict:</b> <b>Capital protection stop executed at breakeven before dump.</b>${sigLink}
     `.trim();
 
     this.sendAlert(text);
@@ -2651,8 +2660,8 @@ ${header}
 
   public async sendTpSlReport(chatId: string | number): Promise<void> {
     const trailingText = config.TRAILING_SL_ENABLED
-      ? `🛡️ <b>ACTIVE (Zero-Loss Guarantee):</b>\n   ├ <b>+${config.BREAKEVEN_TRIGGER_PCT}% Gain:</b> Stop-Loss floor locked at <b>Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion)</b> 🔒\n   ├ <b>+30%+ Gain:</b> Dynamic Trailing SL locks profit at <b>Peak - ${config.TRAILING_SL_CUSHION_PCT}%</b> 🏔️\n   └ <i>Solana dump se 100% protection! Ek rupay ka bhi nuqsan nahi hoga.</i>`
-      : '🔴 <b>DISABLED</b> (Zero-Loss Guarantee & Trailing SL is OFF)';
+      ? `🛡️ <b>ACTIVE (Breakeven Floor & Trailing SL):</b>\n   ├ <b>+${config.BREAKEVEN_TRIGGER_PCT}% Gain:</b> Stop-Loss floor locked at <b>Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion)</b> 🔒\n   ├ <b>+30%+ Gain:</b> Dynamic Trailing SL locks profit at <b>Peak - ${config.TRAILING_SL_CUSHION_PCT}%</b> 🏔️\n   └ <i>Automated protection with trailing floor against sudden market dumps.</i>`
+      : '🔴 <b>DISABLED</b> (Breakeven Floor & Trailing SL is OFF)';
 
     const tpText = config.AUTO_TP_ENABLED
       ? `🟢 <b>ENABLED:</b> Sell <b>${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%</b> when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   └ <i>Initial principal returned to wallet, 50% moonbag rides for free!</i>`
@@ -2663,10 +2672,10 @@ ${header}
       : '🔴 <b>DISABLED</b> (Auto Stop-Loss is OFF)';
 
     const text = `
-🎯 <b>AUTOMATED PROFIT & ZERO-LOSS PROTECTION</b>
+🎯 <b>AUTOMATED PROFIT & CAPITAL PROTECTION</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🛡️ <b>Zero-Loss Guarantee & Trailing SL:</b>
+🛡️ <b>Breakeven Floor & Trailing SL:</b>
 ${trailingText}
 
 🚀 <b>Moonbag Auto Take-Profit:</b>
@@ -2684,7 +2693,7 @@ ${slText}
       inline_keyboard: [
         [
           {
-            text: config.TRAILING_SL_ENABLED ? '🛡️ Zero-Loss: ON (Tap to Disable)' : '⚪ Zero-Loss: OFF (Tap to Enable)',
+            text: config.TRAILING_SL_ENABLED ? '🛡️ Breakeven: ON (Tap to Disable)' : '⚪ Breakeven: OFF (Tap to Enable)',
             callback_data: 'toggle_trailing',
           },
         ],

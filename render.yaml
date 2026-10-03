@@ -2,22 +2,32 @@ services:
   - type: web
     name: solana-copy-bot
     runtime: docker
-    plan: free
+    plan: starter
     dockerfilePath: Dockerfile
+    disk:
+      name: bot-data
+      mountPath: /app/data
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: EXECUTION_MODE
         value: PAPER
+      - key: DB_PATH
+        value: /app/data/copy_bot.db
       - key: HELIUS_API_KEY
         sync: false
       - key: WATCHED_WALLETS
         value: CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TELEGRAM_CHAT_ID
+      - key: TELEGRAM_PAIRING_CODE
+        sync: false
+      - key: CONTROL_API_TOKEN
+        sync: false
+      - key: HELIUS_WEBHOOK_SECRET
         sync: false
       - key: FIXED_BUY_SOL
-        value: "0.1"
+        value: "0.01"
       - key: DEFAULT_SIZING_MODE
         value: FIXED_SIZE

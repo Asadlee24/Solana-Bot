@@ -92,7 +92,7 @@ export const WalletAccountMenu: React.FC<WalletAccountMenuProps> = ({
         <div className="wam-title-row">
           <div className="wam-badge-role">
             <span className="role-dot" />
-            <span>DASHBOARD WALLET</span>
+            <span>BROWSER WALLET (READ-ONLY)</span>
           </div>
           <button
             type="button"
@@ -116,6 +116,22 @@ export const WalletAccountMenu: React.FC<WalletAccountMenuProps> = ({
             <span className="wam-network-tag">{wallet.network}</span>
           </div>
         </div>
+      </div>
+
+      {/* Distinction Notice */}
+      <div
+        style={{
+          margin: '8px 16px 0 16px',
+          padding: '8px 10px',
+          background: 'rgba(59, 130, 246, 0.08)',
+          border: '1px solid rgba(59, 130, 246, 0.2)',
+          borderRadius: '6px',
+          fontSize: '11px',
+          color: '#93c5fd',
+          lineHeight: '1.4',
+        }}
+      >
+        ℹ️ Connected for dashboard view only. Automated copy-trades are signed exclusively by the backend execution hot wallet.
       </div>
 
       {/* Address & Copy Block */}

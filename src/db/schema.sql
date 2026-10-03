@@ -4,6 +4,25 @@ PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
 
+-- Schema Version Migrations Tracking
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at INTEGER NOT NULL
+);
+
+-- Operator Security & Operational Audit Log
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    actor TEXT NOT NULL,       -- 'OPERATOR_API', 'OPERATOR_TELEGRAM', 'SYSTEM'
+    action TEXT NOT NULL,      -- 'LIVE_ARM', 'LIVE_KILL', 'CIRCUIT_BREAKER_RESET', 'WALLET_ADD', 'WALLET_DELETE', 'MANUAL_SELL', 'MANUAL_CLOSE'
+    details TEXT,              -- JSON string with parameters
+    ip_address TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs (timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action);
+
 -- Bot Operational Settings & Pairing
 CREATE TABLE IF NOT EXISTS bot_settings (
     key TEXT PRIMARY KEY,

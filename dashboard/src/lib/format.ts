@@ -30,9 +30,13 @@ export function formatPct(pct: number | undefined | null, withSign = true): stri
   return `${prefix}${pct.toFixed(2)}%`;
 }
 
-export function formatBps(bps: number | undefined | null): string {
+export function formatBps(bps: number | undefined | null, includePct = true): string {
   if (bps === undefined || bps === null || isNaN(bps)) return '—';
   const prefix = bps > 0 ? '+' : '';
+  const pct = (bps / 100).toFixed(2);
+  if (includePct) {
+    return `${prefix}${bps.toLocaleString()} bps (${prefix}${pct}%)`;
+  }
   return `${prefix}${bps.toLocaleString()} bps`;
 }
 
