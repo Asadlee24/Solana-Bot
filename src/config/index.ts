@@ -1,7 +1,9 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config();
+}
 
 const ConfigSchema = z.object({
   // Environment & Execution

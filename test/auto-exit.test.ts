@@ -76,7 +76,7 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
     autoExitManager.start(mockSignalManager);
     await autoExitManager.checkOpenPositions();
 
-    expect(mockSignalManager.executeManualExit).toHaveBeenCalledWith(testPos.id, 0.5);
+    expect(mockSignalManager.executeManualExit).toHaveBeenCalledWith(testPos.id, 0.5, true);
     expect(db.markPositionTpTriggered).toHaveBeenCalledWith(testPos.id, expect.any(Number));
     expect(telegramNotifier.notifyAutoTakeProfit).toHaveBeenCalled();
     autoExitManager.stop();
@@ -143,7 +143,7 @@ describe('Automated Take-Profit & Stop-Loss Engine (Moonbag & Anti-Rug)', () => 
     autoExitManager.start(mockSignalManager);
     await autoExitManager.checkOpenPositions();
 
-    expect(mockSignalManager.executeManualExit).toHaveBeenCalledWith(testPos.id, 1.0);
+    expect(mockSignalManager.executeManualExit).toHaveBeenCalledWith(testPos.id, 1.0, true);
     expect(telegramNotifier.notifyAutoStopLoss).toHaveBeenCalled();
     autoExitManager.stop();
   });

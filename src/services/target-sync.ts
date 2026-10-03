@@ -4,7 +4,9 @@ import { db } from '../db/database.js';
 import { WatchedWallet } from '../types/index.js';
 import { config } from '../config/index.js';
 
-const BACKUP_FILE = path.resolve(process.cwd(), 'data', 'targets_persistence.json');
+const BACKUP_FILE = process.env.NODE_ENV === 'test'
+  ? path.resolve(process.cwd(), 'data', 'test_targets_persistence.json')
+  : path.resolve(process.cwd(), 'data', 'targets_persistence.json');
 
 export class TargetSyncService {
   private static instance: TargetSyncService;

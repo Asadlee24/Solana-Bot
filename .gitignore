@@ -18,6 +18,7 @@ data/*.db-shm
 data/*.db-wal
 data/*.db-journal
 data/test_*.db
+data/test_*.json
 
 # Build outputs
 dist/
