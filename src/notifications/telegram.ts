@@ -1072,31 +1072,27 @@ ${walletOverview}
     const feedName = config.HELIUS_API_KEY ? 'Helius Enhanced WSS' : 'Solana WSS';
     const fastPathState = config.FAST_COPY_MODE ? 'ON' : 'OFF';
 
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
     const statusBadge = isLive
-      ? (isArmed ? '🟢 <b>LIVE • ARMED</b>' : '🔴 <b>LIVE • PAUSED</b>')
-      : '🟡 <b>PAPER • RUNNING</b>';
+      ? (isArmed ? '🟢 <b>LIVE (ARMED)</b>' : '🔴 <b>LIVE (PAUSED)</b>')
+      : '🟡 <b>PAPER (SIM)</b>';
 
     const text = `
-⚡ <b>SOLANA COPY BOT</b>
+⚡ <b>SOLANA COPY-TRADING TERMINAL</b> ⚡
+${divider}
+<b>System:</b> ${statusBadge}   |   <b>Risk:</b> 🛡️ <b>ACTIVE</b>
 
-${statusBadge}
+💼 <b>WALLET & CAPITAL</b>
+├ <b>Balance:</b> 💎 <b>${balanceDisplay}</b>${balanceUsdDisplay}
+├ <b>Spendable:</b> ⚡ <b>${spendableDisplay}</b>   •   <b>Size:</b> <b>${config.FIXED_BUY_SOL.toFixed(4)} SOL</b>
+└ <b>PnL:</b> <b>${pnlDisplay}</b>   •   <b>Positions:</b> <b>${openPositionsCount} active</b>
 
-💼 <b>Wallet</b>
-${balanceDisplay}${balanceUsdDisplay}
-Spendable: ${spendableDisplay}
-Trade Size: ${config.FIXED_BUY_SOL.toFixed(4)} SOL
-
-📊 <b>Trading</b>
-Targets: ${targetsCount}
-Positions: ${openPositionsCount}
-Realized PnL: ${pnlDisplay}
-
-⚡ <b>Execution</b>
-Feed: ${feedName}
-Fast Path: ${fastPathState}
-Latency: ${latencyDisplay}
-
-🛡️ <b>Risk Guards:</b> <b>ACTIVE</b>
+🎯 <b>NETWORK & EXECUTION</b>
+├ <b>Targets:</b> 🎯 <b>${targetsCount} active</b>   •   <b>Fast-Path:</b> ⚡ <b>${fastPathState}</b>
+└ <b>Feed:</b> 📡 <b>${feedName}</b>   •   <b>${latencyDisplay}</b>
+${divider}
+<i>Tap an option below to manage:</i>
     `.trim();
 
     const inlineKeyboard = {
@@ -1110,12 +1106,12 @@ Latency: ${latencyDisplay}
           { text: '📈 PnL', callback_data: 'menu_pnl' },
         ],
         [
-          { text: '🛡️ Risk', callback_data: 'menu_risk' },
-          { text: '⚙️ Status', callback_data: 'menu_status' },
+          { text: '🛡️ Risk Limits', callback_data: 'menu_risk' },
+          { text: '⚙️ Bot Status', callback_data: 'menu_status' },
         ],
         [
           {
-            text: isArmed ? '🔴 Pause Bot' : '🟢 Arm Bot',
+            text: isArmed ? '🛑 PAUSE BOT' : '🟢 ACTIVATE BOT',
             callback_data: isArmed ? 'action_deactivate' : 'action_activate',
           },
         ],
@@ -1530,27 +1526,25 @@ ${recentTradesText}
       ? `${telemetry.latencyP95Ms.toFixed(1)}ms`
       : 'Awaiting live samples';
 
+    const divider = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
     const text = `
 ⚡ <b>SYSTEM ENGINE HEALTH & STATUS</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-🟢 <b>System Status:</b> <b>RUNNING & OPERATIONAL</b>
-🎯 <b>Execution Mode:</b> <code>${isLive ? (isArmed ? '🟢 LIVE (ARMED & READY)' : '🔴 LIVE (PAUSED)') : 'PAPER'}</code>
-⏱️ <b>Server Uptime:</b> <b>${formatUptime(telemetry.uptimeSeconds)}</b>${walletLine}
+${divider}
+<b>System:</b> <b>RUNNING & OPERATIONAL</b>
+<b>Execution:</b> <code>${isLive ? (isArmed ? '🟢 LIVE (ARMED)' : '🔴 LIVE (PAUSED)') : 'PAPER'}</code>
+<b>Uptime:</b> <b>${formatUptime(telemetry.uptimeSeconds)}</b>${walletLine}
 
 📡 <b>EXECUTION PATH</b>
-├ <b>Feed Ingestion:</b> ⚡ <b>${config.HELIUS_API_KEY ? 'Helius Enhanced WSS' : 'Solana WSS'}</b>
-├ <b>Median Latency (p50):</b> 🟢 <b>${latencyP50Text}</b>
-├ <b>95th Percentile (p95):</b> ⚡ <b>${latencyP95Text}</b>
-├ <b>Circuit Breaker:</b> ${isTripped ? '🚨 <b>TRIPPED</b>' : '🛡️ <b>ARMED (Normal)</b>'}
+├ <b>Feed:</b> ⚡ <b>${config.HELIUS_API_KEY ? 'Helius Enhanced WSS' : 'Solana WSS'}</b>
+├ <b>Latency:</b> 🟢 <b>p50: ${latencyP50Text}</b>   •   ⚡ <b>p95: ${latencyP95Text}</b>
+├ <b>Guards:</b> ${isTripped ? '🚨 <b>TRIPPED</b>' : '🛡️ <b>ARMED (Normal)</b>'}
 └ <b>Target Traders:</b> 🎯 <b>${db.getWatchedWallets().length} Registered</b>
 
 📊 <b>ACTIVITY & SUMMARY</b>
-├ <b>Signals Processed:</b> <b>${telemetry.totalTradesProcessed}</b>
-├ <b>Closed Trades:</b> <b>${telemetry.totalTradesClosed || 0}</b> (<code>${(telemetry.winRatePct ?? 0).toFixed(1)}% Win Rate</code>)
+├ <b>Signals Processed:</b> <b>${telemetry.totalTradesProcessed}</b>   •   <b>Trades:</b> <b>${telemetry.totalTradesClosed || 0}</b>
 └ <b>Realized PnL:</b> <b>${realizedSol >= 0 ? '🟢 +' : '🔴 '}${realizedSol.toFixed(4)} SOL</b> (<code>${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD</code>)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${divider}
     `.trim();
 
     const inlineKeyboard = {
