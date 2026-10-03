@@ -88,12 +88,15 @@ export class FastExecutionService {
     const minReserveFloor = solToLamportsBigInt(config.MIN_SOL_RESERVE_SOL);
     const totalReservationNeeded = requestedLamports + feeCalculation.totalEstimatedFeesLamports;
 
-    // Check spendable balance subtracting existing pending reservations
+    // Check spendable balance: subtracts active pending reservations and MIN_SOL_RESERVE_SOL exactly once globally
     const currentCachedBalance = executionWalletManager.getCachedBalanceLamports();
-    const spendable = capitalReservationLedger.getSpendableBalance(currentCachedBalance);
+    const spendable = capitalReservationLedger.calculateSpendableLamports(
+      currentCachedBalance,
+      minReserveFloor
+    );
 
-    if (spendable < totalReservationNeeded + minReserveFloor) {
-      const msg = `Insufficient spendable balance after pending reservations (available: ${(Number(spendable) / 1e9).toFixed(4)} SOL, required: ${(Number(totalReservationNeeded + minReserveFloor) / 1e9).toFixed(4)} SOL)`;
+    if (spendable < totalReservationNeeded) {
+      const msg = `Insufficient spendable balance after pending reservations (available: ${(Number(spendable) / 1e9).toFixed(4)} SOL, required: ${(Number(totalReservationNeeded) / 1e9).toFixed(4)} SOL)`;
       console.warn(`[FastExecution] ${msg}`);
       throw new Error(msg);
     }

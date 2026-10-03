@@ -180,21 +180,33 @@ export async function runBenchmark(sampleCount: number = 50) {
   const normalStats = stats(normalLatenciesMs);
   const fastStats = stats(fastLatenciesMs);
 
-  console.log('--- PATH A: Normal / Unoptimized Processing Time (Signal -> Tx Ready) ---');
+  console.log('--- PATH A: Normal / Unoptimized Path (In-Memory Signal -> Tx Build Ready) ---');
   console.table(normalStats);
 
-  console.log('\n--- PATH B: FAST_COPY_MODE In-Memory Processing Time (Signal -> Broadcast Dispatch) ---');
+  console.log('\n--- PATH B: FAST_COPY_MODE Path (In-Memory Signal -> Pre-Broadcast Dispatch) ---');
   console.table(fastStats);
 
   const speedupP50 = (normalStats.p50 / fastStats.p50).toFixed(2);
   const speedupP95 = (normalStats.p95 / fastStats.p95).toFixed(2);
 
-  console.log(`\n🚀 MEASURED LOCAL ACCELERATION:`);
-  console.log(`- p50 Latency:  ${normalStats.p50} ms -> ${fastStats.p50} ms (${speedupP50}x faster)`);
-  console.log(`- p95 Latency:  ${normalStats.p95} ms -> ${fastStats.p95} ms (${speedupP95}x faster)`);
-  console.log(`- Min/Max Fast: ${fastStats.min} ms / ${fastStats.max} ms`);
+  console.log(`\n============================================================`);
+  console.log(`📊 BENCHMARK TIMING BREAKDOWN & LATENCY PROOFS`);
+  console.log(`============================================================`);
+  console.log(`1. ACTUALLY MEASURED PROCESS-LOCAL CPU/MEMORY LATENCY (N = ${sampleCount}):`);
+  console.log(`   - Stage covered: Stream envelope decode -> curve cache lookup -> fast simulation policy -> tx build & sign -> in-memory reservation & idempotency registration`);
+  console.log(`   - Normal Local Path p50: ${normalStats.p50} ms | p95: ${normalStats.p95} ms`);
+  console.log(`   - Fast-Path Local p50:   ${fastStats.p50} ms | p95: ${fastStats.p95} ms`);
+  console.log(`   - Process-Local Speedup: ${speedupP50}x (p50), ${speedupP95}x (p95)`);
+  console.log(`   - Fast Min / Max:        ${fastStats.min} ms / ${fastStats.max} ms`);
+  console.log(`\n2. REFERENCE / ASSUMED NETWORK & CONSENSUS LATENCY (NOT measured in-process):`);
+  console.log(`   - Inbound WSS stream transit: ~50 - 150 ms (depends on Helius Atlas server proximity)`);
+  console.log(`   - Outbound Sender HTTP transit: ~30 - 120 ms (SWQoS / Helius Sender endpoint)`);
+  console.log(`   - Block leader landing & confirmation: ~400 - 1,200 ms (1-3 Solana slots)`);
+  console.log(`   * Note: These network ranges are reference figures and vary by geographic location & network congestion.`);
+  console.log(`============================================================\n`);
 
   return { normalStats, fastStats, speedupP50, speedupP95 };
 }
 
 runBenchmark(100).catch(console.error);
+

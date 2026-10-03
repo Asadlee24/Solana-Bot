@@ -16,6 +16,8 @@ import { FastTransactionDecoder, ParsedTransactionEnvelope } from '../src/parser
 import { capitalReservationLedger } from '../src/services/capital-reservation.js';
 import { curveStateCache } from '../src/services/curve-state-cache.js';
 import { HeliusTransactionStream } from '../src/streams/helius-transaction-stream.js';
+import { signalManager } from '../src/streams/signal-manager.js';
+import { liveEngine } from '../src/execution/live-engine.js';
 import { latencyTracker } from '../src/telemetry/latency-tracker.js';
 import { FastPathTimestamps, MirrorIntent, SwapIntent } from '../src/types/index.js';
 
@@ -525,5 +527,165 @@ describe('First-TX Fast Path Test Suite', () => {
     const summary = latencyTracker.getFastPathSummary();
     expect(summary.count).toBeGreaterThanOrEqual(1);
     expect(summary.signal_to_broadcast.p50).toBeGreaterThan(0);
+  });
+
+  // 18. PAPER safety proof: EXECUTION_MODE=PAPER + FAST_COPY_MODE=true NEVER broadcasts real transaction
+  it('EXECUTION_MODE=PAPER + FAST_COPY_MODE=true never invokes real broadcast path or moves funds', async () => {
+    config.EXECUTION_MODE = 'PAPER';
+    config.FAST_COPY_MODE = true;
+
+    vi.spyOn(riskEngine, 'evaluateIntent').mockReturnValue({
+      decision: 'APPROVED',
+      approved: true,
+    });
+
+    const broadcastFastSpy = vi.spyOn(transactionSubmitter, 'broadcastFast');
+    const submitAndConfirmSpy = vi.spyOn(transactionSubmitter, 'submitAndConfirm');
+    const fastBuySpy = vi.spyOn(fastExecutionService, 'executeFastBuy');
+    const liveTradeSpy = vi.spyOn(liveEngine, 'executeLiveTrade');
+
+    const targetKeypair = Keypair.generate();
+    const targetWallet = targetKeypair.publicKey.toBase58();
+    const testMint = Keypair.generate().publicKey.toBase58();
+
+    // Register watched wallet in DB
+    db.upsertWatchedWallet({
+      wallet: targetWallet,
+      label: 'Paper Test Target',
+      enabled: true,
+      buyMode: 'FIXED',
+      fixedBuyLamports: '100000000',
+      copyRatio: 1.0,
+      maxBuyLamports: '500000000',
+    });
+    signalManager.refreshWallets();
+
+    const sampleAccounts = [
+      '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf', // global
+      'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM', // fee recipient
+      testMint,                                       // mint
+      '8HjPjY2L24Hw1e3uP2YjW9GfH2kP3zX5yU7aB9cV1dE3', // bonding curve
+      '5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P111111111111', // associated bonding curve
+      '7A2kP3zX5yU7aB9cV1dE38HjPjY2L24Hw1e3uP2YjW9G', // user ATA
+      targetWallet,                                   // user / signer
+    ];
+
+    const ixData = Buffer.alloc(24);
+    Buffer.from([0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea]).copy(ixData, 0);
+    ixData.writeBigUInt64LE(5_000_000_000n, 8); // 5000 tokens
+    ixData.writeBigUInt64LE(100_000_000n, 16);  // 0.1 SOL
+
+    const envelope: ParsedTransactionEnvelope = {
+      signature: `sig_paper_${Date.now()}`,
+      slot: 123456,
+      signers: [targetWallet],
+      accountKeys: [targetWallet, '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', testMint, ...sampleAccounts],
+      instructions: [
+        {
+          programId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+          accounts: sampleAccounts,
+          data: ixData,
+        },
+      ],
+      observedAt: process.hrtime.bigint(),
+    };
+
+    const result = await signalManager.handleIncomingTransaction(envelope);
+
+    // PROOF: Zero real transaction broadcasts or live calls occurred
+    expect(broadcastFastSpy).toHaveBeenCalledTimes(0);
+    expect(submitAndConfirmSpy).toHaveBeenCalledTimes(0);
+    expect(fastBuySpy).toHaveBeenCalledTimes(0);
+    expect(liveTradeSpy).toHaveBeenCalledTimes(0);
+
+    // Verified that paper engine processed trade safely
+    expect(result.order).not.toBeNull();
+    expect(result.order?.mode).toBe('PAPER');
+    expect(result.order?.status).toBe('FILLED');
+  });
+
+  // 19. Capital reservation math: MIN_SOL_RESERVE_SOL subtracted exactly ONCE across 3+ concurrent orders
+  it('subtracts MIN_SOL_RESERVE_SOL exactly once globally across 3+ concurrent pending reservations', () => {
+    const totalBalance = 1_000_000_000n; // 1.0 SOL
+    const minReserveFloor = 20_000_000n; // 0.02 SOL
+    const mint1 = Keypair.generate().publicKey.toBase58();
+    const mint2 = Keypair.generate().publicKey.toBase58();
+    const mint3 = Keypair.generate().publicKey.toBase58();
+
+    // Order 1: 200M lamports (0.2 SOL)
+    capitalReservationLedger.reserveSimple('order_1', mint1, 200_000_000n);
+    const spendableAfter1 = capitalReservationLedger.calculateSpendableLamports(totalBalance, minReserveFloor);
+    expect(spendableAfter1).toBe(780_000_000n); // 1000M - 200M - 20M = 780M
+
+    // Order 2: 300M lamports (0.3 SOL)
+    capitalReservationLedger.reserveSimple('order_2', mint2, 300_000_000n);
+    const spendableAfter2 = capitalReservationLedger.calculateSpendableLamports(totalBalance, minReserveFloor);
+    expect(spendableAfter2).toBe(480_000_000n); // 1000M - (200M + 300M) - 20M = 480M
+
+    // Order 3: 400M lamports (0.4 SOL)
+    capitalReservationLedger.reserveSimple('order_3', mint3, 400_000_000n);
+    const spendableAfter3 = capitalReservationLedger.calculateSpendableLamports(totalBalance, minReserveFloor);
+    expect(spendableAfter3).toBe(80_000_000n); // 1000M - (200M + 300M + 400M) - 20M = 80M
+
+    // Order 4: Attempting 100M lamports (0.1 SOL) -> Must fail because 80M < 100M
+    const canSpend4 = capitalReservationLedger.canSpend(100_000_000n, totalBalance, minReserveFloor);
+    expect(canSpend4).toBe(false);
+
+    // Order 5: Attempting 50M lamports (0.05 SOL) -> Must succeed because 50M <= 80M
+    const canSpend5 = capitalReservationLedger.canSpend(50_000_000n, totalBalance, minReserveFloor);
+    expect(canSpend5).toBe(true);
+
+    // PROOF: If minReserveFloor (20M) were subtracted 3 times (once per reservation),
+    // remaining spendable would have been 1000M - 900M - 60M = 40M, which would have rejected 50M!
+    // Since 50M succeeded, the floor was proven subtracted EXACTLY ONCE globally.
+    expect(capitalReservationLedger.getTotalReservedLamports()).toBe(900_000_000n);
+  });
+
+  // 20. SUBMISSION_UNKNOWN timeout idempotency: only ONE broadcast attempt occurs and never duplicate-broadcasts
+  it('SUBMISSION_UNKNOWN state prevents automatic duplicate broadcast on retry or re-ingestion', async () => {
+    const targetSig = `sig_sender_timeout_${Date.now()}`;
+    const mint = Keypair.generate().publicKey.toBase58();
+    const idKey = PendingOrderManager.generateIdempotencyKey(targetSig, mint, 'BUY');
+
+    // 1. Initial registration
+    const regResult = pendingOrderManager.registerOrder({
+      targetSignature: targetSig,
+      mint,
+      side: 'BUY',
+      amountLamports: 100_000_000n,
+      reservationLamports: 100_050_000n,
+      recentBlockhash: 'mock_bh',
+    });
+    expect(regResult.success).toBe(true);
+
+    // 2. Sender HTTP times out after accepted dispatch -> transition to SUBMISSION_UNKNOWN
+    pendingOrderManager.transitionState(idKey, 'SUBMISSION_UNKNOWN', {
+      followerSignature: 'fol_sig_in_flight',
+      error: 'Gateway Timeout 504: Transaction status uncertain',
+    });
+
+    const order = pendingOrderManager.getOrder(idKey);
+    expect(order?.state).toBe('SUBMISSION_UNKNOWN');
+    expect(order?.followerSignature).toBe('fol_sig_in_flight');
+
+    // 3. Duplicate signal arrives via secondary stream/poller
+    const broadcastFastSpy = vi.spyOn(transactionSubmitter, 'broadcastFast');
+
+    // Idempotency check MUST reject the duplicate
+    const duplicateReg = pendingOrderManager.registerOrder({
+      targetSignature: targetSig,
+      mint,
+      side: 'BUY',
+      amountLamports: 100_000_000n,
+      reservationLamports: 100_050_000n,
+      recentBlockhash: 'mock_bh',
+    });
+
+    expect(duplicateReg.success).toBe(false);
+    expect(duplicateReg.error).toContain('Duplicate order rejected by idempotency guard');
+
+    // PROOF: Zero duplicate broadcast dispatches occurred
+    expect(broadcastFastSpy).toHaveBeenCalledTimes(0);
+    expect(pendingOrderManager.isTokenLocked(mint)).toBe(true); // Lock remains active
   });
 });

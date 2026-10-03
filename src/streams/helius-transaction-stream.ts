@@ -30,7 +30,8 @@ export class HeliusTransactionStream {
     ) {
       this.url = config.HELIUS_WSS_URL;
     } else if (config.HELIUS_API_KEY) {
-      this.url = `wss://mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
+      // Helius LaserStream / Enhanced WebSockets dedicated gateway (Developer+ plans)
+      this.url = `wss://atlas-mainnet.helius-rpc.com/?api-key=${config.HELIUS_API_KEY}`;
     } else {
       this.url = config.SOLANA_RPC_URL.replace(/^http:/i, 'ws:').replace(/^https:/i, 'wss:');
     }
