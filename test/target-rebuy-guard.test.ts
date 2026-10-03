@@ -88,6 +88,75 @@ describe('Target Pre-Existing Token & Re-Buy Guard', () => {
     expect(res.decision).toBe('APPROVED');
   });
 
+  it('strictly rejects 2nd and 3rd buys when target trader already bought the coin earlier (DCA prevention)', () => {
+    const riskEngine = new RiskEngine();
+    const tokenA = 'TokenMintA111111111111111111111111111111111';
+
+    const buy1: SwapIntent = {
+      targetSignature: 'sig_buy_1',
+      slot: 300000001,
+      targetWallet,
+      venue: 'PUMPFUN',
+      side: 'BUY',
+      inputMint: WSOL,
+      outputMint: tokenA,
+      tokenMint: tokenA,
+      inputAmountRaw: '100000000',
+      outputAmountRaw: '5000000000',
+      estimatedPrice: 0.00002,
+      isTargetRebuy: false,
+      observedAt: process.hrtime.bigint(),
+      timestampMs: Date.now(),
+      rawProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P',
+      confidence: 1.0,
+    };
+
+    // 1st buy: Fresh entry -> APPROVED
+    const res1 = riskEngine.evaluateIntent(buy1, 5_000_000_000n, 0n);
+    expect(res1.approved).toBe(true);
+    expect(res1.decision).toBe('APPROVED');
+
+    // System records that target trader has entered tokenA
+    riskEngine.recordTargetEntry(targetWallet, tokenA, 'sig_buy_1');
+
+    // 2nd buy attempt by target trader on same token: -> MUST BE REJECTED
+    const buy2: SwapIntent = {
+      ...buy1,
+      targetSignature: 'sig_buy_2',
+      slot: 300000005,
+      timestampMs: Date.now(),
+    };
+    const res2 = riskEngine.evaluateIntent(buy2, 5_000_000_000n, 0n);
+    expect(res2.approved).toBe(false);
+    expect(res2.decision).toBe('REJECTED_TARGET_ALREADY_HELD');
+    expect(res2.reason).toContain('Target trader already entered');
+
+    // 3rd buy attempt by target trader on same token: -> MUST BE REJECTED
+    const buy3: SwapIntent = {
+      ...buy1,
+      targetSignature: 'sig_buy_3',
+      slot: 300000010,
+      timestampMs: Date.now(),
+    };
+    const res3 = riskEngine.evaluateIntent(buy3, 5_000_000_000n, 0n);
+    expect(res3.approved).toBe(false);
+    expect(res3.decision).toBe('REJECTED_TARGET_ALREADY_HELD');
+
+    // Target sells/exits tokenA: Entry is cleared
+    riskEngine.clearTargetEntry(targetWallet, tokenA);
+
+    // After selling out, a new fresh entry can be evaluated
+    const freshReentry: SwapIntent = {
+      ...buy1,
+      targetSignature: 'sig_buy_new_cycle',
+      slot: 300000100,
+      timestampMs: Date.now(),
+    };
+    const resFresh = riskEngine.evaluateIntent(freshReentry, 5_000_000_000n, 0n);
+    expect(resFresh.approved).toBe(true);
+    expect(resFresh.decision).toBe('APPROVED');
+  });
+
   it('FastTransactionDecoder accurately marks isTargetRebuy=true when target preTokenBalances > 0', () => {
     const disc = Buffer.from([102, 6, 61, 18, 1, 218, 235, 234]);
     const bufData = Buffer.alloc(24);

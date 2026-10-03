@@ -13,6 +13,10 @@ node_modules/
 *.pem
 
 # SQLite Databases & Local runtime storage
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
 data/*.db
 data/*.db-shm
 data/*.db-wal

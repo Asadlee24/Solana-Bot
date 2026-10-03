@@ -17,12 +17,30 @@ export class RiskEngine {
   private lastBuyTimestampByMint: Map<string, number> = new Map();
   private lifetimeBoughtMints: Set<string> = new Set();
   private firstSeenTargetPriceByMint: Map<string, number> = new Map();
+  private targetActiveEntries: Map<string, Set<string>> = new Map();
 
   constructor() {
     this.initDefaultBlacklist();
     this.initRecentCooldownsFromDb();
     this.initLifetimeBoughtMints();
     this.initFirstSeenTargetPrices();
+    this.initTargetActiveEntries();
+  }
+
+  private initTargetActiveEntries() {
+    try {
+      const entries = db.getAllTargetActiveEntries();
+      for (const e of entries) {
+        let set = this.targetActiveEntries.get(e.target_wallet);
+        if (!set) {
+          set = new Set();
+          this.targetActiveEntries.set(e.target_wallet, set);
+        }
+        set.add(e.token_mint);
+      }
+    } catch {
+      // db may not be initialized yet in isolated tests
+    }
   }
 
   private initLifetimeBoughtMints() {
@@ -128,6 +146,15 @@ export class RiskEngine {
         decision: 'REJECTED_TARGET_ALREADY_HELD',
         approved: false,
         reason: `Target trader already held pre-existing tokens in ${intent.tokenMint.slice(0, 8)}... (${intent.targetPreBalanceToken || '>0'} tokens). Only fresh initial entries are copied!`,
+      };
+    }
+
+    // 4b. Target Active Entry Guard: Reject 2nd, 3rd, or subsequent buys if target already entered this coin
+    if (this.hasTargetActiveEntry(intent.targetWallet, intent.tokenMint)) {
+      return {
+        decision: 'REJECTED_TARGET_ALREADY_HELD',
+        approved: false,
+        reason: `Target trader already entered ${intent.tokenMint.slice(0, 8)}... earlier (2nd/3rd entry / DCA blocked). Only fresh 1st entries are copied!`,
       };
     }
 
@@ -436,6 +463,44 @@ export class RiskEngine {
       this.inFlightBuys.clear();
       this.lifetimeBoughtMints.clear();
     }
+  }
+
+  public recordTargetEntry(targetWallet: string, tokenMint: string, txSignature: string = ''): void {
+    let set = this.targetActiveEntries.get(targetWallet);
+    if (!set) {
+      set = new Set();
+      this.targetActiveEntries.set(targetWallet, set);
+    }
+    set.add(tokenMint);
+    try {
+      db.recordTargetActiveEntry(targetWallet, tokenMint, txSignature);
+    } catch {}
+  }
+
+  public clearTargetEntry(targetWallet: string, tokenMint: string): void {
+    const set = this.targetActiveEntries.get(targetWallet);
+    if (set) {
+      set.delete(tokenMint);
+    }
+    try {
+      db.clearTargetActiveEntry(targetWallet, tokenMint);
+    } catch {}
+  }
+
+  public hasTargetActiveEntry(targetWallet: string, tokenMint: string): boolean {
+    const set = this.targetActiveEntries.get(targetWallet);
+    if (set && set.has(tokenMint)) {
+      return true;
+    }
+    try {
+      return db.hasTargetActiveEntry(targetWallet, tokenMint);
+    } catch {
+      return false;
+    }
+  }
+
+  public clearAllTargetEntries(): void {
+    this.targetActiveEntries.clear();
   }
 }
 

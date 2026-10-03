@@ -213,13 +213,22 @@ export class FastExecutionService {
         if (sim.value.err) {
           const errLogs = sim.value.logs?.slice(-3).join('; ') || 'No logs';
           const errMsg = `Fast simulation failed: ${JSON.stringify(sim.value.err)} | ${errLogs}`;
-          console.error(`[FastExecution] ${errMsg}`);
+          console.warn(`[FastExecution Fallback] ${errMsg}. Safe fallback to standard execution.`);
           pendingOrderManager.resolveOrder(idempotencyKey, 'FAILED', { error: errMsg });
-          throw new Error(errMsg);
+          return {
+            order: null as any,
+            fallbackNeeded: true,
+            fallbackReason: errMsg,
+          };
         }
       } catch (simErr: any) {
+        console.warn(`[FastExecution Fallback] Preflight error: ${simErr.message}. Safe fallback to standard execution.`);
         pendingOrderManager.resolveOrder(idempotencyKey, 'FAILED', { error: simErr.message });
-        throw simErr;
+        return {
+          order: null as any,
+          fallbackNeeded: true,
+          fallbackReason: simErr.message,
+        };
       }
     } else {
       console.info(`[FastExecution ⚡] Simulation safely bypassed: ${simPolicy.reason}`);

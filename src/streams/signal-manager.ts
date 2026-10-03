@@ -146,6 +146,13 @@ export class SignalManager extends EventEmitter {
       return { intent: swapIntent, order: null };
     }
 
+    // If target is selling, clear target active entry so fresh re-entries can be tracked in the future
+    if (swapIntent.side === 'SELL') {
+      if (!swapIntent.sellFraction || swapIntent.sellFraction >= 0.8) {
+        riskEngine.clearTargetEntry(swapIntent.targetWallet, swapIntent.tokenMint);
+      }
+    }
+
     // Skip SELL orders if follower wallet holds 0 balance of this token
     if (swapIntent.side === 'SELL' && BigInt(mirrorIntent.requestedInAmountRaw || '0') <= 0n) {
       console.info(`[SKIP SELL] Follower holds 0 balance of token ${swapIntent.tokenMint}. Skipping unheld sell.`);
@@ -158,6 +165,8 @@ export class SignalManager extends EventEmitter {
 
     if (swapIntent.side === 'BUY') {
       riskEngine.markInFlight(swapIntent.tokenMint);
+      // Record target trader entry immediately so any 2nd, 3rd, or DCA buys are blocked
+      riskEngine.recordTargetEntry(swapIntent.targetWallet, swapIntent.tokenMint, swapIntent.targetSignature);
     }
 
     // 6. Execution Gateway (Fast Path, Live, or Paper)

@@ -1,3 +1,5 @@
+import { PublicKey } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { SwapIntent, DexVenue } from '../types/index.js';
 import { JupiterAdapter } from './adapters/jupiter.js';
 import { OrcaAdapter } from './adapters/orca.js';
@@ -265,10 +267,19 @@ export class FastTransactionDecoder {
       try {
         let isRebuy = false;
         let preBalRaw = '0';
+        let targetAtaStr: string | null = null;
+        try {
+          const mintPub = new PublicKey(intent.tokenMint);
+          const targetPub = new PublicKey(targetWallet);
+          targetAtaStr = getAssociatedTokenAddressSync(mintPub, targetPub, true).toBase58();
+        } catch {}
+
         for (const b of tx.meta.preTokenBalances) {
+          const accKey = allAccountKeys && allAccountKeys[b.accountIndex];
           const isTargetOwner =
             b.owner === targetWallet ||
-            (allAccountKeys && allAccountKeys[b.accountIndex] === targetWallet);
+            accKey === targetWallet ||
+            (targetAtaStr !== null && accKey === targetAtaStr);
           if (isTargetOwner && b.mint === intent.tokenMint) {
             const amt = BigInt(b.uiTokenAmount?.amount || '0');
             if (amt > 0n) {

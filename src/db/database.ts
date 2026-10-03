@@ -162,6 +162,22 @@ export class DBManager {
           } catch {}
         },
       },
+      {
+        version: 6,
+        name: 'target_active_entries_table',
+        up: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS target_active_entries (
+              target_wallet TEXT NOT NULL,
+              token_mint TEXT NOT NULL,
+              first_seen_at INTEGER NOT NULL,
+              last_tx_signature TEXT NOT NULL,
+              PRIMARY KEY (target_wallet, token_mint)
+            );
+            CREATE INDEX IF NOT EXISTS idx_target_active_entries_wallet ON target_active_entries (target_wallet);
+          `);
+        },
+      },
     ];
 
     const recordMigration = this.db.prepare(
@@ -335,6 +351,14 @@ export class DBManager {
         );
         CREATE INDEX IF NOT EXISTS idx_latency_sig ON latency_samples (target_signature);
         CREATE INDEX IF NOT EXISTS idx_positions_mint_state ON positions (token_mint, state);
+        CREATE TABLE IF NOT EXISTS target_active_entries (
+          target_wallet TEXT NOT NULL,
+          token_mint TEXT NOT NULL,
+          first_seen_at INTEGER NOT NULL,
+          last_tx_signature TEXT NOT NULL,
+          PRIMARY KEY (target_wallet, token_mint)
+        );
+        CREATE INDEX IF NOT EXISTS idx_target_active_entries_wallet ON target_active_entries (target_wallet);
       `);
     }
 
@@ -1554,6 +1578,32 @@ export class DBManager {
 
   public clearPendingOrders(): void {
     this.db.exec('DELETE FROM pending_orders');
+  }
+
+  public recordTargetActiveEntry(targetWallet: string, tokenMint: string, txSignature: string = ''): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO target_active_entries (target_wallet, token_mint, first_seen_at, last_tx_signature)
+      VALUES (?, ?, ?, ?)
+    `);
+    stmt.run(targetWallet, tokenMint, Date.now(), txSignature);
+  }
+
+  public hasTargetActiveEntry(targetWallet: string, tokenMint: string): boolean {
+    const stmt = this.db.prepare(`
+      SELECT 1 FROM target_active_entries WHERE target_wallet = ? AND token_mint = ? LIMIT 1
+    `);
+    return !!stmt.get(targetWallet, tokenMint);
+  }
+
+  public clearTargetActiveEntry(targetWallet: string, tokenMint: string): void {
+    const stmt = this.db.prepare(`
+      DELETE FROM target_active_entries WHERE target_wallet = ? AND token_mint = ?
+    `);
+    stmt.run(targetWallet, tokenMint);
+  }
+
+  public getAllTargetActiveEntries(): { target_wallet: string; token_mint: string }[] {
+    return this.db.prepare('SELECT target_wallet, token_mint FROM target_active_entries').all() as any;
   }
 
   public close() {

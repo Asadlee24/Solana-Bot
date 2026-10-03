@@ -197,3 +197,13 @@ CREATE TABLE IF NOT EXISTS pending_orders (
 );
 CREATE INDEX IF NOT EXISTS idx_pending_orders_state ON pending_orders (state);
 CREATE INDEX IF NOT EXISTS idx_pending_orders_target_sig ON pending_orders (target_signature);
+
+-- Target Trader Active Token Entries (Guarantees only 1st entry is copied, blocks DCA/2nd/3rd buys)
+CREATE TABLE IF NOT EXISTS target_active_entries (
+    target_wallet TEXT NOT NULL,
+    token_mint TEXT NOT NULL,
+    first_seen_at INTEGER NOT NULL,
+    last_tx_signature TEXT NOT NULL,
+    PRIMARY KEY (target_wallet, token_mint)
+);
+CREATE INDEX IF NOT EXISTS idx_target_active_entries_wallet ON target_active_entries (target_wallet);
