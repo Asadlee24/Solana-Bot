@@ -209,7 +209,7 @@ export const PositionsTable: React.FC<PositionsTableProps> = ({ positions, isLoa
                               <span>
                                 {pos.trailingFloorPct !== null && pos.trailingFloorPct !== undefined && pos.trailingFloorPct > 2
                                   ? `Trailing Floor: +${pos.trailingFloorPct}%`
-                                  : `Zero-Loss Locked`}
+                                  : `Breakeven Locked`}
                               </span>
                             </div>
                           )}

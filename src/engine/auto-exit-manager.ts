@@ -42,7 +42,7 @@ export class AutoExitManager {
     this.isRunning = true;
 
     console.info(
-      `[AUTO-EXIT] Engine started | TP: ${config.AUTO_TP_ENABLED ? `+${config.AUTO_TP_GAIN_PCT}% (Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)` : 'OFF'} | SL: ${config.AUTO_SL_ENABLED ? `-${config.AUTO_SL_LOSS_PCT}% (Sell 100%)` : 'OFF'} | Trailing & Zero-Loss: ${config.TRAILING_SL_ENABLED ? `ON (Lock @ +${config.BREAKEVEN_TRIGGER_PCT}% -> +${config.BREAKEVEN_LOCK_PCT}%, Trail -${config.TRAILING_SL_CUSHION_PCT}%)` : 'OFF'} | Poll: ${config.AUTO_EXIT_POLL_INTERVAL_MS}ms`
+      `[AUTO-EXIT] Engine started | TP: ${config.AUTO_TP_ENABLED ? `+${config.AUTO_TP_GAIN_PCT}% (Sell ${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%)` : 'OFF'} | SL: ${config.AUTO_SL_ENABLED ? `-${config.AUTO_SL_LOSS_PCT}% (Sell 100%)` : 'OFF'} | Trailing & Breakeven: ${config.TRAILING_SL_ENABLED ? `ON (Lock @ +${config.BREAKEVEN_TRIGGER_PCT}% -> +${config.BREAKEVEN_LOCK_PCT}%, Trail -${config.TRAILING_SL_CUSHION_PCT}%)` : 'OFF'} | Poll: ${config.AUTO_EXIT_POLL_INTERVAL_MS}ms`
     );
 
     this.scheduleNextTick();
@@ -240,18 +240,18 @@ export class AutoExitManager {
           }
         }
 
-        // 4. Calculate Dynamic Stop-Loss Floor & Zero-Loss Guarantee
+        // 4. Calculate Dynamic Stop-Loss Floor & Breakeven Protection
         let effectiveSlFloor = -config.AUTO_SL_LOSS_PCT; // Base anti-rug floor (e.g. -30%)
         let isBreakevenActive = false;
         let isTrailingActive = false;
 
         if (config.TRAILING_SL_ENABLED) {
-          // Zero-Loss Guarantee: If coin peak has crossed Breakeven Trigger (default: +20%)
+          // Breakeven Protection Floor: If coin peak has crossed Breakeven Trigger (default: +20%)
           if (currentPeak >= config.BREAKEVEN_TRIGGER_PCT) {
             effectiveSlFloor = Math.max(effectiveSlFloor, config.BREAKEVEN_LOCK_PCT);
             isBreakevenActive = true;
 
-            // One-time alert that Zero-Loss Guarantee is active
+            // One-time alert that Breakeven Protection is active
             if (!this.breakevenAlerted.has(pos.id)) {
               this.breakevenAlerted.add(pos.id);
               db.saveBreakevenAlerted(pos.id, true); // persist to DB
@@ -369,7 +369,7 @@ export class AutoExitManager {
   ): Promise<void> {
     this.inFlightExits.add(pos.tokenMint);
     console.info(
-      `🛡️ [ZERO-LOSS BREAKEVEN EXIT] ${pos.tokenMint} at ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% (Peak was +${peakPct.toFixed(1)}%). Executing 100% exit...`
+      `🛡️ [BREAKEVEN PROTECTION EXIT] ${pos.tokenMint} at ${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}% (Peak was +${peakPct.toFixed(1)}%). Executing 100% exit...`
     );
 
     try {
@@ -381,7 +381,7 @@ export class AutoExitManager {
       this.breakevenAlerted.delete(pos.id);
       telegramNotifier.notifyBreakevenExit(order, position || pos, pnlPct, peakPct, meta);
     } catch (err: any) {
-      console.error(`❌ [ZERO-LOSS EXIT ERROR] ${pos.tokenMint}:`, err.message || err);
+      console.error(`❌ [BREAKEVEN EXIT ERROR] ${pos.tokenMint}:`, err.message || err);
       this.handleExitFailure(pos.tokenMint, err);
     } finally {
       this.inFlightExits.delete(pos.tokenMint);

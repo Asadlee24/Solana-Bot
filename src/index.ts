@@ -8,11 +8,23 @@ import { liveEngine } from './execution/live-engine.js';
 import { executionWalletManager } from './execution/wallet-manager.js';
 import { telegramNotifier } from './notifications/telegram.js';
 import { positionSyncService } from './services/position-sync.js';
+import { readinessValidator } from './services/readiness.js';
 import { HeliusWebSocketStream } from './streams/helius-ws.js';
 import { rpcPoller } from './streams/rpc-poller.js';
 import { signalManager } from './streams/signal-manager.js';
 
 async function bootstrap() {
+  // Validate system configuration and security readiness
+  const readiness = readinessValidator.validate();
+  readinessValidator.logReport(readiness);
+
+  if (config.EXECUTION_MODE === 'LIVE' && !readiness.canStart) {
+    console.error(
+      '[STARTUP BLOCKED] Critical startup configuration missing or invalid for LIVE execution mode. Failing closed.'
+    );
+    process.exit(1);
+  }
+
   // Startup self-test for execution wallet (prints ONLY public key)
   executionWalletManager.logStartupStatus();
 

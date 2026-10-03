@@ -14,7 +14,9 @@
     "replay": "tsx src/cli/replay-cli.ts",
     "simulate": "tsx src/cli/simulate-trade.ts",
     "dashboard:dev": "vite dashboard --port 3000",
-    "dashboard:build": "vite build dashboard && node scripts/post-build.js"
+    "dashboard:build": "vite build dashboard && node scripts/post-build.js",
+    "db:backup": "tsx scripts/backup-db.ts",
+    "db:restore": "tsx scripts/restore-db.ts"
   },
   "keywords": [
     "solana",

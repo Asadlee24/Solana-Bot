@@ -1,6 +1,6 @@
-import { CheckCircle2, Globe, RefreshCw, Server, XCircle } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, Globe, Lock, RefreshCw, Server, XCircle } from 'lucide-react';
 import React, { useState } from 'react';
-import { getApiBase, setApiBase } from '../../lib/api';
+import { getApiBase, getControlToken, setApiBase, setControlToken } from '../../lib/api';
 import { Modal } from './Modal';
 
 interface ApiConfigModalProps {
@@ -15,6 +15,8 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
   onSaved,
 }) => {
   const [apiUrl, setApiUrl] = useState<string>(getApiBase());
+  const [controlToken, setControlTokenState] = useState<string>(getControlToken());
+  const [showToken, setShowToken] = useState<boolean>(false);
   const [testState, setTestState] = useState<'IDLE' | 'TESTING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [testMsg, setTestMsg] = useState<string>('');
 
@@ -49,6 +51,7 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
 
   const handleSave = () => {
     setApiBase(apiUrl.trim());
+    setControlToken(controlToken.trim());
     onSaved();
     onClose();
   };
@@ -56,6 +59,8 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
   const handleReset = () => {
     setApiUrl('');
     setApiBase('');
+    setControlTokenState('');
+    setControlToken('');
     setTestState('IDLE');
     setTestMsg('');
     onSaved();
@@ -109,6 +114,35 @@ export const ApiConfigModal: React.FC<ApiConfigModalProps> = ({
           </div>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0 0' }}>
             Leave blank to use default relative path (standard when running locally or on same domain).
+          </p>
+        </div>
+
+        <div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+            <Lock size={12} color="#f59e0b" />
+            <span>OPERATOR CONTROL API TOKEN (AUTH)</span>
+          </label>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input
+              type={showToken ? 'text' : 'password'}
+              className="wallet-input"
+              style={{ flex: 1, padding: '10px 12px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', borderRadius: '6px', color: '#fff', fontSize: '13px', fontFamily: showToken ? 'inherit' : 'monospace' }}
+              placeholder="Enter server CONTROL_API_TOKEN"
+              value={controlToken}
+              onChange={(e) => setControlTokenState(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 12px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+              onClick={() => setShowToken(!showToken)}
+              title={showToken ? 'Hide token' : 'Show token'}
+            >
+              {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '6px 0 0 0' }}>
+            Required for mutating operations (Live Arm, Kill Switch, Manual Sell/Close, Watched Wallets, Circuit Breaker Reset). Kept in session memory only (never saved permanently or leaked in URLs).
           </p>
         </div>
 

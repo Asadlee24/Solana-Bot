@@ -1,8 +1,11 @@
+import crypto from 'crypto';
 import cors from 'cors';
 import express, { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
-import { config } from '../config/index.js';
+import { PublicKey } from '@solana/web3.js';
+import { z } from 'zod';
+import { CANONICAL_LIVE_TRADING_ACK, config } from '../config/index.js';
 import { db } from '../db/database.js';
 import { riskEngine } from '../engine/risk-engine.js';
 import { liveEngine } from '../execution/live-engine.js';
@@ -14,20 +17,59 @@ import { traderNamingService } from '../services/trader-naming.js';
 import { signalManager } from '../streams/signal-manager.js';
 import { WebhookReceiver } from '../streams/webhook-server.js';
 import { SystemTelemetry, FollowerPosition } from '../types/index.js';
+import {
+  authFailureLimiter,
+  mutatingControlLimiter,
+  tradingExitLimiter,
+  walletMutationLimiter,
+  webhookRateLimiter,
+} from './rate-limiter.js';
 
 // Authentication middleware for state-modifying actions
 export const requireControlAuth = (req: Request, res: Response, next: express.NextFunction) => {
-  if (!config.CONTROL_API_TOKEN || config.CONTROL_API_TOKEN.trim() === '') {
-    return next();
-  }
-  const tokenHeader = req.headers['x-api-token'] as string;
-  const authHeader = req.headers.authorization;
-  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  const clientIp = typeof req.headers['x-forwarded-for'] === 'string'
+    ? req.headers['x-forwarded-for'].split(',')[0].trim()
+    : req.ip || req.socket?.remoteAddress || 'unknown';
 
-  if (tokenHeader === config.CONTROL_API_TOKEN || bearerToken === config.CONTROL_API_TOKEN) {
-    return next();
+  if (authFailureLimiter.isRateLimited(clientIp)) {
+    return res.status(429).json({
+      error: 'Too many failed authentication attempts. Please wait a minute before retrying.',
+    });
   }
-  return res.status(401).json({ error: 'Unauthorized: Invalid or missing CONTROL_API_TOKEN' });
+
+  const configuredToken = config.CONTROL_API_TOKEN ? config.CONTROL_API_TOKEN.trim() : '';
+
+  // Fail-closed rule: Missing CONTROL_API_TOKEN must never silently make privileged routes public.
+  if (!configuredToken) {
+    if (config.ALLOW_UNAUTHENTICATED_CONTROL && config.NODE_ENV !== 'production') {
+      return next();
+    }
+    return res.status(401).json({
+      error: 'Unauthorized: CONTROL_API_TOKEN is not configured on this server. State-modifying controls fail-closed.',
+    });
+  }
+
+  const tokenHeader = req.headers['x-api-token'];
+  const authHeader = req.headers.authorization;
+  const provided = typeof tokenHeader === 'string' && tokenHeader.trim()
+    ? tokenHeader.trim()
+    : (authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null);
+
+  if (!provided) {
+    authFailureLimiter.recordHit(clientIp);
+    return res.status(401).json({ error: 'Unauthorized: Missing CONTROL_API_TOKEN' });
+  }
+
+  const expectedBuf = Buffer.from(configuredToken);
+  const actualBuf = Buffer.from(provided);
+  const isValid = expectedBuf.length === actualBuf.length && crypto.timingSafeEqual(expectedBuf, actualBuf);
+
+  if (!isValid) {
+    authFailureLimiter.recordHit(clientIp);
+    return res.status(401).json({ error: 'Unauthorized: Invalid CONTROL_API_TOKEN' });
+  }
+
+  return next();
 };
 
 export function createApiServer() {
@@ -40,15 +82,36 @@ export function createApiServer() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          callback(new Error('Blocked by CORS policy'));
+        // 1. Same-origin or direct server-to-server/curl without Origin header
+        if (!origin) {
+          return callback(null, true);
         }
+
+        // 2. Explicitly allowed configured origins
+        if (allowedOrigins.includes(origin)) {
+          return callback(null, true);
+        }
+
+        // 3. Local development relaxed logic (only when NOT in production)
+        const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+        if (config.NODE_ENV !== 'production' && isLocalhost) {
+          return callback(null, true);
+        }
+
+        // 4. In production or unapproved cross-origin: reject
+        callback(new Error('Blocked by CORS policy'));
       },
+      credentials: true,
     })
   );
-  app.use(express.json());
+
+  app.use(express.json({ limit: '1mb' }));
+  app.use((err: any, _req: Request, res: Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      return res.status(400).json({ error: 'Malformed JSON payload' });
+    }
+    next(err);
+  });
 
   // Serve static web dashboard build if available
   const distPath = path.resolve('dashboard/dist');
@@ -56,13 +119,13 @@ export function createApiServer() {
     app.use(express.static(distPath));
   }
 
-  // Webhook Receiver
+  // Webhook Receiver with rate limiter
   const webhookReceiver = new WebhookReceiver({
     onTransaction: (tx) => {
       signalManager.handleIncomingTransaction(tx, 'WEBHOOK', 'PROCESSED_SUCCESS');
     },
   });
-  app.post('/webhook/helius', webhookReceiver.handleHeliusWebhook);
+  app.post('/webhook/helius', webhookRateLimiter.middleware, webhookReceiver.handleHeliusWebhook);
 
   const getEnrichedPositions = async () => {
     const dbWallets = db.getWatchedWallets().map((w) => w.wallet);
@@ -110,11 +173,11 @@ export function createApiServer() {
               continue;
             }
 
-            const decimals = await mintDecimalsService.getDecimals(item.mint);
+            const decimals = await mintDecimalsService.getDecimals(item.mint, { allowUnverifiedDisplay: true });
             const meta = await tokenMetadataService.getTokenMetadata(item.mint);
             const priceSol = meta?.priceSol || 0;
-            const liveSol = (await tokenMetadataService.getSolPriceUsd()) || 140.0;
-            const priceUsd = meta?.priceUsd || priceSol * liveSol;
+            const liveSol = (await tokenMetadataService.getSolPriceUsd()) || (config.SOL_PRICE_USD || 0);
+            const priceUsd = meta?.priceUsd || (liveSol > 0 ? priceSol * liveSol : 0);
             const tokenQty = Number(item.amountRaw) / (10 ** decimals);
             const estValueUsd = tokenQty * priceUsd;
 
@@ -159,14 +222,16 @@ export function createApiServer() {
       }
     }
 
-    const solPriceUsd = (await tokenMetadataService.getSolPriceUsd()) || 140.0;
+    const solPriceUsd = (await tokenMetadataService.getSolPriceUsd()) || (config.SOL_PRICE_USD || 0);
 
     return Promise.all(
       open.map(async (pos) => {
-        const decimals = await mintDecimalsService.getDecimals(pos.tokenMint);
+        const decimals = await mintDecimalsService.getDecimals(pos.tokenMint, { allowUnverifiedDisplay: true });
         const meta = await tokenMetadataService.getTokenMetadata(pos.tokenMint);
         const currentPriceSol = meta?.priceSol && meta.priceSol > 0 ? meta.priceSol : pos.avgEntryPriceSol;
-        const currentPriceUsd = meta?.priceUsd && meta.priceUsd > 0 ? meta.priceUsd : (currentPriceSol * solPriceUsd);
+        const currentPriceUsd = meta?.priceUsd && meta.priceUsd > 0
+          ? meta.priceUsd
+          : (solPriceUsd > 0 ? currentPriceSol * solPriceUsd : 0);
 
         const tokenQty = Number(pos.qtyRaw) / (10 ** decimals);
         let costBasisLamports = BigInt(pos.costBasisLamports || '0');
@@ -174,10 +239,10 @@ export function createApiServer() {
           costBasisLamports = BigInt(Math.round((config.FIXED_BUY_SOL || 0.05) * 1e9));
         }
         const costBasisSol = Number(costBasisLamports) / 1e9;
-        const costBasisUsd = costBasisSol * solPriceUsd;
+        const costBasisUsd = solPriceUsd > 0 ? costBasisSol * solPriceUsd : 0;
 
         const currentValueSol = tokenQty * currentPriceSol;
-        const currentValueUsd = currentValueSol * solPriceUsd;
+        const currentValueUsd = solPriceUsd > 0 ? currentValueSol * solPriceUsd : 0;
 
         const unrealizedPnlSol = currentValueSol - costBasisSol;
         const unrealizedPnlPct = costBasisSol > 0 ? (unrealizedPnlSol / costBasisSol) * 100 : 0;
@@ -205,13 +270,13 @@ export function createApiServer() {
           traderGmgnUrl: traderInfo.gmgnUrl,
           metadata: meta,
           decimals,
-          solPriceUsd,
+          solPriceUsd: solPriceUsd > 0 ? solPriceUsd : null,
           currentPriceSol,
-          currentPriceUsd,
+          currentPriceUsd: solPriceUsd > 0 ? currentPriceUsd : null,
           currentValueSol: Number(currentValueSol.toFixed(4)),
-          currentValueUsd: Number(currentValueUsd.toFixed(2)),
+          currentValueUsd: solPriceUsd > 0 ? Number(currentValueUsd.toFixed(2)) : null,
           costBasisSol: Number(costBasisSol.toFixed(4)),
-          costBasisUsd: Number(costBasisUsd.toFixed(2)),
+          costBasisUsd: solPriceUsd > 0 ? Number(costBasisUsd.toFixed(2)) : null,
           unrealizedPnlSol: Number(unrealizedPnlSol.toFixed(4)),
           unrealizedPnlPct: Number(unrealizedPnlPct.toFixed(2)),
           unrealizedPnlLamports,
@@ -227,6 +292,12 @@ export function createApiServer() {
     const telemetry = db.getSystemTelemetry();
     telemetry.circuitBreakerTripped = riskEngine.isTripped();
 
+    // Derived strictly from settled trade positions ledger (never contaminated by deposits or withdrawals)
+    const accounting = db.getAccountingSummary();
+    telemetry.totalRealizedPnlSol = Number(accounting.realizedPnlSol.toFixed(4));
+    telemetry.totalTradesClosed = accounting.totalTradesClosed;
+    telemetry.winRatePct = accounting.winRatePct;
+
     try {
       const liveSolPrice = await tokenMetadataService.getSolPriceUsd();
       if (liveSolPrice > 0) {
@@ -241,9 +312,16 @@ export function createApiServer() {
     telemetry.totalUnrealizedPnlSol = Number(liveFloatingSol.toFixed(4));
     telemetry.totalNetPnlSol = Number((telemetry.totalRealizedPnlSol + liveFloatingSol).toFixed(4));
     telemetry.currentPaperBalanceSol = Number((telemetry.initialPaperBalanceSol + telemetry.totalNetPnlSol).toFixed(4));
-    telemetry.totalPaperBalanceUsd = Number((telemetry.currentPaperBalanceSol * telemetry.solPriceUsd).toFixed(2));
-    telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
-    telemetry.roiPercent = Number(((telemetry.totalNetPnlSol / telemetry.initialPaperBalanceSol) * 100).toFixed(2));
+
+    if (telemetry.solPriceUsd && telemetry.solPriceUsd > 0) {
+      telemetry.totalPaperBalanceUsd = Number((telemetry.currentPaperBalanceSol * telemetry.solPriceUsd).toFixed(2));
+      telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
+      telemetry.totalRealizedPnlUsd = Number((telemetry.totalRealizedPnlSol * telemetry.solPriceUsd).toFixed(2));
+    }
+
+    telemetry.roiPercent = telemetry.initialPaperBalanceSol > 0
+      ? Number(((telemetry.totalNetPnlSol / telemetry.initialPaperBalanceSol) * 100).toFixed(2))
+      : 0;
 
     telemetry.isLiveMode = config.EXECUTION_MODE === 'LIVE';
     if (config.EXECUTION_MODE === 'LIVE') {
@@ -255,14 +333,9 @@ export function createApiServer() {
       telemetry.liveEngineArmed = liveEngine.getStatus().isArmed;
 
       const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-      const netGainSol = walletStatus.balanceSol - initialCapital;
-      telemetry.totalRealizedPnlSol = Number(netGainSol.toFixed(4));
-      telemetry.totalRealizedPnlUsd = Number((netGainSol * telemetry.solPriceUsd).toFixed(2));
-      telemetry.totalNetPnlSol = Number((netGainSol + liveFloatingSol).toFixed(4));
-      telemetry.totalNetPnlUsd = Number((telemetry.totalNetPnlSol * telemetry.solPriceUsd).toFixed(2));
-      telemetry.roiPercent = Number(((netGainSol / initialCapital) * 100).toFixed(2));
-      telemetry.winRatePct = 100.0;
-      telemetry.totalTradesClosed = 4;
+      telemetry.roiPercent = initialCapital > 0
+        ? Number(((telemetry.totalNetPnlSol / initialCapital) * 100).toFixed(2))
+        : 0;
     }
 
     return telemetry;
@@ -279,11 +352,48 @@ export function createApiServer() {
     res.json(enriched);
   });
 
-  app.post('/api/positions/:id/sell', async (req: Request, res: Response) => {
+  // Input validation schemas
+  const SellInputSchema = z.object({
+    fraction: z.number().positive().max(1.0, 'fraction must be <= 1.0').default(1.0),
+  });
+
+  const WatchedWalletInputSchema = z.object({
+    wallet: z.string().refine((val) => {
+      try {
+        new PublicKey(val);
+        return true;
+      } catch {
+        return false;
+      }
+    }, { message: 'Invalid Solana base58 public key' }),
+    label: z.string().min(1).max(64).default('Target Trader'),
+    enabled: z.boolean().default(true),
+    buyMode: z.enum(['FIXED_SIZE', 'TARGET_NOTIONAL_SCALAR', 'CAPPED_PROPORTIONAL_HYBRID']).default('FIXED_SIZE'),
+    fixedBuyLamports: z.string().regex(/^\d+$/, 'fixedBuyLamports must be integer lamports').default('100000000'),
+    copyRatio: z.number().positive().max(10, 'copyRatio cannot exceed 10x').default(0.05),
+    maxBuyLamports: z.string().regex(/^\d+$/, 'maxBuyLamports must be integer lamports').default('1000000000'),
+    configJson: z.string().optional(),
+    createdAt: z.number().default(() => Date.now()),
+  });
+
+  app.post('/api/positions/:id/sell', requireControlAuth, tradingExitLimiter.middleware, async (req: Request, res: Response) => {
     try {
       const positionId = req.params.id;
-      const fraction = typeof req.body?.fraction === 'number' ? req.body.fraction : 1.0;
+      const parseResult = SellInputSchema.safeParse(req.body || {});
+      if (!parseResult.success) {
+        return res.status(400).json({ error: parseResult.error.errors[0]?.message || 'Invalid sell parameters' });
+      }
+      const fraction = parseResult.data.fraction;
       const result = await signalManager.executeManualExit(positionId, fraction);
+
+      db.logAudit({
+        timestamp: Date.now(),
+        actor: 'OPERATOR_API',
+        action: 'MANUAL_SELL',
+        details: { positionId, fraction },
+        ipAddress: req.ip,
+      });
+
       const safeData = JSON.parse(
         JSON.stringify({ success: true, ...result }, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
       );
@@ -293,10 +403,19 @@ export function createApiServer() {
     }
   });
 
-  app.post('/api/positions/:id/close', async (req: Request, res: Response) => {
+  app.post('/api/positions/:id/close', requireControlAuth, tradingExitLimiter.middleware, async (req: Request, res: Response) => {
     try {
       const positionId = req.params.id;
       const result = await signalManager.executeManualExit(positionId, 1.0);
+
+      db.logAudit({
+        timestamp: Date.now(),
+        actor: 'OPERATOR_API',
+        action: 'MANUAL_CLOSE',
+        details: { positionId },
+        ipAddress: req.ip,
+      });
+
       const safeData = JSON.parse(
         JSON.stringify({ success: true, ...result }, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
       );
@@ -312,7 +431,8 @@ export function createApiServer() {
       const mint = o.token_mint || '';
       return !mint.toLowerCase().includes('tokenmint') && !mint.toLowerCase().includes('paper1111') && !mint.toLowerCase().includes('test');
     });
-    const solPriceUsd = 100.0;
+    const liveSol = await tokenMetadataService.getSolPriceUsd();
+    const solPriceUsd = liveSol > 0 ? liveSol : (config.SOL_PRICE_USD || 0);
 
     const enriched = await Promise.all(
       orders.map(async (order) => {
@@ -322,10 +442,13 @@ export function createApiServer() {
         const hasMeasuredTargetPrice = Boolean(order.target_price && order.target_price > 0);
         const traderPrice = hasMeasuredTargetPrice ? order.target_price : (followerPrice > 0 ? followerPrice * 0.985 : 0);
 
-        const totalSupply = 1_000_000_000;
-        const followerMarketCap = followerPrice * totalSupply * solPriceUsd;
-        const traderMarketCap = traderPrice > 0
-          ? traderPrice * totalSupply * solPriceUsd
+        const isMarketCapEstimated = true;
+        const estimatedTotalSupply = 1_000_000_000;
+        const followerMarketCap = meta?.fdvUsd && meta.fdvUsd > 0
+          ? meta.fdvUsd
+          : (solPriceUsd > 0 ? followerPrice * estimatedTotalSupply * solPriceUsd : 0);
+        const traderMarketCap = traderPrice > 0 && solPriceUsd > 0
+          ? traderPrice * estimatedTotalSupply * solPriceUsd
           : (followerMarketCap > 0 ? followerMarketCap * 0.9975 : 0);
 
         const isBuy = order.side === 'BUY';
@@ -348,15 +471,15 @@ export function createApiServer() {
           metadata: meta,
           comparison: {
             traderPriceSol: traderPrice,
-            traderPriceUsd: traderPrice * solPriceUsd,
+            traderPriceUsd: solPriceUsd > 0 ? traderPrice * solPriceUsd : null,
             followerPriceSol: followerPrice,
-            followerPriceUsd: followerPrice * solPriceUsd,
+            followerPriceUsd: solPriceUsd > 0 ? followerPrice * solPriceUsd : null,
             traderMarketCapUsd: Math.round(traderMarketCap),
             followerMarketCapUsd: Math.round(followerMarketCap),
             traderSpentSol: Number(traderSpentSol.toFixed(4)),
-            traderSpentUsd: Math.round(traderSpentSol * solPriceUsd),
+            traderSpentUsd: solPriceUsd > 0 ? Math.round(traderSpentSol * solPriceUsd) : null,
             followerSpentSol: Number(followerSpentSol.toFixed(4)),
-            followerSpentUsd: Number((followerSpentSol * solPriceUsd).toFixed(2)),
+            followerSpentUsd: solPriceUsd > 0 ? Number((followerSpentSol * solPriceUsd).toFixed(2)) : null,
             entryGapPct: Number(entryGapPct.toFixed(2)),
             entryGapBps: Math.round(entryGapPct * 100),
             reactionLatencyMs: hasMeasuredLatency ? Number(order.l_decision_ms.toFixed(2)) : null,
@@ -364,6 +487,7 @@ export function createApiServer() {
             isTargetPriceEstimated: !hasMeasuredTargetPrice,
             isTargetSpentEstimated: !hasMeasuredTargetSpend,
             isLatencyEstimated: !hasMeasuredLatency,
+            isMarketCapEstimated,
           },
         };
       })
@@ -387,14 +511,77 @@ export function createApiServer() {
     res.json(wallets);
   });
 
-  app.post('/api/wallets', requireControlAuth, (req: Request, res: Response) => {
-    const wallet = req.body;
-    if (!wallet || !wallet.wallet) {
+  app.post('/api/wallets', requireControlAuth, walletMutationLimiter.middleware, (req: Request, res: Response) => {
+    const raw = req.body || {};
+    // Normalize snake_case and camelCase parameters gracefully
+    const normalized = {
+      wallet: raw.wallet,
+      label: raw.label || 'Target Trader',
+      enabled: raw.enabled !== undefined ? Boolean(raw.enabled) : true,
+      buyMode: raw.buyMode || raw.buy_mode || 'FIXED_SIZE',
+      fixedBuyLamports:
+        raw.fixedBuyLamports ||
+        raw.fixed_buy_raw ||
+        (raw.fixedBuySol ? Math.round(Number(raw.fixedBuySol) * 1e9).toString() : '100000000'),
+      copyRatio:
+        typeof raw.copyRatio === 'number'
+          ? raw.copyRatio
+          : typeof raw.copy_ratio === 'number'
+          ? raw.copy_ratio
+          : 0.05,
+      maxBuyLamports:
+        raw.maxBuyLamports ||
+        raw.max_buy_raw ||
+        (raw.maxBuySol ? Math.round(Number(raw.maxBuySol) * 1e9).toString() : '1000000000'),
+      configJson: raw.configJson || raw.config_json,
+    };
+
+    const parseResult = WatchedWalletInputSchema.safeParse(normalized);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        error: parseResult.error.errors[0]?.message || 'Invalid wallet parameters',
+        details: parseResult.error.errors,
+      });
+    }
+
+    const validated = parseResult.data;
+    db.upsertWatchedWallet(validated);
+    signalManager.refreshWallets();
+
+    db.logAudit({
+      timestamp: Date.now(),
+      actor: 'OPERATOR_API',
+      action: 'WALLET_ADD',
+      details: { wallet: validated.wallet, label: validated.label, buyMode: validated.buyMode },
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, wallet: validated });
+  });
+
+  app.delete('/api/wallets/:wallet', requireControlAuth, walletMutationLimiter.middleware, (req: Request, res: Response) => {
+    const wallet = req.params.wallet;
+    if (!wallet) {
       return res.status(400).json({ error: 'Missing wallet public key' });
     }
-    db.upsertWatchedWallet(wallet);
+    try {
+      new PublicKey(wallet);
+    } catch {
+      return res.status(400).json({ error: 'Invalid Solana base58 public key' });
+    }
+
+    const deleted = db.deleteWatchedWallet(wallet);
     signalManager.refreshWallets();
-    res.json({ success: true });
+
+    db.logAudit({
+      timestamp: Date.now(),
+      actor: 'OPERATOR_API',
+      action: 'WALLET_DELETE',
+      details: { wallet },
+      ipAddress: req.ip,
+    });
+
+    res.json({ success: true, deleted });
   });
 
   app.get('/api/risk', (_req: Request, res: Response) => {
@@ -417,9 +604,35 @@ export function createApiServer() {
     });
   });
 
-  app.post('/api/risk/reset', (_req: Request, res: Response) => {
+  app.post('/api/risk/reset', requireControlAuth, mutatingControlLimiter.middleware, (req: Request, res: Response) => {
     riskEngine.resetCircuitBreaker();
+    db.logAudit({
+      timestamp: Date.now(),
+      actor: 'OPERATOR_API',
+      action: 'CIRCUIT_BREAKER_RESET',
+      details: { endpoint: '/api/risk/reset' },
+      ipAddress: req.ip,
+    });
     res.json({ success: true, message: 'Circuit breaker reset. Normal trading resumed.' });
+  });
+
+  app.post('/api/circuit-breaker/reset', requireControlAuth, mutatingControlLimiter.middleware, (req: Request, res: Response) => {
+    riskEngine.resetCircuitBreaker();
+    db.logAudit({
+      timestamp: Date.now(),
+      actor: 'OPERATOR_API',
+      action: 'CIRCUIT_BREAKER_RESET',
+      details: { endpoint: '/api/circuit-breaker/reset' },
+      ipAddress: req.ip,
+    });
+    res.json({ success: true, message: 'Circuit breaker reset. Normal trading resumed.' });
+  });
+
+  // Operator Audit Logs API
+  app.get('/api/audit-logs', requireControlAuth, (req: Request, res: Response) => {
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const logs = db.getAuditLogs(limit);
+    res.json(logs);
   });
 
   // Live Engine Safety & Status Endpoints
@@ -434,7 +647,7 @@ export function createApiServer() {
       executionMode: config.EXECUTION_MODE,
       isArmed: liveStatus.isArmed,
       disarmReason: liveStatus.disarmReason,
-      liveTradingAckConfigured: config.LIVE_TRADING_ACK === 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK',
+      liveTradingAckConfigured: config.LIVE_TRADING_ACK === CANONICAL_LIVE_TRADING_ACK,
       wallet: {
         isConfigured: walletStatus.isConfigured,
         publicKey: walletStatus.publicKey,
@@ -452,13 +665,27 @@ export function createApiServer() {
     });
   });
 
-  app.post('/api/live/kill', requireControlAuth, (_req: Request, res: Response) => {
+  app.post('/api/live/kill', requireControlAuth, mutatingControlLimiter.middleware, (req: Request, res: Response) => {
     liveEngine.kill('Operator triggered Emergency Kill Switch via Dashboard/API');
+    db.logAudit({
+      timestamp: Date.now(),
+      actor: 'OPERATOR_API',
+      action: 'LIVE_KILL',
+      details: { reason: 'Operator Emergency Kill Switch' },
+      ipAddress: req.ip,
+    });
     res.json({ success: true, isArmed: false, message: 'Live execution DISARMED immediately.' });
   });
 
-  app.post('/api/live/arm', requireControlAuth, async (_req: Request, res: Response) => {
+  app.post('/api/live/arm', requireControlAuth, mutatingControlLimiter.middleware, async (req: Request, res: Response) => {
     const result = await liveEngine.arm();
+    db.logAudit({
+      timestamp: Date.now(),
+      actor: 'OPERATOR_API',
+      action: 'LIVE_ARM',
+      details: { armed: result.armed, reason: result.reason },
+      ipAddress: req.ip,
+    });
     res.json({
       success: result.armed,
       isArmed: result.armed,

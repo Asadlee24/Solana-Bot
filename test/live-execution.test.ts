@@ -680,7 +680,7 @@ describe('Real Mainnet Execution Safety & Verification Suite', () => {
   });
 
   describe('10. BUY-Only Smoke-Test Guard', () => {
-    it('blocks SELL orders when SMOKE_TEST_ALLOWED_SIDE is BUY', async () => {
+    it('does not block protective SELL orders in smoke-test mode to prevent trapping customer funds', async () => {
       const engine = new LiveExecutionEngine();
       (engine as any).isArmed = true;
 
@@ -722,8 +722,10 @@ describe('Real Mainnet Execution Safety & Verification Suite', () => {
           createdAt: process.hrtime.bigint(),
         };
 
+        // SELL is NOT blocked by SMOKE_TEST_ALLOWED_SIDE=BUY (prevents trapping funds);
+        // it proceeds directly to on-chain balance verification
         await expect(engine.executeLiveTrade(sellIntent, sellMirror)).rejects.toThrow(
-          /Trade side SELL is blocked by SMOKE_TEST_ALLOWED_SIDE=BUY/
+          /Follower holds 0 balance of this token on-chain/
         );
       } finally {
         (config as any).SMOKE_TEST_ALLOWED_SIDE = origSide;

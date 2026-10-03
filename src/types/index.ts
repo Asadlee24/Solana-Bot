@@ -228,7 +228,7 @@ export interface WatchedWallet {
   fixedBuyLamports: string; // e.g. "100000000" for 0.1 SOL
   copyRatio: number; // for scalar/hybrid modes (e.g. 0.05 for 5%)
   maxBuyLamports: string;
-  createdAt: number;
+  createdAt?: number;
 }
 
 /**
@@ -265,4 +265,21 @@ export interface SystemTelemetry {
   liveWalletReserveSol?: number;
   liveWalletSpendableSol?: number;
   liveEngineArmed?: boolean;
+}
+
+export interface AuditLogEntry {
+  id?: number;
+  timestamp: number;
+  actor: 'OPERATOR_API' | 'OPERATOR_TELEGRAM' | 'SYSTEM' | string;
+  action:
+    | 'LIVE_ARM'
+    | 'LIVE_KILL'
+    | 'CIRCUIT_BREAKER_RESET'
+    | 'WALLET_ADD'
+    | 'WALLET_DELETE'
+    | 'MANUAL_SELL'
+    | 'MANUAL_CLOSE'
+    | string;
+  details?: Record<string, any> | string;
+  ipAddress?: string;
 }

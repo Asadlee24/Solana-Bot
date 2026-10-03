@@ -25,13 +25,45 @@ export function setApiBase(url: string): void {
   }
 }
 
-async function safeJsonFetch<T>(endpoint: string, init?: RequestInit): Promise<T> {
+export function getControlToken(): string {
+  if (typeof window !== 'undefined') {
+    return window.sessionStorage.getItem('solana_bot_control_token') || '';
+  }
+  return '';
+}
+
+export function setControlToken(token: string): void {
+  if (typeof window !== 'undefined') {
+    const trimmed = token.trim();
+    if (trimmed) {
+      window.sessionStorage.setItem('solana_bot_control_token', trimmed);
+    } else {
+      window.sessionStorage.removeItem('solana_bot_control_token');
+    }
+  }
+}
+
+async function safeJsonFetch<T>(endpoint: string, init?: RequestInit, isPrivileged: boolean = false): Promise<T> {
   const base = getApiBase();
   const url = `${base}${endpoint}`;
-  const res = await fetch(url, init);
+  const headers = new Headers(init?.headers || {});
+
+  if (isPrivileged) {
+    const token = getControlToken();
+    if (token) {
+      headers.set('x-api-token', token);
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+  }
+
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({}));
-    throw new Error(errBody.error || `HTTP ${res.status}: ${res.statusText}`);
+    const message = errBody.error || `HTTP ${res.status}: ${res.statusText}`;
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`[AUTH REQUIRED] ${message}. Please configure your Control API Token in Settings.`);
+    }
+    throw new Error(message);
   }
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
@@ -81,7 +113,13 @@ export async function addWallet(wallet: {
       copy_ratio: wallet.copyRatio || 0.05,
       max_buy_raw: wallet.maxBuyLamports || '1000000000',
     }),
-  });
+  }, true);
+}
+
+export async function deleteWallet(wallet: string): Promise<{ success: boolean; deleted: boolean }> {
+  return safeJsonFetch<{ success: boolean; deleted: boolean }>(`/api/wallets/${encodeURIComponent(wallet)}`, {
+    method: 'DELETE',
+  }, true);
 }
 
 export async function fetchRiskConfig(): Promise<RiskConfig> {
@@ -91,7 +129,36 @@ export async function fetchRiskConfig(): Promise<RiskConfig> {
 export async function resetCircuitBreaker(): Promise<{ success: boolean }> {
   return safeJsonFetch<{ success: boolean }>('/api/circuit-breaker/reset', {
     method: 'POST',
-  });
+  }, true);
+}
+
+export async function fetchLiveStatus(): Promise<{
+  executionMode: string;
+  isArmed: boolean;
+  disarmReason: string | null;
+  liveTradingAckConfigured: boolean;
+  wallet: {
+    isConfigured: boolean;
+    publicKey: string | null;
+    balanceSol: number;
+    reserveSol: number;
+    spendableSol: number;
+  };
+  limits: any;
+}> {
+  return safeJsonFetch('/api/live/status');
+}
+
+export async function armLiveEngine(): Promise<{ success: boolean; isArmed: boolean; reason?: string }> {
+  return safeJsonFetch<{ success: boolean; isArmed: boolean; reason?: string }>('/api/live/arm', {
+    method: 'POST',
+  }, true);
+}
+
+export async function killLiveEngine(): Promise<{ success: boolean; isArmed: boolean; message: string }> {
+  return safeJsonFetch<{ success: boolean; isArmed: boolean; message: string }>('/api/live/kill', {
+    method: 'POST',
+  }, true);
 }
 
 export async function triggerSimulationSwap(targetWallet: string, tokenMint: string): Promise<boolean> {
@@ -135,11 +202,13 @@ export async function sellPosition(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fraction }),
-  });
+  }, true);
 }
 
 export async function closePosition(
   positionId: string
 ): Promise<{ success: boolean; order: any; position: any }> {
-  return sellPosition(positionId, 1.0);
+  return safeJsonFetch<{ success: boolean; order: any; position: any }>(`/api/positions/${positionId}/close`, {
+    method: 'POST',
+  }, true);
 }

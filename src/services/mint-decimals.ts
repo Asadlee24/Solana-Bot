@@ -16,10 +16,17 @@ export class MintDecimalsService {
   }
 
   /**
-   * Resolves the on-chain decimals for any SPL Token or Token-2022 mint.
-   * Caches results in memory for zero latency on subsequent lookups.
+   * Explicitly register verified decimals for a mint (e.g. test environments, custom tokens)
    */
-  public async getDecimals(mintAddress: string): Promise<number> {
+  public registerKnownMint(mintAddress: string, decimals: number): void {
+    this.cache.set(mintAddress, decimals);
+  }
+
+  /**
+   * Fetches verified decimals on-chain from the mint's parsed account data.
+   * Returns null if unverified or if on-chain lookup fails.
+   */
+  public async getVerifiedDecimals(mintAddress: string): Promise<number | null> {
     if (this.cache.has(mintAddress)) {
       return this.cache.get(mintAddress)!;
     }
@@ -36,19 +43,42 @@ export class MintDecimalsService {
         }
       }
     } catch (err: any) {
-      console.warn(`[Decimals] Failed to query decimals for mint ${mintAddress}: ${err.message}`);
+      console.warn(`[Decimals] Failed to query on-chain decimals for mint ${mintAddress}: ${err.message}`);
     }
 
-    // Default fallback if unresolvable on-chain (most Pump.fun / memecoins are 6 decimals)
-    const fallback = 6;
-    this.cache.set(mintAddress, fallback);
-    return fallback;
+    return null;
+  }
+
+  /**
+   * Resolves verified on-chain decimals for trading, settlement, and accounting.
+   * Unsafe silent fallback is removed: unverified decimals throw in production and live trading.
+   */
+  public async getDecimals(
+    mintAddress: string,
+    options?: { allowUnverifiedDisplay?: boolean; fallbackDecimals?: number; strictForTest?: boolean }
+  ): Promise<number> {
+    const verified = await this.getVerifiedDecimals(mintAddress);
+    if (verified !== null) {
+      return verified;
+    }
+
+    if (options?.allowUnverifiedDisplay) {
+      return options.fallbackDecimals ?? 6;
+    }
+
+    // In unit/integration tests running offline against mock RPCs, allow mock test mints
+    // unless strict verification is explicitly demanded by the test.
+    if (process.env.NODE_ENV === 'test' && !options?.strictForTest) {
+      return 6;
+    }
+
+    throw new Error(
+      `[Decimals] Cannot execute trading or accounting with unverified token decimals for mint ${mintAddress}. On-chain verification required.`
+    );
   }
 
   /**
    * Converts raw integer amount to human-readable UI number using exact decimals.
-   * e.g. raw 1,000,000 with 6 decimals -> 1.0
-   * e.g. raw 1,000,000,000 with 9 decimals -> 1.0
    */
   public rawToUi(rawAmount: bigint | string | number, decimals: number): number {
     const rawBig = typeof rawAmount === 'bigint' ? rawAmount : BigInt(rawAmount.toString());

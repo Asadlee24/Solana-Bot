@@ -10,6 +10,7 @@ import bs58Module from 'bs58';
 import { randomUUID } from 'crypto';
 import {
   calculateEstimatedFeesLamports,
+  CANONICAL_LIVE_TRADING_ACK,
   config,
   LAMPORTS_PER_SOL_BIGINT,
   solToLamportsBigInt,
@@ -65,7 +66,7 @@ export class LiveExecutionEngine {
       return { armed: false, reason: this.disarmReason };
     }
 
-    const requiredAck = 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK';
+    const requiredAck = CANONICAL_LIVE_TRADING_ACK;
     if (config.LIVE_TRADING_ACK !== requiredAck) {
       this.isArmed = false;
       this.disarmReason = `Missing or invalid safety acknowledgement: LIVE_TRADING_ACK must equal "${requiredAck}"`;
@@ -558,6 +559,11 @@ export class LiveExecutionEngine {
         db.saveMirrorOrder(order);
 
         // 9. Record ACTUAL amounts in PositionEngine (Never quote estimates!)
+        const totalFeeLamports =
+          BigInt(settlement.actualFeeLamports || '0') +
+          BigInt(settlement.actualPriorityFeeLamports || '0') +
+          BigInt(settlement.actualTipLamports || '0');
+
         if (isBuy) {
           positionEngine.recordFill(
             mirrorIntent.targetWallet,
@@ -566,7 +572,8 @@ export class LiveExecutionEngine {
             settlement.actualTokensRaw,
             settlement.actualSolLamports,
             settlement.actualExecutionPriceSol,
-            order.orderSignature || realTxSignature
+            order.orderSignature || realTxSignature,
+            totalFeeLamports
           );
         } else {
           positionEngine.recordFill(
@@ -576,7 +583,8 @@ export class LiveExecutionEngine {
             settlement.actualTokensRaw,
             settlement.actualSolLamports,
             settlement.actualExecutionPriceSol,
-            order.orderSignature || realTxSignature
+            order.orderSignature || realTxSignature,
+            totalFeeLamports
           );
         }
 

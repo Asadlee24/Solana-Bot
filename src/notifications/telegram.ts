@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { PublicKey } from '@solana/web3.js';
 import { config } from '../config/index.js';
 import { db } from '../db/database.js';
@@ -67,7 +68,7 @@ export class TelegramNotifier {
             { command: 'score', description: 'Analyze Trader Win-Rate & PnL: /score <wallet>' },
             { command: 'trader_score', description: 'Analyze Trader Win-Rate & PnL: /trader_score <wallet>' },
             { command: 'tpsl', description: 'Auto Take-Profit & Stop-Loss Settings' },
-            { command: 'zeroloss', description: 'Zero-Loss Guarantee & Breakeven Lock' },
+            { command: 'zeroloss', description: 'Breakeven Floor & Dynamic Trailing Stop' },
             { command: 'trailing', description: 'Dynamic Trailing Stop-Loss Settings' },
             { command: 'never_rebuy', description: 'Never Re-Buy Guard (Strict 1-Entry per Coin)' },
             { command: 'risk', description: 'Pre-Trade Risk Controls & Limits' },
@@ -76,6 +77,7 @@ export class TelegramNotifier {
             { command: 'restore', description: 'Restore Bottom Interactive Keypad' },
             { command: 'keypad', description: 'Restore Bottom Interactive Keypad' },
             { command: 'help', description: 'Terminal Usage Guide & Commands' },
+            { command: 'pair', description: 'Pair operator account: /pair <setup_code>' },
           ],
         }),
         signal: AbortSignal.timeout(8000),
@@ -110,8 +112,17 @@ export class TelegramNotifier {
         if (id.trim()) ids.add(id.trim());
       });
     }
-    // Whitelist operator's sole authorized account: @Asadaly2 (7080909965)
-    ids.add('7080909965');
+    // Load chat IDs authorized via secure pairing persisted in SQLite
+    try {
+      const persisted = db.getAuthorizedTelegramChats();
+      for (const id of persisted) {
+        if (id && id.trim()) ids.add(id.trim());
+      }
+    } catch {}
+
+    if (this.chatId && this.chatId.trim() && ids.has(this.chatId.trim())) {
+      ids.add(this.chatId.trim());
+    }
     return Array.from(ids);
   }
 
@@ -208,15 +219,7 @@ export class TelegramNotifier {
   public isAuthorizedChat(incomingChatId: string | number): boolean {
     const incomingStr = String(incomingChatId).trim();
     const authorized = this.getAuthorizedChatIds();
-    if (authorized.includes(incomingStr)) {
-      return true;
-    }
-    if (!config.TELEGRAM_CHAT_ID || config.TELEGRAM_CHAT_ID.trim() === '') {
-      this.chatId = incomingStr;
-      console.info(`[Telegram Security] Bound authorized operator chat ID: ${this.chatId}`);
-      return true;
-    }
-    return false;
+    return authorized.includes(incomingStr);
   }
 
   /**
@@ -224,20 +227,40 @@ export class TelegramNotifier {
    */
   private async handleTextMessage(msg: any): Promise<void> {
     const rawChatId = msg.chat?.id;
-    if (!rawChatId || !this.isAuthorizedChat(rawChatId)) {
+    if (!rawChatId) return;
+
+    const rawText = (msg.text || '').trim();
+
+    // Check for /pair <code> or pair <code> command before authorization check
+    const withoutPrefix = rawText.replace(/@\w+/g, '').trim();
+    if (withoutPrefix.startsWith('/pair') || withoutPrefix.toLowerCase().startsWith('pair')) {
+      const parts = withoutPrefix.split(/\s+/);
+      const codeAttempt = parts[1];
+      await this.handlePairCommand(rawChatId, codeAttempt);
+      return;
+    }
+
+    if (!this.isAuthorizedChat(rawChatId)) {
       console.warn(`[Telegram Security] Blocked unauthorized message from chat ID: ${rawChatId}`);
       try {
-        await this.sendCustomMessage(
-          rawChatId,
-          '⛔ <b>[ACCESS DENIED]</b> Unauthorized chat ID. You do not have permission to control this bot.'
-        );
+        const pairingConfigured = Boolean(config.TELEGRAM_PAIRING_CODE && config.TELEGRAM_PAIRING_CODE.trim() !== '');
+        const isPaired = db.isTelegramPairingCompleted();
+        if (pairingConfigured && !isPaired) {
+          await this.sendCustomMessage(
+            rawChatId,
+            '🔒 <b>[PAIRING REQUIRED]</b> This bot is protected.\nTo authenticate your Telegram account as the authorized operator, send:\n<code>/pair &lt;pairing_code&gt;</code>'
+          );
+        } else {
+          await this.sendCustomMessage(
+            rawChatId,
+            '⛔ <b>[ACCESS DENIED]</b> Unauthorized chat ID. You do not have permission to control this bot.'
+          );
+        }
       } catch {}
       return;
     }
     const chatId = String(rawChatId);
     this.chatId = chatId;
-
-    const rawText = (msg.text || '').trim();
 
     // Strip @botname suffix (e.g. /menu@mybot -> /menu)
     const withoutBotSuffix = rawText.replace(/@\w+/g, '');
@@ -349,11 +372,11 @@ export class TelegramNotifier {
       await this.sendTpSlReport(chatId);
     } else if (clean === 'trailing_off' || clean === 'zeroloss_off' || clean === 'trailingoff' || clean === 'zerolossoff') {
       (config as any).TRAILING_SL_ENABLED = false;
-      await this.sendCustomMessage(chatId, '🔴 <b>Zero-Loss Guarantee & Trailing Stop-Loss have been TURNED OFF.</b>');
+      await this.sendCustomMessage(chatId, '🔴 <b>Breakeven Floor & Trailing Stop-Loss have been TURNED OFF.</b>');
       await this.sendTpSlReport(chatId);
     } else if (clean === 'trailing_on' || clean === 'zeroloss_on' || clean === 'trailingon' || clean === 'zerolosson') {
       (config as any).TRAILING_SL_ENABLED = true;
-      await this.sendCustomMessage(chatId, `🛡️ <b>Zero-Loss Guarantee & Trailing Stop-Loss have been TURNED ON!</b>\n• +${config.BREAKEVEN_TRIGGER_PCT}% profit par Stop-Loss Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion) par lock ho jayega.\n• +30%+ par Stop-Loss peak se ${config.TRAILING_SL_CUSHION_PCT}% peeche trail karega.`);
+      await this.sendCustomMessage(chatId, `🛡️ <b>Breakeven Floor & Trailing Stop-Loss have been TURNED ON!</b>\n• +${config.BREAKEVEN_TRIGGER_PCT}% profit par Stop-Loss Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion) par lock ho jayega.\n• +30%+ par Stop-Loss peak se ${config.TRAILING_SL_CUSHION_PCT}% peeche trail karega.`);
       await this.sendTpSlReport(chatId);
     } else if (clean === 'tp_off' || clean === 'tpoff' || clean === 'disable_tp') {
       (config as any).AUTO_TP_ENABLED = false;
@@ -414,6 +437,73 @@ export class TelegramNotifier {
         this.getPersistentReplyKeyboard()
       );
     }
+  }
+
+  /**
+   * Handle secure operator pairing via /pair <code>
+   */
+  public async handlePairCommand(chatId: string | number, codeAttempt?: string): Promise<void> {
+    const targetChat = String(chatId).trim();
+
+    if (!config.TELEGRAM_PAIRING_CODE || config.TELEGRAM_PAIRING_CODE.trim() === '') {
+      await this.sendCustomMessage(
+        targetChat,
+        '⛔ <b>[PAIRING DISABLED]</b> TELEGRAM_PAIRING_CODE is not configured on the server. Please set it in your .env file or define TELEGRAM_CHAT_ID.'
+      );
+      return;
+    }
+
+    if (db.isTelegramPairingCompleted()) {
+      await this.sendCustomMessage(
+        targetChat,
+        '⚠️ <b>[ALREADY PAIRED]</b> This bot has already been paired to an authorized operator account. Remote re-pairing is blocked.\nTo re-pair, an administrator must reset pairing locally on the host server.'
+      );
+      return;
+    }
+
+    if (!codeAttempt || codeAttempt.trim() === '') {
+      await this.sendCustomMessage(
+        targetChat,
+        '⚠️ <b>[CODE REQUIRED]</b> Please provide your setup pairing code:\n<code>/pair &lt;your_code&gt;</code>'
+      );
+      return;
+    }
+
+    const trimmedAttempt = codeAttempt.trim();
+    const expectedCode = config.TELEGRAM_PAIRING_CODE.trim();
+
+    const bufA = Buffer.from(trimmedAttempt);
+    const bufB = Buffer.from(expectedCode);
+    const isValid = bufA.length === bufB.length && crypto.timingSafeEqual(bufA, bufB);
+
+    if (!isValid) {
+      console.warn(`[Telegram Security] Invalid pairing code attempt from chat ID: ${targetChat}`);
+      await this.sendCustomMessage(
+        targetChat,
+        '⛔ <b>[INVALID PAIRING CODE]</b> Verification failed. Check your TELEGRAM_PAIRING_CODE in .env and try again.'
+      );
+      return;
+    }
+
+    // Persist pairing in SQLite (survives restarts)
+    db.addAuthorizedTelegramChat(targetChat);
+    db.setTelegramPairingCompleted(true);
+    this.chatId = targetChat;
+
+    console.info(`[Telegram Security] Successfully paired operator chat ID: ${targetChat}`);
+    await this.sendCustomMessage(
+      targetChat,
+      '✅ <b>[PAIRING SUCCESSFUL]</b>\nThis Telegram account is now the verified authorized operator for this trading bot!\nAll trade alerts, position notices, and administrative commands are now enabled.\n\nSend /menu to open the control terminal.'
+    );
+  }
+
+  /**
+   * Safe local-only reset for Telegram pairing
+   */
+  public resetPairing(): void {
+    db.resetTelegramPairing();
+    this.chatId = config.TELEGRAM_CHAT_ID || '';
+    console.info('[Telegram Security] Operator pairing reset locally.');
   }
 
   /**
@@ -479,9 +569,9 @@ export class TelegramNotifier {
     } else if (data === 'toggle_trailing') {
       (config as any).TRAILING_SL_ENABLED = !config.TRAILING_SL_ENABLED;
       const status = config.TRAILING_SL_ENABLED
-        ? '🛡️ <b>TURNED ON (Zero-Loss Guarantee & Trailing Ratchet Active)</b>'
+        ? '🛡️ <b>TURNED ON (Breakeven Floor & Trailing Ratchet Active)</b>'
         : '🔴 <b>TURNED OFF</b>';
-      await this.sendCustomMessage(chatId, `Zero-Loss Guarantee & Trailing SL is now ${status}.`);
+      await this.sendCustomMessage(chatId, `Breakeven Floor & Trailing SL is now ${status}.`);
       await this.sendTpSlReport(chatId);
     } else if (data === 'menu_risk') {
       await this.sendRiskReport(chatId);
@@ -754,12 +844,11 @@ Tap <b>ACTIVATE BOT</b> when you are ready to resume.
       const sizingUsd = config.FIXED_BUY_SOL * solPriceUsd;
       const minToArmUsd = minToArm * solPriceUsd;
 
-      const telemetry = db.getSystemTelemetry();
-      const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-      const realizedSol = bal - initialCapital;
+      const accounting = db.getAccountingSummary();
+      const realizedSol = accounting.realizedPnlSol;
       const realizedUsd = realizedSol * solPriceUsd;
-      const closedTrades = 4;
-      const winRate = 100.0;
+      const closedTrades = accounting.totalTradesClosed;
+      const winRate = accounting.winRatePct;
 
       const tpStatus = config.AUTO_TP_ENABLED ? '🟢 ON (+100% Moonbag)' : '🔴 OFF';
       const slStatus = config.AUTO_SL_ENABLED ? `🟢 ON (-${config.AUTO_SL_LOSS_PCT}% Anti-Rug)` : '🔴 OFF';
@@ -976,11 +1065,11 @@ ${divider}
       const isArmed = isLive && liveEngine.getStatus().isArmed;
       const bal = executionWalletManager.getCachedBalanceSol();
       const balUsd = bal * solPriceUsd;
-      const initialCapital = config.LIVE_INITIAL_BALANCE_SOL || 0.2610;
-      const realizedSol = isLive ? (bal - initialCapital) : (db.getSystemTelemetry().totalRealizedPnlSol || 0);
+      const accounting = db.getAccountingSummary();
+      const realizedSol = accounting.realizedPnlSol;
       const realizedUsd = realizedSol * solPriceUsd;
-      const winRate = isLive ? 100.0 : (db.getSystemTelemetry().winRatePct ?? 0);
-      const closedTrades = isLive ? 4 : (db.getSystemTelemetry().totalTradesClosed || 0);
+      const winRate = accounting.winRatePct;
+      const closedTrades = accounting.totalTradesClosed;
 
       const emptyMsg = `
 📂 <b>PORTFOLIO POSITIONS (0 ACTIVE)</b>
@@ -1255,7 +1344,8 @@ ${divider}
     const initialCapital = isLive
       ? (config.LIVE_INITIAL_BALANCE_SOL || 0.2610)
       : (telemetry.initialPaperBalanceSol || 10.0);
-    const realizedSol = isLive ? (balanceSol - initialCapital) : (telemetry.totalRealizedPnlSol || 0);
+    const accounting = db.getAccountingSummary();
+    const realizedSol = accounting.realizedPnlSol;
     const realizedUsd = realizedSol * solPrice;
     const unrealizedSol = telemetry.totalUnrealizedPnlSol || 0;
     const unrealizedUsd = unrealizedSol * solPrice;
@@ -1264,11 +1354,23 @@ ${divider}
     const isOverallProfit = totalPnlSol >= 0;
     const roiPercent = initialCapital > 0 ? ((totalPnlSol / initialCapital) * 100) : 0;
 
-    const winRate = isLive ? 100.0 : (telemetry.winRatePct ?? 0);
-    const closedCount = isLive ? 4 : (telemetry.totalTradesClosed || 0);
+    const winRate = accounting.winRatePct;
+    const closedCount = accounting.totalTradesClosed;
 
     const pnlSign = isOverallProfit ? '+' : '';
     const pnlBadge = isOverallProfit ? '🟢' : '🔴';
+
+    const closedPositions = db.getClosedPositions(4);
+    const recentTradesText = closedPositions.length === 0
+      ? '    • <i>No settled trades recorded yet.</i>'
+      : closedPositions.map((c) => {
+          const pnlLamports = Number(BigInt(c.realizedPnlLamports || '0'));
+          const pnlInSol = pnlLamports / 1e9;
+          const sign = pnlInSol >= 0 ? '+' : '';
+          const badge = pnlInSol >= 0 ? '🟢' : '🔴';
+          const shortMint = `${c.tokenMint.substring(0, 4)}...${c.tokenMint.substring(c.tokenMint.length - 4)}`;
+          return `    • 🪙 <code>${shortMint}</code>: ${badge} <b>${sign}${pnlInSol.toFixed(4)} SOL</b>`;
+        }).join('\n');
 
     const text = `
 📊 <b>PORTFOLIO PnL & PERFORMANCE</b>
@@ -1287,12 +1389,9 @@ ${divider}
 🎯 <b>TRADING ACTIVITY & STATS</b>
 ├ <b>Open Positions:</b> <b>${telemetry.openPositionsCount} Coins</b> ${telemetry.openPositionsCount === 0 ? '(<i>100% Pure SOL Liquid</i>)' : ''}
 ├ <b>Closed Trades:</b> <b>${closedCount}</b>
-├ <b>Win Rate:</b> 🎯 <b>${winRate.toFixed(1)}%</b> (<i>100% Alpha Record Today</i>)
-└ <b>Today's Top Winners:</b>
-    • 🪙 <b>$URANIUMINU:</b> 🟢 <b>+94.1%</b> (<code>+0.0500 SOL</code> 2x Moonbag)
-    • 🪙 <b>$BGNLn:</b> 🟢 <b>+58.5%</b> (<code>+0.0319 SOL</code>)
-    • 🪙 <b>$INURANUS:</b> 🟢 <b>+26.4%</b> (<code>+0.0138 SOL</code>)
-    • 🪙 <b>$Scale:</b> 🟢 <b>+12.0%</b> (<code>+0.0062 SOL</code>)
+├ <b>Win Rate:</b> 🎯 <b>${winRate.toFixed(1)}%</b> (${closedCount > 0 ? `${closedCount} Settled Trades` : 'Baseline'})
+└ <b>Recent Settled Trades:</b>
+${recentTradesText}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <i>💡 Tap below to check positions, balance, or refresh real-time stats.</i>
@@ -1991,6 +2090,9 @@ ${lockedSummary}
     replyMarkup?: any,
     defaultKeyboard?: any
   ): Promise<void> {
+    if (!this.enabled || !this.botToken) {
+      return;
+    }
     try {
       const url = `${this.apiRoot}/bot${this.botToken}/sendMessage`;
       const payload: any = {
@@ -2327,7 +2429,7 @@ Trading automatically paused for portfolio protection.
   }
 
   /**
-   * Real-Time Zero-Loss Guarantee Lock Alert (Fires when profit crosses +20%)
+   * Real-Time Breakeven Protection Lock Alert (Fires when profit crosses +20%)
    */
   public async notifyBreakevenLocked(
     position: FollowerPosition,
@@ -2346,7 +2448,7 @@ Trading automatically paused for portfolio protection.
     const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
 
     const text = `
-🛡️ <b>[ZERO-LOSS GUARANTEE LOCKED]</b> 🔒
+🛡️ <b>[BREAKEVEN PROTECTION LOCKED]</b> 🔒
 
 <b>Coin:</b> <b>$${sym}</b>${tokenName}
 <b>Mint:</b> <code>${position.tokenMint}</code>
@@ -2354,8 +2456,8 @@ Trading automatically paused for portfolio protection.
 <b>Trigger Gain:</b> <b>+${pnlPct.toFixed(1)}%</b> (Peak: +${peakPct.toFixed(1)}%) 🚀
 <b>Floating Gain:</b> +${floatingPnlSol.toFixed(4)} SOL (+$${floatingPnlUsd.toFixed(2)} USD)
 <b>Stop-Loss Floor:</b> <b>LOCKED AT +${config.BREAKEVEN_LOCK_PCT.toFixed(1)}%</b> (Entry Price + Fee Cushion)
-<b>Protection Status:</b> <b>ZERO CAPITAL RISK GUARANTEED</b> 🛡️
-<i>Agar coin yahan se dump hota hai, toh bot automatically Breakeven par nikal jayega. Ek rupay ka bhi nuqsan nahi hoga!</i>
+<b>Protection Status:</b> <b>BREAKEVEN FLOOR ACTIVE</b> 🛡️
+<i>Agar coin yahan se dump hota hai, toh bot automatically Breakeven par nikal jayega. Capital protection stop active!</i>
     `.trim();
 
     const inlineKeyboard = {
@@ -2375,7 +2477,7 @@ Trading automatically paused for portfolio protection.
   }
 
   /**
-   * Alert when Zero-Loss Breakeven Exit is executed
+   * Alert when Breakeven Exit is executed
    */
   public async notifyBreakevenExit(
     order: MirrorOrder,
@@ -2399,16 +2501,16 @@ Trading automatically paused for portfolio protection.
     const traderInfo = traderNamingService.getTraderInfo(position.targetWallet || position.tokenMint);
 
     const text = `
-🛡️ <b>[ZERO-LOSS BREAKEVEN EXIT FILLED]</b> 🛡️
+🛡️ <b>[BREAKEVEN PROTECTION EXIT FILLED]</b> 🛡️
 
 <b>Coin:</b> <b>$${sym}</b>${tokenName}
 <b>Mint:</b> <code>${position.tokenMint}</code>
 <b>Copied Trader:</b> <b>${traderInfo.displayName}</b>
-<b>Strategy:</b> Zero-Loss Capital Protection (100% Exited)
+<b>Strategy:</b> Breakeven Capital Protection (100% Exited)
 <b>Highest Peak:</b> +${peakPct.toFixed(1)}% 🏔️
 <b>Exit Result:</b> <b>${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%</b> (${realizedSol >= 0 ? '+' : ''}${realizedSol.toFixed(4)} SOL | ${realizedSol >= 0 ? '+' : ''}$${realizedUsd.toFixed(2)} USD)
 <b>Payout:</b> +${solReceived.toFixed(4)} SOL (+$${usdReceived.toFixed(2)} USD)
-<b>Verdict:</b> <b>Pura capital mehfooz! Coin dump hone se pehle Zero-Loss par exit ho gaya.</b>${sigLink}
+<b>Verdict:</b> <b>Capital protection stop executed at breakeven before dump.</b>${sigLink}
     `.trim();
 
     this.sendAlert(text);
@@ -2558,8 +2660,8 @@ ${header}
 
   public async sendTpSlReport(chatId: string | number): Promise<void> {
     const trailingText = config.TRAILING_SL_ENABLED
-      ? `🛡️ <b>ACTIVE (Zero-Loss Guarantee):</b>\n   ├ <b>+${config.BREAKEVEN_TRIGGER_PCT}% Gain:</b> Stop-Loss floor locked at <b>Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion)</b> 🔒\n   ├ <b>+30%+ Gain:</b> Dynamic Trailing SL locks profit at <b>Peak - ${config.TRAILING_SL_CUSHION_PCT}%</b> 🏔️\n   └ <i>Solana dump se 100% protection! Ek rupay ka bhi nuqsan nahi hoga.</i>`
-      : '🔴 <b>DISABLED</b> (Zero-Loss Guarantee & Trailing SL is OFF)';
+      ? `🛡️ <b>ACTIVE (Breakeven Floor & Trailing SL):</b>\n   ├ <b>+${config.BREAKEVEN_TRIGGER_PCT}% Gain:</b> Stop-Loss floor locked at <b>Entry (+${config.BREAKEVEN_LOCK_PCT}% cushion)</b> 🔒\n   ├ <b>+30%+ Gain:</b> Dynamic Trailing SL locks profit at <b>Peak - ${config.TRAILING_SL_CUSHION_PCT}%</b> 🏔️\n   └ <i>Automated protection with trailing floor against sudden market dumps.</i>`
+      : '🔴 <b>DISABLED</b> (Breakeven Floor & Trailing SL is OFF)';
 
     const tpText = config.AUTO_TP_ENABLED
       ? `🟢 <b>ENABLED:</b> Sell <b>${(config.AUTO_TP_SELL_FRACTION * 100).toFixed(0)}%</b> when token reaches <b>+${config.AUTO_TP_GAIN_PCT}% (2x)</b>\n   └ <i>Initial principal returned to wallet, 50% moonbag rides for free!</i>`
@@ -2570,10 +2672,10 @@ ${header}
       : '🔴 <b>DISABLED</b> (Auto Stop-Loss is OFF)';
 
     const text = `
-🎯 <b>AUTOMATED PROFIT & ZERO-LOSS PROTECTION</b>
+🎯 <b>AUTOMATED PROFIT & CAPITAL PROTECTION</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🛡️ <b>Zero-Loss Guarantee & Trailing SL:</b>
+🛡️ <b>Breakeven Floor & Trailing SL:</b>
 ${trailingText}
 
 🚀 <b>Moonbag Auto Take-Profit:</b>
@@ -2591,7 +2693,7 @@ ${slText}
       inline_keyboard: [
         [
           {
-            text: config.TRAILING_SL_ENABLED ? '🛡️ Zero-Loss: ON (Tap to Disable)' : '⚪ Zero-Loss: OFF (Tap to Enable)',
+            text: config.TRAILING_SL_ENABLED ? '🛡️ Breakeven: ON (Tap to Disable)' : '⚪ Breakeven: OFF (Tap to Enable)',
             callback_data: 'toggle_trailing',
           },
         ],

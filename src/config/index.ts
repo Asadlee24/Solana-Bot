@@ -1,7 +1,12 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config();
+}
+
+// Live Safety Acknowledgement (MUST match exactly to arm LIVE mode)
+export const CANONICAL_LIVE_TRADING_ACK = 'I_UNDERSTAND_REAL_FUNDS_ARE_AT_RISK';
 
 const ConfigSchema = z.object({
   // Environment & Execution
@@ -38,11 +43,12 @@ const ConfigSchema = z.object({
   MAX_TOTAL_EXPOSURE_SOL: z.coerce.number().default(0.02),
   MIN_SOL_RESERVE_SOL: z.coerce.number().default(0.02), // Floor reserved for rent and fees (0.02 SOL)
   MAX_SIGNAL_AGE_MS: z.coerce.number().default(1500), // Max ms before signal discarded as stale
-  MAX_ENTRY_GAP_BPS: z.coerce.number().default(1500), // 15.0% max price deterioration vs target
+  MAX_ENTRY_GAP_BPS: z.coerce.number().default(200), // 2.0% (200 bps) max price deterioration vs target
   MAX_SLIPPAGE_BPS: z.coerce.number().default(200), // 2.0% max AMM buy slippage
   MAX_SELL_SLIPPAGE_BPS: z.coerce.number().default(1500), // 15.0% max sell slippage to guarantee immediate exit without 15001 error
   DAILY_LOSS_LIMIT_SOL: z.coerce.number().default(0.03),
   CONSECUTIVE_ERROR_LIMIT: z.coerce.number().default(5),
+  SOL_PRICE_USD: z.coerce.number().optional(), // Optional operator fixed SOL/USD price fallback
 
   // Jupiter Swap API V2
   JUPITER_API_KEY: z.string().default(''), // Server-side only (never expose to frontend / VITE)
@@ -65,12 +71,15 @@ const ConfigSchema = z.object({
   API_PORT: z.coerce.number().default(process.env.PORT ? Number(process.env.PORT) : 3001),
   DASHBOARD_PORT: z.coerce.number().default(3000),
   CONTROL_API_TOKEN: z.string().default(''), // Secret token required for mutating API actions (arm, kill, add wallet)
+  ALLOW_UNAUTHENTICATED_CONTROL: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(false),
   HELIUS_WEBHOOK_SECRET: z.string().default(''), // Secret token to verify Helius webhook requests
-  CORS_ALLOWED_ORIGINS: z.string().default(''), // Comma-separated allowed CORS origins (empty allows localhost/same-origin)
+  ALLOW_UNAUTHENTICATED_WEBHOOK: z.preprocess((val) => val === 'true' || val === true, z.boolean()).default(false),
+  CORS_ALLOWED_ORIGINS: z.string().default(''), // Comma-separated allowed CORS origins (empty allows localhost/same-origin in dev, strict in prod)
 
   // Telegram Notifications (Async off hot path)
   TELEGRAM_BOT_TOKEN: z.string().default(''),
   TELEGRAM_CHAT_ID: z.string().default(''),
+  TELEGRAM_PAIRING_CODE: z.string().default(''), // Setup secret to pair authorized chat via /pair <code>
   TELEGRAM_API_ROOT: z.string().default('https://api.telegram.org'),
 
   // SQLite Database path
@@ -84,7 +93,7 @@ const ConfigSchema = z.object({
   AUTO_SL_LOSS_PCT: z.coerce.number().default(30), // -30% loss trigger (anti-rug base floor)
   AUTO_EXIT_POLL_INTERVAL_MS: z.coerce.number().default(800), // 800ms high-frequency monitoring loop
 
-  // Zero-Loss Guarantee & Dynamic Trailing Stop-Loss
+  // Breakeven Floor & Dynamic Trailing Stop-Loss
   TRAILING_SL_ENABLED: z.preprocess((val) => val === 'true' || val === true || val === undefined, z.boolean()).default(true),
   BREAKEVEN_TRIGGER_PCT: z.coerce.number().default(20), // Lock stop-loss at entry (+2% cushion) when profit hits +20%
   BREAKEVEN_LOCK_PCT: z.coerce.number().default(2), // +2% profit floor once breakeven triggers (covers fees/slippage)

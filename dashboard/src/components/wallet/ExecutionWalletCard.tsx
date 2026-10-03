@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { formatShortAddress } from '../../lib/format';
+import { armLiveEngine, fetchLiveStatus as apiFetchLiveStatus, killLiveEngine } from '../../lib/api';
 import { LiveEngineStatus } from '../../types/dashboard';
 import { Badge } from '../common/Badge';
 import { CopyButton } from '../common/CopyButton';
@@ -23,11 +24,8 @@ export const ExecutionWalletCard: React.FC = () => {
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/live/status');
-      if (res.ok) {
-        const data = await res.json();
-        setLiveStatus(data);
-      }
+      const data = await apiFetchLiveStatus();
+      setLiveStatus(data as any);
     } catch (err) {
       console.error('Failed to fetch live execution status:', err);
     } finally {
@@ -49,12 +47,10 @@ export const ExecutionWalletCard: React.FC = () => {
 
     try {
       setActionLoading(true);
-      const res = await fetch('/api/live/kill', { method: 'POST' });
-      if (res.ok) {
-        await fetchStatus();
-      }
-    } catch (err) {
-      alert('Error deactivating bot: ' + String(err));
+      await killLiveEngine();
+      await fetchStatus();
+    } catch (err: any) {
+      alert('Error deactivating bot: ' + (err.message || String(err)));
     } finally {
       setActionLoading(false);
     }
@@ -68,14 +64,13 @@ export const ExecutionWalletCard: React.FC = () => {
 
     try {
       setActionLoading(true);
-      const res = await fetch('/api/live/arm', { method: 'POST' });
-      const data = await res.json();
+      const data = await armLiveEngine();
       if (!data.success) {
-        alert('Cannot Activate Bot:\n\n' + data.reason);
+        alert('Cannot Activate Bot:\n\n' + (data.reason || 'Arming failed'));
       }
       await fetchStatus();
-    } catch (err) {
-      alert('Error activating bot: ' + String(err));
+    } catch (err: any) {
+      alert('Error activating bot: ' + (err.message || String(err)));
     } finally {
       setActionLoading(false);
     }

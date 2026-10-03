@@ -18,6 +18,8 @@ export interface TokenMetadata {
   solscanUrl: string;
   imageUrl?: string;
   updatedAt: number;
+  isFdvEstimated?: boolean;
+  isSupplyEstimated?: boolean;
 }
 
 export class TokenMetadataService {
@@ -194,20 +196,23 @@ export class TokenMetadataService {
       symbol,
       priceUsd,
       priceSol: priceSol > 0 ? priceSol : undefined,
-      fdvUsd: priceSol > 0 ? priceSol * 1_000_000_000 * solPriceUsd : 0,
+      fdvUsd: priceSol > 0 && solPriceUsd > 0 ? priceSol * 1_000_000_000 * solPriceUsd : 0,
       liquidityUsd,
       dexScreenerUrl: `https://dexscreener.com/solana/${mint}`,
       pumpFunUrl: `https://pump.fun/${mint}`,
       solscanUrl: `https://solscan.io/token/${mint}`,
       updatedAt: Date.now(),
+      isFdvEstimated: true,
+      isSupplyEstimated: true,
     };
   }
 
-  private cachedSolPriceUsd: number = 105.0;
+  private cachedSolPriceUsd: number = config.SOL_PRICE_USD || 0;
   private lastSolPriceFetchTime: number = 0;
 
   /**
-   * Fetch current real-time SOL/USD price from DexScreener
+   * Fetch current real-time SOL/USD price from DexScreener.
+   * Returns live price, or configured SOL_PRICE_USD, or 0 (if unavailable).
    */
   public async getSolPriceUsd(): Promise<number> {
     const now = Date.now();
@@ -226,11 +231,12 @@ export class TokenMetadataService {
         if (price > 0) {
           this.cachedSolPriceUsd = price;
           this.lastSolPriceFetchTime = now;
+          return price;
         }
       }
     } catch {}
 
-    return this.cachedSolPriceUsd;
+    return this.cachedSolPriceUsd > 0 ? this.cachedSolPriceUsd : (config.SOL_PRICE_USD || 0);
   }
 
   /**
