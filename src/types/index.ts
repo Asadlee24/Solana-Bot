@@ -167,11 +167,14 @@ export interface MirrorOrder {
   submittedAt?: bigint;
   landedAt?: bigint;
   orderSignature?: string;
+  followerSignature?: string;
+  targetWallet?: string;
   priorityFeeLamports: bigint;
   tipLamports: bigint;
   routeFeeLamports: bigint;
   status: OrderStatus;
   errorMessage?: string;
+  error?: string;
 }
 
 /**
@@ -282,4 +285,57 @@ export interface AuditLogEntry {
     | string;
   details?: Record<string, any> | string;
   ipAddress?: string;
+}
+
+export type PendingOrderState =
+  | 'PREPARED'
+  | 'SUBMITTING'
+  | 'SUBMITTED'
+  | 'SUBMISSION_UNKNOWN'
+  | 'CONFIRMED'
+  | 'FAILED'
+  | 'EXPIRED';
+
+export interface PendingOrderRecord {
+  idempotencyKey: string;
+  targetSignature: string;
+  followerSignature?: string;
+  tokenMint: string;
+  side: TradeSide;
+  amountInLamports: string;
+  reservedLamports: string;
+  state: PendingOrderState;
+  recentBlockhash: string;
+  lastValidBlockHeight?: number;
+  errorMessage?: string;
+  createdAt: number;
+  updatedAt: number;
+  targetWallet?: string;
+}
+
+export interface FastPathTimestamps {
+  signal_received: bigint;
+  full_tx_available?: bigint;
+  decoded?: bigint;
+  risk_started?: bigint;
+  risk_completed?: bigint;
+  state_ready?: bigint;
+  build_started?: bigint;
+  tx_built?: bigint;
+  tx_signed?: bigint;
+  persistence_completed?: bigint;
+  broadcast_started?: bigint;
+  broadcast_completed?: bigint;
+  first_status_seen?: bigint;
+  landed?: bigint;
+  confirmed?: bigint;
+  settled?: bigint;
+}
+
+export interface CapitalReservation {
+  idempotencyKey: string;
+  targetWallet?: string;
+  tokenMint: string;
+  totalLamports: bigint;
+  createdAt: number;
 }

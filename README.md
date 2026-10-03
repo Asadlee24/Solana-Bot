@@ -49,7 +49,9 @@ EXECUTION_MODE=PAPER
 # Solana RPC & Helius API
 SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 HELIUS_API_KEY=your_helius_api_key_here
-HELIUS_WSS_URL=wss://mainnet.helius-rpc.com/?api-key=your_helius_api_key_here
+# Enhanced WSS (Developer+ plans): wss://atlas-mainnet.helius-rpc.com/?api-key=...
+# Standard WSS (Free plan fallback): wss://mainnet.helius-rpc.com/?api-key=...
+HELIUS_WSS_URL=wss://atlas-mainnet.helius-rpc.com/?api-key=your_helius_api_key_here
 
 # Watched Target Wallets (comma-separated base58 public keys)
 WATCHED_WALLETS=CwUHN4zTn5wiEYoZjsP4FrDvAT9heDWewCTQjhgwhJqS

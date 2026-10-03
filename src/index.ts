@@ -1,7 +1,9 @@
+import { Connection } from '@solana/web3.js';
 import { createApiServer } from './api/server.js';
 import { config } from './config/index.js';
 import { db } from './db/database.js';
 import { autoExitManager } from './engine/auto-exit-manager.js';
+import { pendingOrderManager } from './engine/pending-order-manager.js';
 import { riskEngine } from './engine/risk-engine.js';
 import { blockhashService } from './execution/blockhash-service.js';
 import { liveEngine } from './execution/live-engine.js';
@@ -9,6 +11,7 @@ import { executionWalletManager } from './execution/wallet-manager.js';
 import { telegramNotifier } from './notifications/telegram.js';
 import { positionSyncService } from './services/position-sync.js';
 import { readinessValidator } from './services/readiness.js';
+import { HeliusTransactionStream } from './streams/helius-transaction-stream.js';
 import { HeliusWebSocketStream } from './streams/helius-ws.js';
 import { rpcPoller } from './streams/rpc-poller.js';
 import { signalManager } from './streams/signal-manager.js';
@@ -33,6 +36,10 @@ async function bootstrap() {
 
   // Restore and reconcile live positions with on-chain wallet tokens & accurate cost basis
   await positionSyncService.initializeOnStartup();
+
+  // Crash Recovery: reconcile any unresolved pending orders from prior process runs
+  const rpcConn = new Connection(config.SOLANA_RPC_URL, { commitment: 'confirmed' });
+  await pendingOrderManager.recover(rpcConn);
 
   const liveStatus = liveEngine.getStatus();
 
@@ -88,24 +95,43 @@ async function bootstrap() {
     }
   } catch {}
 
-  // Start Live Ingestion Feeds
-  const heliusWs = new HeliusWebSocketStream({
-    onTransaction: (tx) => {
-      signalManager.handleIncomingTransaction(tx, 'HELIUS_PRECONFIRMATION', 'SEEN_PRECONF');
-    },
-    onOpen: () => {
-      console.info('[Stream] Hot path signal ingestion active via Helius LaserStream');
-    },
-    onError: (err) => {
-      console.warn('[Stream Warning]:', err.message);
-    },
-  });
+  // Start Live Ingestion Feeds (Helius Full-Transaction Stream in Fast Mode, LaserStream in Normal Mode)
+  const feedStream: HeliusTransactionStream | HeliusWebSocketStream = config.FAST_COPY_MODE
+    ? new HeliusTransactionStream(
+        {
+          onTransaction: (tx) => {
+            signalManager.handleIncomingTransaction(tx, 'HELIUS_PRECONFIRMATION', 'SEEN_PRECONF');
+          },
+          onOpen: () => {
+            console.info('[Stream] Hot path signal ingestion active via Helius Full Transaction Stream');
+          },
+          onError: (err) => {
+            console.warn('[Stream Warning]:', err.message);
+          },
+        },
+        allWallets
+      )
+    : new HeliusWebSocketStream({
+        onTransaction: (tx) => {
+          signalManager.handleIncomingTransaction(tx, 'HELIUS_PRECONFIRMATION', 'SEEN_PRECONF');
+        },
+        onOpen: () => {
+          console.info('[Stream] Hot path signal ingestion active via Helius LaserStream');
+        },
+        onError: (err) => {
+          console.warn('[Stream Warning]:', err.message);
+        },
+      });
 
-  heliusWs.start();
+  feedStream.start();
 
   // Dynamically update WebSocket subscriptions whenever a wallet is added/removed
-  signalManager.on('walletsUpdated', () => {
-    heliusWs.resubscribe();
+  signalManager.on('walletsUpdated', (wallets) => {
+    if (config.FAST_COPY_MODE && 'updateWatchedWallets' in feedStream) {
+      (feedStream as HeliusTransactionStream).updateWatchedWallets(wallets.map((w: any) => w.wallet));
+    } else if ('resubscribe' in feedStream) {
+      (feedStream as HeliusWebSocketStream).resubscribe();
+    }
   });
 
   // Start real-time in-memory blockhash cache service
@@ -122,7 +148,7 @@ async function bootstrap() {
     console.info('\n[Shutdown] Stopping bot cleanly...');
     autoExitManager.stop();
     blockhashService.stop();
-    heliusWs.stop();
+    feedStream.stop();
     rpcPoller.stop();
     server.close();
     db.close();

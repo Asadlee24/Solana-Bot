@@ -9,6 +9,8 @@ import {
   LatencyMetric,
   MirrorIntent,
   MirrorOrder,
+  PendingOrderRecord,
+  PendingOrderState,
   ReconciledTrade,
   SwapIntent,
   SystemTelemetry,
@@ -103,6 +105,61 @@ export class DBManager {
             CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs (timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs (action);
           `);
+        },
+      },
+      {
+        version: 4,
+        name: 'pending_orders_table',
+        up: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS pending_orders (
+              idempotency_key TEXT PRIMARY KEY,
+              target_signature TEXT NOT NULL,
+              follower_signature TEXT,
+              token_mint TEXT NOT NULL,
+              side TEXT NOT NULL,
+              amount_in_lamports TEXT NOT NULL,
+              reserved_lamports TEXT NOT NULL,
+              state TEXT NOT NULL,
+              recent_blockhash TEXT NOT NULL,
+              last_valid_block_height INTEGER,
+              error_message TEXT,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_pending_orders_state ON pending_orders (state);
+            CREATE INDEX IF NOT EXISTS idx_pending_orders_target_sig ON pending_orders (target_signature);
+          `);
+        },
+      },
+      {
+        version: 5,
+        name: 'pending_orders_nullable_follower_sig',
+        up: () => {
+          try {
+            this.db.exec(`
+              CREATE TABLE IF NOT EXISTS pending_orders_temp (
+                idempotency_key TEXT PRIMARY KEY,
+                target_signature TEXT NOT NULL,
+                follower_signature TEXT,
+                token_mint TEXT NOT NULL,
+                side TEXT NOT NULL,
+                amount_in_lamports TEXT NOT NULL,
+                reserved_lamports TEXT NOT NULL,
+                state TEXT NOT NULL,
+                recent_blockhash TEXT NOT NULL,
+                last_valid_block_height INTEGER,
+                error_message TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+              );
+              INSERT OR IGNORE INTO pending_orders_temp SELECT * FROM pending_orders;
+              DROP TABLE pending_orders;
+              ALTER TABLE pending_orders_temp RENAME TO pending_orders;
+              CREATE INDEX IF NOT EXISTS idx_pending_orders_state ON pending_orders (state);
+              CREATE INDEX IF NOT EXISTS idx_pending_orders_target_sig ON pending_orders (target_signature);
+            `);
+          } catch {}
         },
       },
     ];
@@ -1395,6 +1452,108 @@ export class DBManager {
         winRatePct: 0,
       };
     }
+  }
+
+  public savePendingOrder(order: PendingOrderRecord): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO pending_orders (
+        idempotency_key, target_signature, follower_signature, token_mint,
+        side, amount_in_lamports, reserved_lamports, state,
+        recent_blockhash, last_valid_block_height, error_message,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(idempotency_key) DO UPDATE SET
+        follower_signature = excluded.follower_signature,
+        state = excluded.state,
+        error_message = excluded.error_message,
+        updated_at = excluded.updated_at
+    `);
+    stmt.run(
+      order.idempotencyKey,
+      order.targetSignature,
+      order.followerSignature ?? null,
+      order.tokenMint,
+      order.side,
+      order.amountInLamports,
+      order.reservedLamports,
+      order.state,
+      order.recentBlockhash,
+      order.lastValidBlockHeight ?? null,
+      order.errorMessage ?? null,
+      order.createdAt,
+      order.updatedAt
+    );
+  }
+
+  public updatePendingOrderState(
+    idempotencyKey: string,
+    state: PendingOrderState,
+    errorMessage?: string,
+    followerSignature?: string
+  ): void {
+    const stmt = this.db.prepare(`
+      UPDATE pending_orders
+      SET state = ?,
+          error_message = COALESCE(?, error_message),
+          follower_signature = COALESCE(?, follower_signature),
+          updated_at = ?
+      WHERE idempotency_key = ?
+    `);
+    stmt.run(state, errorMessage ?? null, followerSignature ?? null, Date.now(), idempotencyKey);
+  }
+
+  public getPendingOrders(unresolvedOnly = false): PendingOrderRecord[] {
+    const query = unresolvedOnly
+      ? `SELECT * FROM pending_orders WHERE state IN ('PREPARED', 'SUBMITTING', 'SUBMITTED', 'SUBMISSION_UNKNOWN') ORDER BY created_at ASC`
+      : `SELECT * FROM pending_orders ORDER BY created_at DESC LIMIT 100`;
+    const rows = this.db.prepare(query).all() as any[];
+    return rows.map((r) => ({
+      idempotencyKey: r.idempotency_key,
+      targetSignature: r.target_signature,
+      followerSignature: r.follower_signature,
+      tokenMint: r.token_mint,
+      side: r.side,
+      amountInLamports: r.amount_in_lamports,
+      reservedLamports: r.reserved_lamports,
+      state: r.state,
+      recentBlockhash: r.recent_blockhash,
+      lastValidBlockHeight: r.last_valid_block_height ? Number(r.last_valid_block_height) : undefined,
+      errorMessage: r.error_message || undefined,
+      createdAt: Number(r.created_at),
+      updatedAt: Number(r.updated_at),
+    }));
+  }
+
+  public getPendingOrderByKey(idempotencyKey: string): PendingOrderRecord | null {
+    const row = this.db
+      .prepare('SELECT * FROM pending_orders WHERE idempotency_key = ?')
+      .get(idempotencyKey) as any;
+    if (!row) return null;
+    return {
+      idempotencyKey: row.idempotency_key,
+      targetSignature: row.target_signature,
+      followerSignature: row.follower_signature,
+      tokenMint: row.token_mint,
+      side: row.side,
+      amountInLamports: row.amount_in_lamports,
+      reservedLamports: row.reserved_lamports,
+      state: row.state,
+      recentBlockhash: row.recent_blockhash,
+      lastValidBlockHeight: row.last_valid_block_height ? Number(row.last_valid_block_height) : undefined,
+      errorMessage: row.error_message || undefined,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  public deletePendingOrder(idempotencyKey: string): boolean {
+    const stmt = this.db.prepare('DELETE FROM pending_orders WHERE idempotency_key = ?');
+    const res = stmt.run(idempotencyKey);
+    return res.changes > 0;
+  }
+
+  public clearPendingOrders(): void {
+    this.db.exec('DELETE FROM pending_orders');
   }
 
   public close() {

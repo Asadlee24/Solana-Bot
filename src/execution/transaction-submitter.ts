@@ -84,6 +84,96 @@ export class TransactionSubmitter {
   }
 
   /**
+   * Fast-Path broadcast:
+   * Dispatches signed transaction immediately without awaiting on-chain confirmation.
+   * Returns immediately once socket / HTTP send is completed.
+   */
+  public async broadcastFast(
+    transaction: VersionedTransaction,
+    signature: string
+  ): Promise<{
+    signature: string;
+    provider: LandingProvider;
+    submittedAt: bigint;
+    broadcastOk: boolean;
+    error?: string;
+  }> {
+    const { provider, endpointUrl } = this.resolveLandingProvider();
+    const rawTx = transaction.serialize();
+    const submittedAt = process.hrtime.bigint();
+
+    try {
+      if (provider === 'HELIUS_SWQOS' || provider === 'HELIUS_SENDER_MAX') {
+        const txBase64 = Buffer.from(rawTx).toString('base64');
+        const payload = {
+          jsonrpc: '2.0',
+          id: `fast-send-${Date.now()}`,
+          method: 'sendTransaction',
+          params: [
+            txBase64,
+            {
+              encoding: 'base64',
+              skipPreflight: true,
+              maxRetries: 0,
+              preflightCommitment: 'processed',
+            },
+          ],
+        };
+
+        const res = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            signature,
+            provider,
+            submittedAt,
+            broadcastOk: false,
+            error: `HTTP ${res.status}: ${errText}`,
+          };
+        }
+
+        const data = (await res.json()) as any;
+        if (data.error) {
+          return {
+            signature,
+            provider,
+            submittedAt,
+            broadcastOk: false,
+            error: JSON.stringify(data.error),
+          };
+        }
+      } else {
+        const sendOptions: SendOptions = {
+          skipPreflight: true,
+          maxRetries: 2,
+          preflightCommitment: 'processed',
+        };
+        await this.connection.sendRawTransaction(rawTx, sendOptions);
+      }
+
+      return {
+        signature,
+        provider,
+        submittedAt,
+        broadcastOk: true,
+      };
+    } catch (err: any) {
+      return {
+        signature,
+        provider,
+        submittedAt,
+        broadcastOk: false,
+        error: err.message,
+      };
+    }
+  }
+
+  /**
    * High-speed submission with preflight simulation, real Helius Sender / Standard RPC routing,
    * monotonic latency timer tracking, and fail-safe confirmation.
    */

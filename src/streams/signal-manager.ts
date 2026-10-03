@@ -14,7 +14,9 @@ import { FastTransactionDecoder, ParsedTransactionEnvelope } from '../parsers/fa
 import { tokenMetadataService } from '../services/token-metadata.js';
 import { latencyTracker } from '../telemetry/latency-tracker.js';
 import { targetSyncService } from '../services/target-sync.js';
+import { fastExecutionService } from '../execution/fast-executor.js';
 import {
+  FastPathTimestamps,
   FollowerPosition,
   MirrorIntent,
   MirrorOrder,
@@ -153,8 +155,8 @@ export class SignalManager extends EventEmitter {
       riskEngine.markInFlight(swapIntent.tokenMint);
     }
 
-    // 6. Execution Gateway (Paper or Live)
-    let order: MirrorOrder;
+    // 6. Execution Gateway (Fast Path, Live, or Paper)
+    let order: MirrorOrder | null = null;
     try {
       if (config.EXECUTION_MODE === 'LIVE') {
         const liveStatus = liveEngine.getStatus();
@@ -164,7 +166,44 @@ export class SignalManager extends EventEmitter {
           telegramNotifier.notifyTargetDetected(swapIntent, 'DISARMED_SKIP', liveStatus.disarmReason);
           return { intent: swapIntent, order: null };
         }
-        order = await liveEngine.executeLiveTrade(swapIntent, mirrorIntent);
+
+        // FAST_COPY_MODE Hot Path (Pump.fun BUY only)
+        let fastExecuted = false;
+        if (config.FAST_COPY_MODE && swapIntent.side === 'BUY' && swapIntent.venue === 'PUMPFUN') {
+          const fastTimestamps: FastPathTimestamps = {
+            signal_received: observedAt,
+            full_tx_available: observedAt,
+            decoded: decisionAt,
+            risk_started: decisionAt,
+            risk_completed: decisionAt,
+          };
+
+          try {
+            const fastRes = await fastExecutionService.executeFastBuy({
+              targetIntent: swapIntent,
+              mirrorIntent,
+              timestamps: fastTimestamps,
+              targetEnvelope: tx,
+            });
+
+            if (fastRes.fallbackNeeded) {
+              console.info(`[Fast Path Fallback] Switching to standard execution: ${fastRes.fallbackReason}`);
+            } else {
+              order = fastRes.order;
+              fastExecuted = true;
+            }
+          } catch (fastErr: any) {
+            if (config.FAST_PATH_FALLBACK_ENABLED) {
+              console.warn(`[Fast Path Fallback] Fast executor error: ${fastErr.message}. Executing normal path.`);
+            } else {
+              throw fastErr;
+            }
+          }
+        }
+
+        if (!fastExecuted) {
+          order = await liveEngine.executeLiveTrade(swapIntent, mirrorIntent);
+        }
       } else {
         order = await paperEngine.executePaperTrade(swapIntent, mirrorIntent);
       }
@@ -179,6 +218,10 @@ export class SignalManager extends EventEmitter {
       }
       console.error('[Execution Error]:', err);
       telegramNotifier.notifyTargetDetected(swapIntent, 'EXECUTION_FAILED', err.message || 'Execution error');
+      return { intent: swapIntent, order: null };
+    }
+
+    if (!order) {
       return { intent: swapIntent, order: null };
     }
 
