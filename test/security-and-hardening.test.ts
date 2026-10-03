@@ -309,8 +309,9 @@ describe('Security Hardening & Audit Verification Suite', () => {
       expect(resKill.status).toBe(200);
 
       // Read-only endpoint does not require auth
-      const resTelemetry = await fetch(`${baseUrl}/api/telemetry`);
-      expect(resTelemetry.status).toBe(200);
+      const resLatency = await fetch(`${baseUrl}/api/latency`);
+      expect(resLatency.status).toBe(200);
+      await resLatency.text();
     });
   });
 
@@ -477,31 +478,37 @@ describe('Security Hardening & Audit Verification Suite', () => {
 
     afterEach(async () => {
       (config as any).NODE_ENV = 'test';
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
+      if (server) {
+        (server as any).closeAllConnections?.();
+        await new Promise<void>((resolve) => {
+          server.close(() => resolve());
+        });
+      }
     });
 
     it('allows approved production origins', async () => {
-      const res = await fetch(`${baseUrl}/api/telemetry`, {
+      const res = await fetch(`${baseUrl}/api/latency`, {
         headers: { Origin: 'https://dashboard.approved.com' },
       });
       expect(res.status).toBe(200);
       expect(res.headers.get('access-control-allow-origin')).toBe('https://dashboard.approved.com');
+      await res.text();
     });
 
     it('rejects unapproved browser origins in production', async () => {
       // In Express CORS, disallowed origin callbacks pass Error('Blocked by CORS policy')
-      const res = await fetch(`${baseUrl}/api/telemetry`, {
+      const res = await fetch(`${baseUrl}/api/latency`, {
         headers: { Origin: 'https://evil-attacker.com' },
       });
       // Should not have access-control-allow-origin header
       expect(res.headers.get('access-control-allow-origin')).toBeNull();
+      await res.text();
     });
 
     it('allows direct server-to-server requests without Origin header', async () => {
-      const res = await fetch(`${baseUrl}/api/telemetry`);
+      const res = await fetch(`${baseUrl}/api/latency`);
       expect(res.status).toBe(200);
+      await res.text();
     });
   });
 

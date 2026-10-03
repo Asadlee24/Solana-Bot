@@ -230,11 +230,6 @@ export class SignalManager extends EventEmitter {
       return { intent: swapIntent, order: null };
     }
 
-    if (swapIntent.side === 'BUY') {
-      riskEngine.recordBuy(swapIntent.tokenMint);
-    }
-    riskEngine.recordSuccess();
-
     // 7. Latency Telemetry Recording
     const quoteDoneAt = order.quotedAt;
     const submittedAt = order.submittedAt || quoteDoneAt;
@@ -257,13 +252,28 @@ export class SignalManager extends EventEmitter {
     this.emit('mirrorOrder', order);
     this.emit('latencySample', latencyMetric);
 
-    const position = db.getPosition(matchedWallet.wallet, order.tokenMint);
-    if (position) {
-      this.emit('positionUpdate', position);
-    }
+    // 8. Order Status Handling & Notification Safety
+    // STRICT RULE: In Fast Path, orders return with status 'SUBMITTED' or 'SUBMISSION_UNKNOWN'.
+    // We MUST NOT call riskEngine.recordBuy(), riskEngine.recordSuccess(), or notifyTradeFilled()
+    // until asynchronous reconciliation confirms the transaction on-chain.
+    if (order.status === 'FILLED') {
+      if (swapIntent.side === 'BUY') {
+        riskEngine.recordBuy(swapIntent.tokenMint);
+      }
+      riskEngine.recordSuccess();
 
-    // 8. Async Telegram Notification
-    telegramNotifier.notifyTradeFilled(order, position || undefined);
+      const position = db.getPosition(matchedWallet.wallet, order.tokenMint);
+      if (position) {
+        this.emit('positionUpdate', position);
+      }
+
+      // Definitive trade fill notification (for synchronous executions e.g. PAPER or non-fast LIVE)
+      telegramNotifier.notifyTradeFilled(order, position || undefined);
+    } else if (order.status === 'SUBMITTED') {
+      telegramNotifier.notifyTradeSubmitted(order, swapIntent);
+    } else if (order.status === 'SUBMISSION_UNKNOWN') {
+      telegramNotifier.notifyTradeSubmissionUnknown(order, swapIntent);
+    }
 
     return { intent: swapIntent, order };
   }

@@ -10,7 +10,7 @@ import { pendingOrderManager } from '../engine/pending-order-manager.js';
 import { positionEngine } from '../engine/position-engine.js';
 import { riskEngine } from '../engine/risk-engine.js';
 import { telegramNotifier } from '../notifications/telegram.js';
-import { ParsedTransactionEnvelope } from '../parsers/fast-decoder.js';
+import { ParsedTransactionEnvelope, TOKEN_2022_PROGRAM_ID } from '../parsers/fast-decoder.js';
 import { capitalReservationLedger } from '../services/capital-reservation.js';
 import { curveStateCache } from '../services/curve-state-cache.js';
 import { latencyTracker } from '../telemetry/latency-tracker.js';
@@ -150,6 +150,18 @@ export class FastExecutionService {
     // 5. Fast Transaction Build
     timestamps.build_started = process.hrtime.bigint();
 
+    let tokenProgOverride: PublicKey | undefined;
+    if (targetIntent.tokenProgramId) {
+      try {
+        tokenProgOverride = new PublicKey(targetIntent.tokenProgramId);
+      } catch {}
+    }
+    if (!tokenProgOverride && targetEnvelope?.accountKeys) {
+      if (targetEnvelope.accountKeys.includes(TOKEN_2022_PROGRAM_ID)) {
+        tokenProgOverride = new PublicKey(TOKEN_2022_PROGRAM_ID);
+      }
+    }
+
     let buildResult;
     try {
       buildResult = await fastPumpBuilder.buildFastBuy(
@@ -157,7 +169,8 @@ export class FastExecutionService {
         mint,
         requestedLamports,
         curveStateResult.state,
-        maxSlippageBps
+        maxSlippageBps,
+        tokenProgOverride
       );
     } catch (buildErr: any) {
       console.warn(`[FastExecution] Fast builder error: ${buildErr.message}. Falling back.`);
@@ -382,6 +395,7 @@ export class FastExecutionService {
           error: order.error,
         });
         riskEngine.recordError(order.error);
+        telegramNotifier.notifyTradeExpired(order, order.error);
         console.warn(`[FastExecution] Order ${signature.slice(0, 8)}... EXPIRED`);
       } else {
         order.status = 'FAILED';
@@ -391,6 +405,7 @@ export class FastExecutionService {
           error: order.error,
         });
         riskEngine.recordError(order.error);
+        telegramNotifier.notifyTradeFailed(order, order.error);
         console.warn(`[FastExecution] Order ${signature.slice(0, 8)}... FAILED: ${order.error}`);
       }
     } catch (reconcileErr: any) {
@@ -401,6 +416,7 @@ export class FastExecutionService {
         error: reconcileErr.message,
       });
       riskEngine.recordError(reconcileErr.message);
+      telegramNotifier.notifyTradeFailed(order, reconcileErr.message);
       console.error(`[FastExecution] Async reconciliation error:`, reconcileErr);
     } finally {
       // Record complete telemetry sample

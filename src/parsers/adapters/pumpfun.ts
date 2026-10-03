@@ -90,6 +90,8 @@ export class PumpFunAdapter {
     const tokenAmt = Number(decoded.tokenAmountRaw) / 1e6; // Pump.fun tokens use 6 decimals
     const estimatedPrice = tokenAmt > 0 ? solAmt / tokenAmt : 0;
 
+    const tokenProgramId = instruction.accounts[8];
+
     return {
       targetSignature: signature,
       slot,
@@ -99,6 +101,7 @@ export class PumpFunAdapter {
       inputMint,
       outputMint,
       tokenMint: mint,
+      tokenProgramId,
       inputAmountRaw,
       outputAmountRaw,
       estimatedPrice,

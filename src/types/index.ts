@@ -129,6 +129,7 @@ export interface MirrorIntent {
 export type OrderStatus =
   | 'PENDING'
   | 'SUBMITTED'
+  | 'SUBMISSION_UNKNOWN'
   | 'PROCESSED'
   | 'CONFIRMED'
   | 'RECONCILED'

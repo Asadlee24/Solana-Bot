@@ -2227,6 +2227,133 @@ ${statusText}
   }
 
   /**
+   * Real-time notification when a fast-path order is broadcast and awaiting on-chain confirmation
+   */
+  public async notifyTradeSubmitted(order: MirrorOrder, targetIntent?: SwapIntent): Promise<void> {
+    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
+    const solPriceUsd = await tokenMetadataService.getSolPriceUsd();
+    const solAmount = Number(order.inAmountRaw || 0) / 1e9;
+    const usdAmount = solAmount * solPriceUsd;
+
+    const sig = order.orderSignature || '';
+    const sigText = sig
+      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      : 'Simulated';
+
+    const traderWallet = (order as any).targetWallet || targetIntent?.targetWallet || traderNamingService.findTargetWalletByMint(order.tokenMint);
+    const traderInfo = traderNamingService.getTraderInfo(traderWallet);
+
+    const text = `
+⚡ <b>[TRADE SUBMITTED] ${modeBadge} BUY SUBMITTED</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
+📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+👤 <b>Target Trader:</b> <b>${traderInfo.displayName}</b> (<a href="${traderInfo.solscanUrl}">Solscan</a> | <a href="${traderInfo.gmgnUrl}">GMGN</a>)
+📦 <b>Trade Size:</b> <b>${solAmount.toFixed(4)} SOL</b> (<code>$${usdAmount.toFixed(2)} USD</code>)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 <b>Explorer:</b> ${sigText}
+⏳ <i>Broadcasting to validators. Awaiting on-chain confirmation...</i>
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  /**
+   * Real-time notification when an order fails on-chain
+   */
+  public async notifyTradeFailed(order: MirrorOrder, reason: string): Promise<void> {
+    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
+    const sig = order.orderSignature || '';
+    const sigText = sig
+      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      : 'Simulated';
+
+    const text = `
+❌ <b>[TRADE FAILED] ${modeBadge} BUY FAILED</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
+📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+⚠️ <b>Reason:</b> <code>${reason}</code>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 <b>Explorer:</b> ${sigText}
+🛡️ <i>No tokens acquired. Capital reservation and lock released safely.</i>
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  /**
+   * Real-time notification when an order expires on-chain without landing
+   */
+  public async notifyTradeExpired(order: MirrorOrder, reason?: string): Promise<void> {
+    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
+    const sig = order.orderSignature || '';
+    const sigText = sig
+      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      : 'Simulated';
+
+    const text = `
+⚠️ <b>[TRADE EXPIRED] ${modeBadge} BUY EXPIRED</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
+📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+⚠️ <b>Reason:</b> <i>Transaction did not land before block height expiration.</i>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 <b>Explorer:</b> ${sigText}
+🛡️ <i>Capital reservation and lock released safely.</i>
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  /**
+   * Real-time notification when order broadcast status is uncertain
+   */
+  public async notifyTradeSubmissionUnknown(order: MirrorOrder, targetIntent?: SwapIntent): Promise<void> {
+    const modeBadge = order.mode === 'PAPER' ? '[PAPER]' : '[LIVE]';
+    const meta = await tokenMetadataService.getTokenMetadata(order.tokenMint);
+    const ticker = meta?.symbol ? `$${meta.symbol.toUpperCase()}` : `$${order.tokenMint.slice(0, 6).toUpperCase()}`;
+    const tokenName = meta?.name && meta.name !== 'Unknown Token' ? ` (${meta.name})` : '';
+
+    const sig = order.orderSignature || '';
+    const sigText = sig
+      ? `<a href="https://solscan.io/tx/${sig}">${sig.slice(0, 8)}...</a>`
+      : 'Simulated';
+
+    const text = `
+⏳ <b>[TRADE UNCERTAIN] ${modeBadge} SUBMISSION UNKNOWN</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🪙 <b>Coin:</b> <b>${ticker}</b>${tokenName}
+📌 <b>Mint:</b> <code>${order.tokenMint}</code>
+⚠️ <i>Broadcast status uncertain. Monitoring blockhash for confirmation or timeout...</i>
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔗 <b>Explorer:</b> ${sigText}
+    `.trim();
+
+    this.sendAlert(text);
+  }
+
+  /**
    * Real-time notification upon trade fill with interactive Close buttons
    */
   public async notifyTradeFilled(order: MirrorOrder, position?: FollowerPosition): Promise<void> {
@@ -2280,7 +2407,7 @@ ${statusText}
 
     const isWin = isBuy ? false : ((position && Number(position.realizedPnlLamports) > 0) || false);
     const headerTitle = isBuy
-      ? `🚀 <b>[TRADE EXECUTED] ${modeBadge} BUY FILLED</b>`
+      ? `✅ <b>[TRADE CONFIRMED] ${modeBadge} BUY FILLED</b>`
       : (isWin ? `🎉 <b>[PROFIT REALIZED] ${modeBadge} SELL FILLED</b>` : `⚡ <b>[TRADE EXECUTED] ${modeBadge} SELL FILLED</b>`);
 
     const traderWallet = (order as any).targetWallet || position?.targetWallet || traderNamingService.findTargetWalletByMint(order.tokenMint);

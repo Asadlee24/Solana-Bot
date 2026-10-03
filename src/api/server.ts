@@ -325,7 +325,7 @@ export function createApiServer() {
 
     telemetry.isLiveMode = config.EXECUTION_MODE === 'LIVE';
     if (config.EXECUTION_MODE === 'LIVE') {
-      const balanceState = await executionWalletManager.getFreshBalance(20000);
+      const balanceState = executionWalletManager.getBalanceDisplayState();
       const walletStatus = executionWalletManager.getStatus();
       telemetry.liveWalletPublicKey = walletStatus.publicKey || undefined;
       telemetry.liveWalletBalanceSol = balanceState.isAvailable ? balanceState.balanceSol : 0;
